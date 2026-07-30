@@ -1,0 +1,98 @@
+import { NextResponse } from "next/server";
+import { getSupabaseAdmin } from "@/lib/supabase";
+import { requireAdminSession } from "@/lib/adminAuth";
+
+// GET /api/admin/campaigns/:id
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  try {
+    requireAdminSession(req);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("*")
+    .eq("id", params.id)
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: "找不到這個檔期" }, { status: 404 });
+
+  // 取付是否還開放：檔期總上限已達標就關閉（2.4節，自動關閉不是後台警示）
+  const codAvailable =
+    data.cod_campaign_cap == null || data.cod_campaign_used < data.cod_campaign_cap;
+
+  return NextResponse.json({ campaign: data, codAvailable });
+}
+
+// PATCH /api/admin/campaigns/:id — 修改檔期設定（含8種交易組合、滿贈基礎單位等）
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+  try {
+    requireAdminSession(req);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+
+  const body = await req.json();
+  const updates: Record<string, any> = {};
+
+  // 允許更新的欄位白名單，避免亂傳欄位進資料庫
+  const allowedFields = [
+    "name",
+    "opens_at",
+    "closes_at",
+    "gift_base_unit",
+    "vendor_order_gift_cap",
+    "cod_campaign_cap",
+    "txn_bank_discount_gift_enabled",
+    "txn_bank_discount_gift_rate",
+    "txn_bank_discount_nogift_enabled",
+    "txn_bank_discount_nogift_rate",
+    "txn_bank_nodiscount_gift_enabled",
+    "txn_bank_nodiscount_gift_rate",
+    "txn_bank_nodiscount_nogift_enabled",
+    "txn_bank_nodiscount_nogift_rate",
+    "txn_cod_discount_gift_enabled",
+    "txn_cod_discount_gift_rate",
+    "txn_cod_discount_nogift_enabled",
+    "txn_cod_discount_nogift_rate",
+    "txn_cod_nodiscount_gift_enabled",
+    "txn_cod_nodiscount_gift_rate",
+    "txn_cod_nodiscount_nogift_enabled",
+    "txn_cod_nodiscount_nogift_rate",
+  ];
+  for (const f of allowedFields) {
+    if (f in body) updates[f] = body[f];
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ error: "沒有可更新的欄位" }, { status: 400 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("campaigns")
+    .update(updates)
+    .eq("id", params.id)
+    .select()
+    .single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ campaign: data });
+}
+
+// DELETE /api/admin/campaigns/:id
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+  try {
+    requireAdminSession(req);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from("campaigns").delete().eq("id", params.id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
