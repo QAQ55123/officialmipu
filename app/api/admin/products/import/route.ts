@@ -62,7 +62,6 @@ export async function POST(req: Request) {
       .from("products")
       .insert({
         series_id: seriesId || null,
-        campaign_id: campaignId || null,
         name,
         amount,
         shipping_fee: shippingFee,
@@ -89,6 +88,15 @@ export async function POST(req: Request) {
     if (variantError) {
       results.push({ row: i + 2, name, ok: false, error: variantError.message });
       continue;
+    }
+
+    // 匯入通常是「幫這個檔期批次新增商品」，所以新商品建立後順便加進該檔期（若有指定 campaignId）
+    if (campaignId) {
+      const { error: linkError } = await supabase.from("campaign_products").insert({ campaign_id: campaignId, product_id: product.id });
+      if (linkError) {
+        results.push({ row: i + 2, name, ok: false, error: `商品已建立，但加入檔期失敗：${linkError.message}` });
+        continue;
+      }
     }
 
     results.push({ row: i + 2, name, ok: true });

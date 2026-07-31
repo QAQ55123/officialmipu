@@ -111,9 +111,75 @@
 
 **已用 `npx tsc --noEmit` 與 `npm run build` 實際驗證可以編譯成功、無型別錯誤。**
 
+### 這輪修正的重大缺失（老實說，之前的版本後台其實進不去）
+在你提供實際的 mibu-app 檔案給我看之後才發現：**新專案從頭到尾都沒有「管理者帳號」系統本身**。
+之前只複製了 `lib/adminAuth.ts`（session簽發邏輯）跟 `/admin/register` 前端頁面，但完全沒有：
+- `admins` / `admin_invite_codes` 資料表（已補進 schema.sql）
+- `/api/admin/register`、`/api/admin/login`、`/api/admin/session`、`/api/admin/logout`、
+  `/api/admin/verify-email` 這些 API（已全部補上，邏輯照 mibu-app 原本的搬過來）
+- `/admin/login` 頁面（原本完全沒有，只能註冊、不能登入）
+
+也就是說，之前的版本即使接上 Supabase，**也永遠無法建立第一個管理者帳號、更別說登入後台**。
+
+同時修正了你問的問題：**owner（最高權限）跟 staff（一般管理者）的區分**——`/api/admin/members`
+（會員管理）跟新增的 `/api/admin/invite-codes`（一般管理者邀請碼管理）現在改用 `requireOwnerSession`，
+只有最高權限管理者能用；其餘檔期/系列/商品/拆單/訂單等維持 `requireAdminSession`，一般管理者也能用，
+比照 mibu-app 原本「staff 只能管理分類/企劃/商品，看不到會員相關工具」的設計。
+新增了 `/admin/invite-codes` 頁面（owner專用），可以產生/撤銷一次性邀請碼給新的一般管理者註冊。
+
+**已用 `npx tsc --noEmit` 與 `npm run build` 實際驗證可以編譯成功、無型別錯誤。**
+
+### 給你的部署提醒
+第一個帳號（owner）用 `.env.local` 或 Vercel 環境變數裡設定的 `ADMIN_INVITE_CODE_OWNER`
+這組固定邀請碼，到 `/admin/register` 註冊；之後如果要讓別人也能管理後台，
+用 owner 帳號登入後到 `/admin/invite-codes` 產生一次性邀請碼給對方，對方帶著這組邀請碼
+到 `/admin/register` 註冊就會拿到 staff（一般管理者）權限。
+
+### 架構修正：商品改成獨立商品庫（這輪你糾正的重要問題）
+你指出商品不該綁死在特定檔期上，應該是**完全獨立的商品庫，檔期只是從庫裡挑商品進來賣**——
+已經修正：
+- schema：`products` 表拿掉 `campaign_id` 欄位，新增 `campaign_products`（檔期×商品的多對多關聯表）
+- 後台商品管理現在是真正獨立的商品庫，不需要先選檔期
+- 新增 `/admin/campaigns/[id]/products` 頁面：從商品庫挑既有商品進這個檔期，或直接匯入CSV
+  順便建立新商品並加入這個檔期
+- 顧客端瀏覽檔期頁面，商品清單改成透過 `campaign_products` 關聯查詢
+- 已確認：這個改動不影響「瀏覽不需要檔期開放、只有下單需要檔期開放」這條規則——
+  商品庫狀態跨檔期都能用，被挑進某個檔期的商品在非開放時段仍然可以瀏覽，只是不能下單
+
+### 圖片上傳功能（這輪補上，之前誤判成不需要）
+- `/api/admin/upload`：上傳圖片到 Supabase Storage，跟商品的「貼網址」欄位並存，不是互相取代
+- `ProductsSection` 表單新增檔案上傳輸入框，上傳成功會自動填入網址欄位
+- **需要額外設定**：到 Supabase 後台 → Storage，建立一個叫 `product-images` 的 **public bucket**，
+  已經在 `.env.local.example` 裡加上提醒
+
+## 後台單頁面重構已完成
+
+`/admin` 現在是**單一頁面**：登入表單內嵌在最上面（未登入時顯示），登入後左側選單切換分頁
+（帳號設定/系列管理/檔期管理/商品管理/訂單管理/會員管理*/邀請碼管理*/公告管理/網站設定*/危險區*，
+標*的僅owner可見），比照 mibu-app 原本的體驗，網址一直都是 `/admin`。
+
+拆單工具、到貨追蹤、成本SHEET、滿贈款式、檔期商品這幾個複雜工具維持獨立網址（因為 mibu-app
+本身沒有這些功能，沒有「原本結構」可以比照，做成獨立網址對這類深層工具比較合理），從檔期管理
+分頁裡的連結點進去。
+
+**已用 `npx tsc --noEmit` 與 `npm run build` 實際驗證整個後台可以編譯成功、無型別錯誤，
+`/admin` 這頁本身也確實出現在 build 結果裡。**
+
+## 現在真的可以照這個順序測試了
+
+1. 接上你的 Supabase 專案（`schema.sql` 貼到 SQL Editor 執行）
+2. 記得到 Supabase 後台 → Storage 建立一個叫 `product-images` 的 public bucket（圖片上傳要用）
+3. 打開網站 `/admin`，用 `.env.local` 裡設的 `ADMIN_INVITE_CODE_OWNER` 註冊你的第一個帳號
+4. 左側選單依序測：系列管理 → 檔期管理（建一個開放時間是「現在」的檔期）→ 商品管理（建幾個商品）
+   → 回到檔期管理點「檔期商品」把商品挑進這個檔期 → 「滿贈款式」登記幾個贈品款式
+5. 開無痕視窗，`/register` 註冊一個顧客帳號 → `/campaigns` 應該看得到剛剛的檔期 → 加入購物車 →
+   結帳送出訂單
+6. 回後台「訂單管理」看得到這張訂單
+
 ## 尚未實作 / 下次可以繼續的方向
 
-1. 會員管理目前只能查看，沒有编辑/停權等操作；公告管理沒有排程發布/下架時間
+1. 舊資料比對認領（FB名稱+個人頁網址）——已經討論過邏輯，還沒動手做
+2. 會員管理目前只能查看，沒有编辑/停權等操作；公告管理沒有排程發布/下架時間
 2. 到貨追蹤頁面的品項勾選 UI 比較陽春（純清單勾選，沒有像拆單頁面那樣的搜尋過濾）
 3. 滿贈到貨的精確追蹤（如果之後測試發現真的需要對應到「這個具體顧客的滿贈到了沒」），
    需要在 schema 加一張關聯表把 `order_gift_selections` 對應到具體的 `vendor_purchase_order_gifts`

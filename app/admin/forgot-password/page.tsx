@@ -12,7 +12,7 @@ export default function AdminForgotPasswordPage() {
     if (!email.trim()) return setMsg("請輸入 Email");
     setSubmitting(true);
     try {
-      const r = await fetch("/api/admin/auth/forgot-password", {
+      const r = await fetch("/api/admin/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),

@@ -4,6 +4,35 @@
 -- ============================================================
 
 -- ------------------------------------------------------------
+-- 0. 管理者帳號（後台用，跟 members 完全分開，互不影響）
+-- ------------------------------------------------------------
+
+-- 一次性邀請碼（給 staff 等級用；owner 用固定的環境變數邀請碼 ADMIN_INVITE_CODE_OWNER，不受影響）
+create table admin_invite_codes (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  used boolean not null default false,
+  used_by text,
+  created_at timestamptz default now(),
+  used_at timestamptz
+);
+
+-- role: 'owner'（最高權限，能碰會員相關工具）／'staff'（一般管理者，不能碰會員資料）
+create table admins (
+  id uuid primary key default gen_random_uuid(),
+  username text not null unique,
+  email text unique,
+  email_verified boolean not null default false,
+  password_hash text not null,
+  role text not null default 'staff' check (role in ('owner', 'staff')),
+  verify_token text,
+  verify_token_expires timestamptz,
+  reset_token text,
+  reset_token_expires timestamptz,
+  created_at timestamptz default now()
+);
+
+-- ------------------------------------------------------------
 -- 1. 會員系統
 -- ------------------------------------------------------------
 create table members (
@@ -35,18 +64,25 @@ create table series (
   created_at timestamptz default now()
 );
 
+-- 網站設定（如結帳頁提示文字），僅owner可改
+create table site_settings (
+  key text primary key,
+  value text,
+  updated_at timestamptz default now()
+);
+
 -- ------------------------------------------------------------
 -- 3. 商品與款式
 -- ------------------------------------------------------------
 create table products (
   id uuid primary key default gen_random_uuid(),
   series_id uuid references series(id),
-  campaign_id uuid, -- 見下方 campaigns，允許 null（跨檔期共用商品的彈性）
   name text not null,
   amount numeric not null, -- 商品原幣金額
   shipping_fee numeric not null default 0, -- 固定運費金額（CSV匯入或後台手動填寫）
   has_discount_flag boolean default false, -- CSV「是否滿減」欄位(v)：決定結帳時套用哪一軌匯率，非顧客可見折扣
   image_url text, -- 貼網址：支援一般圖床或 Google Drive 分享連結
+  sort_order int default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -96,8 +132,18 @@ create table campaigns (
   -- 第3節內部拆單工具：廠商單張採購單贈品上限（供2.7即時試算與第3節共用同一份設定）
   vendor_order_gift_cap int,
 
+  sort_order int default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
+);
+
+-- 檔期 × 商品：多對多關聯，商品是獨立商品庫，檔期只是從庫裡「挑」商品進來賣
+-- 同一個商品可以被挑進不同檔期重複銷售，不需要每次重建
+create table campaign_products (
+  campaign_id uuid references campaigns(id) on delete cascade,
+  product_id uuid references products(id) on delete cascade,
+  added_at timestamptz default now(),
+  primary key (campaign_id, product_id)
 );
 
 -- 滿贈款式登記表（2.7節，顧客端無上限公式；只需登記一次：名稱＋門檻金額）
@@ -120,6 +166,7 @@ create table orders (
   has_discount_flag boolean not null, -- 對應商品是否標記v，決定走哪個匯率軌
   wants_gift boolean default true, -- 購物車「是否要滿贈」，預設true
   fx_rate_snapshot numeric, -- 結帳當下套用的匯率快照
+  cancel_requested_at timestamptz, -- 顧客申請取消訂單的時間，需最高權限管理者審核
   created_at timestamptz default now()
 );
 
@@ -297,7 +344,7 @@ create table announcements (
 
 -- 索引（依常用查詢路徑建立）
 -- ============================================================
-create index idx_products_campaign on products(campaign_id);
+create index idx_campaign_products_product on campaign_products(product_id);
 create index idx_products_series on products(series_id);
 create index idx_orders_campaign on orders(campaign_id);
 create index idx_orders_member on orders(member_id);

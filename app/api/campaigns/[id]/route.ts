@@ -18,13 +18,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const now = Date.now();
   const isOpen = now >= new Date(campaign.opens_at).getTime() && now <= new Date(campaign.closes_at).getTime();
 
-  const { data: products, error: productsError } = await supabase
-    .from("products")
-    .select("*, product_variants(*), series(id, name, is_gift_series)")
-    .eq("campaign_id", params.id)
-    .order("created_at", { ascending: true });
+  const { data: campaignProducts, error: productsError } = await supabase
+    .from("campaign_products")
+    .select("products(*, product_variants(*), series(id, name, is_gift_series))")
+    .eq("campaign_id", params.id);
 
   if (productsError) return NextResponse.json({ error: productsError.message }, { status: 500 });
+  const products = (campaignProducts || []).map((row: any) => row.products).filter(Boolean);
 
   // 依系列分組，方便前台用系列當分類頁籤顯示
   const bySeriesMap = new Map<string, { seriesId: string | null; seriesName: string; isGiftSeries: boolean; products: any[] }>();

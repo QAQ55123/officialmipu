@@ -22,7 +22,7 @@ export default function AdminResetPasswordPage() {
 
     setSubmitting(true);
     try {
-      const r = await fetch("/api/admin/auth/reset-password", {
+      const r = await fetch("/api/admin/reset-password-token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),
