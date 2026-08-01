@@ -78,22 +78,25 @@ create table if not exists products (
   id                uuid primary key default gen_random_uuid(),
   series_id         uuid references series(id) on delete set null,
   name              text not null,
-  amount            numeric not null default 0,
-  shipping_fee      numeric not null default 0,
-  has_discount_flag boolean not null default false,
-  cod_allowed       boolean not null default true,  -- 2.4節：是否開放取付，預設開放
-  image_url         text,
   sort_order        int default 0,
   created_at        timestamptz default now(),
   updated_at        timestamptz default now()
 );
 create index if not exists idx_products_series on products (series_id);
 
+-- 款式（比照 mibu-app 原本模式：每個款式各自有自己的金額/圖片/運費/取付設定，
+-- 不是共用商品本身那一份；同一個商品名稱底下可以有好幾個款式，各自完全獨立）
 create table if not exists product_variants (
-  id            uuid primary key default gen_random_uuid(),
-  product_id    uuid not null references products(id) on delete cascade,
-  style_name    text,
-  created_at    timestamptz default now()
+  id                uuid primary key default gen_random_uuid(),
+  product_id        uuid not null references products(id) on delete cascade,
+  style_name        text,
+  amount            numeric not null default 0,
+  shipping_fee      numeric not null default 0,
+  has_discount_flag boolean not null default false,
+  cod_allowed       boolean not null default true,
+  image_url         text,
+  sort_order        int default 0,
+  created_at        timestamptz default now()
 );
 create index if not exists idx_product_variants_product on product_variants (product_id);
 

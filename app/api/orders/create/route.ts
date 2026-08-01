@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   const variantIds = items.map((i) => i.productVariantId);
   const { data: variants, error: variantError } = await supabaseAdmin
     .from("product_variants")
-    .select("id, products(id, name, amount, has_discount_flag, cod_allowed)")
+    .select("id, style_name, amount, has_discount_flag, cod_allowed, products(id, name)")
     .in("id", variantIds);
   if (variantError) return NextResponse.json({ error: variantError.message }, { status: 500 });
 
@@ -53,8 +53,8 @@ export async function POST(req: Request) {
   if (txnMethod === "cod") {
     const blockedNames = items
       .map((i) => (variants || []).find((v: any) => v.id === i.productVariantId))
-      .filter((v: any) => v && v.products && !v.products.cod_allowed)
-      .map((v: any) => v.products.name);
+      .filter((v: any) => v && !v.cod_allowed)
+      .map((v: any) => v.products?.name + (v.style_name ? `（${v.style_name}）` : ""));
     if (blockedNames.length > 0) {
       return NextResponse.json(
         { error: `以下商品不開放取付，請改用匯款或從購物車移除：${blockedNames.join("、")}` },
@@ -69,8 +69,8 @@ export async function POST(req: Request) {
   for (const cartItem of items) {
     const variant = (variants || []).find((v: any) => v.id === cartItem.productVariantId);
     if (!variant) continue;
-    const product = (variant as any).products;
-    const { enabled, rate } = resolveTxnRate(campaign as CampaignRates, txnMethod, !!product.has_discount_flag, wantsGift);
+    const v = variant as any;
+    const { enabled, rate } = resolveTxnRate(campaign as CampaignRates, txnMethod, !!v.has_discount_flag, wantsGift);
     if (!enabled || rate == null) {
       anyDisabledCombo = true;
       break;
@@ -78,8 +78,8 @@ export async function POST(req: Request) {
     resolvedItems.push({
       productVariantId: cartItem.productVariantId,
       qty: cartItem.qty,
-      unitAmountOriginal: product.amount,
-      unitAmountTwd: ceilToTwd(product.amount, rate),
+      unitAmountOriginal: v.amount,
+      unitAmountTwd: ceilToTwd(v.amount, rate),
     });
   }
 

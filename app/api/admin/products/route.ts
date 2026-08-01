@@ -6,7 +6,7 @@ import { toDirectImageUrl } from "@/lib/imageUrl";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// GET /api/admin/products?seriesId=xxx — 獨立商品庫列表（含款式）
+// GET /api/admin/products?seriesId=xxx — 獨立商品庫列表（含款式，每個款式各自的金額/圖片/運費/取付設定）
 export async function GET(req: Request) {
   try {
     requireAdminSession(req);
@@ -25,8 +25,13 @@ export async function GET(req: Request) {
   return NextResponse.json({ products: data });
 }
 
-// POST /api/admin/products — 手動新增商品（2.2節：CSV匯入只是捷徑，不是唯一新增方式）
-// body: { seriesId, name, amount, shippingFee, hasDiscountFlag, imageUrl, styles: string[] }
+/**
+ * POST /api/admin/products — 新增商品（比照 mibu-app 原本模式：款式各自獨立金額/圖片/運費/取付）
+ * body:
+ *   { productId, variant: {...} }  → 幫既有商品(productId)新增一筆款式
+ *   { seriesId, name, variants: [{...}] }  → 新建商品，同時建立一或多筆款式
+ * variant 欄位: { styleName, amount, shippingFee, hasDiscountFlag, codAllowed, imageUrl }
+ */
 export async function POST(req: Request) {
   try {
     requireAdminSession(req);
@@ -34,38 +39,49 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
   const body = await req.json();
-  const name = String(body.name || "").trim();
-  const amount = Number(body.amount);
-
-  if (!name) return NextResponse.json({ error: "請輸入商品名稱" }, { status: 400 });
-  if (!isFinite(amount) || amount < 0) return NextResponse.json({ error: "商品金額格式不正確" }, { status: 400 });
-
   const supabase = getSupabaseAdmin();
 
-  const { data: product, error: productError } = await supabase
-    .from("products")
-    .insert({
-      series_id: body.seriesId ?? null,
-      name,
+  function buildVariantRow(productId: string, v: any) {
+    const amount = Number(v.amount);
+    if (!isFinite(amount) || amount < 0) throw new Error("金額格式不正確");
+    return {
+      product_id: productId,
+      style_name: v.styleName || null,
       amount,
-      shipping_fee: Number(body.shippingFee) || 0,
-      has_discount_flag: !!body.hasDiscountFlag,
-      cod_allowed: body.codAllowed === false ? false : true,
-      image_url: body.imageUrl ? toDirectImageUrl(String(body.imageUrl)) : null,
-    })
-    .select()
-    .single();
-  if (productError) return NextResponse.json({ error: productError.message }, { status: 500 });
+      shipping_fee: Number(v.shippingFee) || 0,
+      has_discount_flag: !!v.hasDiscountFlag,
+      cod_allowed: v.codAllowed === false ? false : true,
+      image_url: v.imageUrl ? toDirectImageUrl(String(v.imageUrl)) : null,
+    };
+  }
 
-  // 款式用逗號分隔，留空 = 單一款式（2.2節）
-  const styles: string[] = Array.isArray(body.styles) ? body.styles.filter(Boolean) : [];
-  const variantRows: { product_id: string; style_name: string | null }[] =
-    styles.length > 0
-      ? styles.map((s) => ({ product_id: product.id, style_name: s }))
-      : [{ product_id: product.id, style_name: null }];
+  try {
+    // 幫既有商品新增一筆款式
+    if (body.productId) {
+      const row = buildVariantRow(body.productId, body.variant || {});
+      const { data, error } = await supabase.from("product_variants").insert(row).select().single();
+      if (error) throw new Error(error.message);
+      return NextResponse.json({ variant: data });
+    }
 
-  const { data: variants, error: variantError } = await supabase.from("product_variants").insert(variantRows).select();
-  if (variantError) return NextResponse.json({ error: variantError.message }, { status: 500 });
+    // 新建商品
+    const name = String(body.name || "").trim();
+    if (!name) return NextResponse.json({ error: "請輸入商品名稱" }, { status: 400 });
 
-  return NextResponse.json({ product: { ...product, product_variants: variants } });
+    const { data: product, error: productError } = await supabase
+      .from("products")
+      .insert({ series_id: body.seriesId ?? null, name })
+      .select()
+      .single();
+    if (productError) throw new Error(productError.message);
+
+    const variants: any[] = Array.isArray(body.variants) && body.variants.length > 0 ? body.variants : [{}];
+    const rows = variants.map((v) => buildVariantRow(product.id, v));
+    const { data: createdVariants, error: variantError } = await supabase.from("product_variants").insert(rows).select();
+    if (variantError) throw new Error(variantError.message);
+
+    return NextResponse.json({ product: { ...product, product_variants: createdVariants } });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 400 });
+  }
 }

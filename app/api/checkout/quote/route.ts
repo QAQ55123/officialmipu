@@ -29,7 +29,7 @@ export async function POST(req: Request) {
   const variantIds = items.map((i) => i.productVariantId);
   const { data: variants, error: variantError } = await supabase
     .from("product_variants")
-    .select("id, products(name, amount, has_discount_flag, cod_allowed)")
+    .select("id, style_name, amount, has_discount_flag, cod_allowed, products(name)")
     .in("id", variantIds);
   if (variantError) return NextResponse.json({ error: variantError.message }, { status: 500 });
 
@@ -40,19 +40,20 @@ export async function POST(req: Request) {
   for (const cartItem of items) {
     const variant = (variants || []).find((v: any) => v.id === cartItem.productVariantId);
     if (!variant) continue;
-    const product = (variant as any).products;
+    const v = variant as any;
+    const displayName = v.products?.name + (v.style_name ? `（${v.style_name}）` : "");
 
-    if (txnMethod === "cod" && !product.cod_allowed) {
-      codBlockedItems.push(product.name);
+    if (txnMethod === "cod" && !v.cod_allowed) {
+      codBlockedItems.push(displayName);
       continue; // 這幾項不計入取付金額，但不影響其他項目（2.4節）
     }
 
-    const { enabled, rate } = resolveTxnRate(campaign as CampaignRates, txnMethod, !!product.has_discount_flag, wantsGift);
+    const { enabled, rate } = resolveTxnRate(campaign as CampaignRates, txnMethod, !!v.has_discount_flag, wantsGift);
     if (!enabled || rate == null) {
       anyDisabled = true;
       continue;
     }
-    total += ceilToTwd(product.amount, rate) * cartItem.qty;
+    total += ceilToTwd(v.amount, rate) * cartItem.qty;
   }
 
   return NextResponse.json({ total, anyDisabled, codAvailable, codBlockedItems });

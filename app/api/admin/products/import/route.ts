@@ -6,9 +6,12 @@ import { requireAdminSession } from "@/lib/adminAuth";
 /**
  * POST /api/admin/products/import
  * multipart/form-data: file（CSV或Excel）、seriesId
- * 欄位格式（2.2節）：商品名稱 | 款式 | 金額 | 運費金額 | 是否滿減
- * - 款式用逗號分隔多款式，留空 = 單一款式
+ *
+ * 欄位格式（比照 mibu-app 原本模式：一列＝一個具體款式，同一個商品名稱可以重複好幾列）：
+ *   商品名稱 | 款式 | 金額 | 運費金額 | 是否滿減
  * - 是否滿減：v = true，留空 = false
+ * - 同名的商品名稱，會自動歸到同一個商品底下（沒有就新建）
+ * - 圖片不透過CSV，比照2.2節後台再手動貼網址或上傳
  */
 export async function POST(req: Request) {
   try {
@@ -30,11 +33,12 @@ export async function POST(req: Request) {
 
   const supabase = getSupabaseAdmin();
   const results: { row: number; name: string; ok: boolean; error?: string }[] = [];
+  const productIdByName = new Map<string, string>();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const name = String(row["商品名稱"] ?? "").trim();
-    const styleRaw = String(row["款式"] ?? "").trim();
+    const styleName = String(row["款式"] ?? "").trim() || null;
     const amount = Number(row["金額"]);
     const shippingFee = Number(row["運費金額"]) || 0;
     const hasDiscountFlag = String(row["是否滿減"] ?? "").trim().toLowerCase() === "v";
@@ -48,29 +52,28 @@ export async function POST(req: Request) {
       continue;
     }
 
-    const { data: product, error: productError } = await supabase
-      .from("products")
-      .insert({ series_id: seriesId || null, name, amount, shipping_fee: shippingFee, has_discount_flag: hasDiscountFlag })
-      .select()
-      .single();
-    if (productError) {
-      results.push({ row: i + 2, name, ok: false, error: productError.message });
-      continue;
+    try {
+      let productId = productIdByName.get(name);
+      if (!productId) {
+        const { data: product, error: productError } = await supabase
+          .from("products")
+          .insert({ series_id: seriesId || null, name })
+          .select()
+          .single();
+        if (productError) throw new Error(productError.message);
+        productId = product.id;
+        productIdByName.set(name, productId!);
+      }
+
+      const { error: variantError } = await supabase
+        .from("product_variants")
+        .insert({ product_id: productId, style_name: styleName, amount, shipping_fee: shippingFee, has_discount_flag: hasDiscountFlag });
+      if (variantError) throw new Error(variantError.message);
+
+      results.push({ row: i + 2, name, ok: true });
+    } catch (e: any) {
+      results.push({ row: i + 2, name, ok: false, error: e.message });
     }
-
-    const styles = styleRaw ? styleRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-    const variantRows: { product_id: string; style_name: string | null }[] =
-      styles.length > 0
-        ? styles.map((s) => ({ product_id: product.id, style_name: s }))
-        : [{ product_id: product.id, style_name: null }];
-
-    const { error: variantError } = await supabase.from("product_variants").insert(variantRows);
-    if (variantError) {
-      results.push({ row: i + 2, name, ok: false, error: variantError.message });
-      continue;
-    }
-
-    results.push({ row: i + 2, name, ok: true });
   }
 
   const successCount = results.filter((r) => r.ok).length;

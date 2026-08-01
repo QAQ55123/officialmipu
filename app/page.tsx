@@ -3,14 +3,11 @@ import { useEffect, useState, useMemo } from "react";
 import { ShoppingCart } from "lucide-react";
 
 type Series = { id: string; name: string; is_gift_series: boolean };
-type Variant = { id: string; style_name: string | null };
+type Variant = { id: string; style_name: string | null; amount: number; image_url: string | null; cod_allowed: boolean; has_discount_flag: boolean };
 type Product = {
   id: string;
   name: string;
-  amount: number;
-  image_url: string | null;
   series_id: string | null;
-  cod_allowed: boolean;
   product_variants: Variant[];
 };
 type CartEntry = { productVariantId: string; productId: string; name: string; style: string | null; qty: number; price: number; imageUrl: string | null };
@@ -53,18 +50,30 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
 
+  const [loadError, setLoadError] = useState("");
+
   useEffect(() => {
     Promise.all([
       fetch("/api/series").then((r) => r.json()),
       fetch("/api/products").then((r) => r.json()),
       fetch("/api/campaigns/current").then((r) => r.json()),
-    ]).then(([sData, pData, cData]) => {
-      setSeries(sData.series || []);
-      setProducts(pData.products || []);
-      setCampaign(cData.campaign);
-      setIsOpen(cData.isOpen);
-      setLoading(false);
-    });
+    ])
+      .then(([sData, pData, cData]) => {
+        if (sData.error || pData.error || cData.error) {
+          setLoadError(sData.error || pData.error || cData.error);
+          setLoading(false);
+          return;
+        }
+        setSeries(sData.series || []);
+        setProducts(pData.products || []);
+        setCampaign(cData.campaign);
+        setIsOpen(cData.isOpen);
+        setLoading(false);
+      })
+      .catch((e) => {
+        setLoadError(e.message || "連線失敗");
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -130,8 +139,8 @@ export default function Home() {
           name: detailProduct.name,
           style: variant.style_name,
           qty: detailQty,
-          price: detailProduct.amount,
-          imageUrl: detailProduct.image_url,
+          price: variant.amount,
+          imageUrl: variant.image_url,
         },
       ];
     });
@@ -200,6 +209,7 @@ export default function Home() {
   }
 
   if (loading) return <div className="spinner">載入中…</div>;
+  if (loadError) return <div style={{ padding: 40, textAlign: "center", color: "#791F1F" }}>發生錯誤：{loadError}</div>;
 
   return (
     <div>
@@ -229,31 +239,41 @@ export default function Home() {
           {view === "browse" && (
             <div>
               <div className="plan-grid">
-                {filteredProducts.map((p) => (
-                  <div key={p.id} className="plan-card-v2" onClick={() => openProduct(p)}>
-                    <div className="plan-card-v2-img">
-                      {p.image_url && <img src={p.image_url} alt={p.name} />}
-                      {!p.cod_allowed && <span className="plan-card-v2-tag">不開放取付</span>}
+                {filteredProducts.map((p) => {
+                  const variants = p.product_variants;
+                  const firstVariant = variants[0];
+                  const prices = variants.map((v) => v.amount);
+                  const minPrice = Math.min(...prices);
+                  const maxPrice = Math.max(...prices);
+                  const anyCodBlocked = variants.some((v) => !v.cod_allowed);
+                  return (
+                    <div key={p.id} className="plan-card-v2" onClick={() => openProduct(p)}>
+                      <div className="plan-card-v2-img">
+                        {firstVariant?.image_url && <img src={firstVariant.image_url} alt={p.name} />}
+                        {anyCodBlocked && <span className="plan-card-v2-tag">部分款式不開放取付</span>}
+                      </div>
+                      <div className="plan-card-v2-body">
+                        <p className="plan-card-v2-name">{p.name}</p>
+                        <p className="plan-card-v2-meta">NT$ {minPrice === maxPrice ? fmt(minPrice) : `${fmt(minPrice)} ~ ${fmt(maxPrice)}`}</p>
+                      </div>
                     </div>
-                    <div className="plan-card-v2-body">
-                      <p className="plan-card-v2-name">{p.name}</p>
-                      <p className="plan-card-v2-meta">NT$ {fmt(p.amount)}</p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {filteredProducts.length === 0 && <div className="spinner">沒有符合條件的商品</div>}
               </div>
             </div>
           )}
 
-          {view === "product" && detailProduct && (
+          {view === "product" && detailProduct && (() => {
+            const selectedVariant = detailProduct.product_variants.find((v) => v.style_name === detailStyle) || detailProduct.product_variants[0];
+            return (
             <div>
               <a className="checkout-back-link" onClick={() => setView("browse")}>
                 <span aria-hidden="true">←</span>返回商品列表
               </a>
               <div className="product-card-v3">
                 <div className="product-gallery-v3">
-                  {detailProduct.image_url ? <img src={detailProduct.image_url} alt={detailProduct.name} /> : <span className="product-gallery-v3-empty">沒有圖片</span>}
+                  {selectedVariant?.image_url ? <img src={selectedVariant.image_url} alt={detailProduct.name} /> : <span className="product-gallery-v3-empty">沒有圖片</span>}
                 </div>
                 <div className="product-title-block">
                   <h4 style={{ margin: 0, fontSize: 20 }}>{detailProduct.name}</h4>
@@ -269,11 +289,14 @@ export default function Home() {
                             className={`style-pill ${detailStyle === v.style_name ? "active" : ""}`}
                             onClick={() => setDetailStyle(v.style_name)}
                           >
-                            {v.style_name}
+                            {v.style_name}（NT${fmt(v.amount)}）
                           </button>
                         ))}
                       </div>
                     </>
+                  )}
+                  {selectedVariant && !selectedVariant.cod_allowed && (
+                    <div style={{ fontSize: 12, color: "#791F1F", marginBottom: 8 }}>這個款式不開放取付</div>
                   )}
                   <div className="stepper stepper-lg">
                     <button className="step-btn" disabled={detailQty <= 1} onClick={() => setDetailQty((q) => Math.max(1, q - 1))}>－</button>
@@ -282,7 +305,7 @@ export default function Home() {
                   </div>
                   <div className="product-checkout-row">
                     <span className="product-checkout-total">總計</span>
-                    <span className="product-price-v3">NT$ {fmt(detailProduct.amount * detailQty)}</span>
+                    <span className="product-price-v3">NT$ {fmt((selectedVariant?.amount || 0) * detailQty)}</span>
                   </div>
                   <button className="btn" style={{ width: "100%", marginTop: 12 }} disabled={!isOpen} onClick={addToCart}>
                     {isOpen ? "加入購物車" : "目前非開放購買"}
@@ -290,7 +313,8 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {view === "cart" && (
             <div>

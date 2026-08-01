@@ -31,7 +31,7 @@ export async function POST(req: Request) {
   const variantIds = items.map((i) => i.productVariantId);
   const { data: variants, error: variantError } = await supabase
     .from("product_variants")
-    .select("id, products(amount)")
+    .select("id, amount")
     .in("id", variantIds);
   if (variantError) return NextResponse.json({ error: variantError.message }, { status: 500 });
 
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   for (const cartItem of items) {
     const variant = (variants || []).find((v: any) => v.id === cartItem.productVariantId);
     if (!variant) continue;
-    const unitAmount = (variant as any).products?.amount ?? 0;
+    const unitAmount = (variant as any).amount ?? 0;
     for (let i = 0; i < cartItem.qty; i++) {
       giftableItems.push({ id: `${cartItem.productVariantId}-${i}`, amount: unitAmount });
     }
