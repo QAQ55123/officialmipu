@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!ok) return NextResponse.json({ error: "帳號或密碼錯誤" }, { status: 401 });
 
   const token = signSession(admin.id, admin.username, admin.role);
-  const res = NextResponse.json({ ok: true, username: admin.username, role: admin.role });
+  const res = NextResponse.json({ ok: true, username: admin.username, role: admin.role, email: admin.email || "", emailVerified: admin.email_verified });
   res.headers.set("Set-Cookie", sessionCookieHeader(token));
   return res;
 }

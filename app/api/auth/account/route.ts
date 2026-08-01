@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { verifyMemberPw, normFb } from "@/lib/util";
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
-// 新站不需要 Google Sheets 同步（mibu-app 原本用來備份會員清單）
+import { syncMembersSheet } from "@/lib/sheetsSync";
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   if (Object.keys(updates).length > 0) {
     const { error } = await supabase.from("members").update(updates).eq("id", member.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    // 新站不做 Google Sheets 同步，這裡原本 mibu-app 是拿來備份會員清單用的
+    syncMembersSheet().catch(() => {});
   }
 
   if (sentVerifyEmail) {

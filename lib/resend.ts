@@ -18,7 +18,7 @@ function getTransporter() {
 /** 寄信：html 是主要內容，text 是純文字版本（有助於降低被判定為垃圾郵件的機率） */
 export async function sendEmail(to: string, subject: string, html: string, text?: string) {
   const transporter = getTransporter();
-  const from = process.env.EMAIL_FROM || `訂購系統 <${process.env.GMAIL_USER}>`;
+  const from = process.env.EMAIL_FROM || `米舖 <${process.env.GMAIL_USER}>`;
   await transporter.sendMail({ from, to, subject, html, text: text || stripHtml(html) });
 }
 

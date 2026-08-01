@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, verifyAdminPw, hashAdminPw } from "@/lib/adminAuth";
 
-// POST /api/admin/change-password — 修改自己的密碼（需輸入目前密碼驗證身分）
 export async function POST(req: Request) {
   let session;
   try {
@@ -22,7 +21,7 @@ export async function POST(req: Request) {
   if (!admin) return NextResponse.json({ error: "找不到帳號" }, { status: 404 });
 
   const ok = await verifyAdminPw(password, admin.password_hash);
-  if (!ok) return NextResponse.json({ error: "目前密碼不正確" }, { status: 403 });
+  if (!ok) return NextResponse.json({ error: "密碼錯誤" }, { status: 403 });
 
   const newHash = await hashAdminPw(newPassword);
   const { error } = await supabase.from("admins").update({ password_hash: newHash }).eq("id", admin.id);

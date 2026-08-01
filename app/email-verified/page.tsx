@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 export default function EmailVerifiedPage() {
   const [status, setStatus] = useState<"success" | "invalid" | "">("");
-  const [returnTo, setReturnTo] = useState("/login");
+  const [returnTo, setReturnTo] = useState("/?openLogin=1");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

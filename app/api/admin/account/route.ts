@@ -4,7 +4,6 @@ import { requireAdminSession, verifyAdminPw } from "@/lib/adminAuth";
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
 
-// POST /api/admin/account — 修改自己的Email（需輸入目前密碼驗證身分）
 export async function POST(req: Request) {
   let session;
   try {
@@ -30,12 +29,16 @@ export async function POST(req: Request) {
     if (admin.email_verified) {
       return NextResponse.json({ ok: true, email: admin.email, emailVerified: true, verifyEmailSent: false });
     }
+    // 信箱沒變，但還沒驗證過：重新寄一次驗證信
     const verifyToken = genToken();
-    await supabase.from("admins").update({ verify_token: verifyToken, verify_token_expires: hoursFromNow(24) }).eq("id", admin.id);
+    await supabase
+      .from("admins")
+      .update({ verify_token: verifyToken, verify_token_expires: hoursFromNow(24) })
+      .eq("id", admin.id);
     try {
-      const link = `${getSiteUrl()}/api/admin/verify-email?token=${verifyToken}`;
+      const link = `${getSiteUrl()}/api/admin/auth/verify-email?token=${verifyToken}`;
       const { html, text } = verifyEmailContent(admin.username, link);
-      await sendEmail(admin.email, "請驗證你的後台帳號信箱", html, text);
+      await sendEmail(admin.email, "請驗證你的米舖後台帳號信箱", html, text);
     } catch (e) {
       console.error("驗證信寄送失敗：", e);
       return NextResponse.json({ error: "驗證信寄送失敗，請確認寄信服務設定是否正確" }, { status: 500 });
@@ -53,9 +56,9 @@ export async function POST(req: Request) {
     .eq("id", admin.id);
 
   try {
-    const link = `${getSiteUrl()}/api/admin/verify-email?token=${verifyToken}`;
+    const link = `${getSiteUrl()}/api/admin/auth/verify-email?token=${verifyToken}`;
     const { html, text } = verifyEmailContent(admin.username, link);
-    await sendEmail(newEmail, "請驗證你的後台帳號信箱", html, text);
+    await sendEmail(newEmail, "請驗證你的米舖後台帳號信箱", html, text);
   } catch (e) {
     console.error("驗證信寄送失敗：", e);
   }

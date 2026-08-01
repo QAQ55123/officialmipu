@@ -41,8 +41,8 @@ export default function ResetPasswordPage() {
     return (
       <div style={{ maxWidth: 380, margin: "80px auto", padding: 20, textAlign: "center" }}>
         <h2>密碼已重設</h2>
-        <a className="btn" href="/login" style={{ display: "inline-block", marginTop: 12, textDecoration: "none" }}>
-          回到登入頁面
+        <a className="btn" href="/" style={{ display: "inline-block", marginTop: 12, textDecoration: "none" }}>
+          回到首頁登入
         </a>
       </div>
     );

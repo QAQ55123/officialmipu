@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     try {
       const link = `${getSiteUrl()}/reset-password?token=${token}`;
       const { html, text } = resetPasswordContent(member.username, link);
-      await sendEmail(email, "重設你的帳號密碼", html, text);
+      await sendEmail(email, "重設你的米舖帳號密碼", html, text);
     } catch (e) {
       console.error("重設密碼信寄送失敗：", e);
     }

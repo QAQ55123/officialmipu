@@ -1,18 +1,23 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { requireOwnerSession } from "@/lib/adminAuth";
+import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const ALLOWED_KEYS = ["checkout_notice"];
 
-// GET /api/admin/site-settings — 讀取所有設定（僅owner）
+/** 後台用：讀取所有設定 */
 export async function GET(req: Request) {
+  try {
+    requireAdminSession(req);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
   try {
     requireOwnerSession(req);
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 401 });
+    return NextResponse.json({ error: e.message }, { status: 403 });
   }
 
   const supabase = getSupabaseAdmin();
@@ -25,12 +30,17 @@ export async function GET(req: Request) {
   return NextResponse.json({ checkoutNotice: map["checkout_notice"] || "" });
 }
 
-// PATCH /api/admin/site-settings — 更新設定（僅owner）body: { key, value }
+/** 更新設定（僅限最高權限）body: { key, value } */
 export async function PATCH(req: Request) {
+  try {
+    requireAdminSession(req);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
   try {
     requireOwnerSession(req);
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 401 });
+    return NextResponse.json({ error: e.message }, { status: 403 });
   }
 
   const body = await req.json();

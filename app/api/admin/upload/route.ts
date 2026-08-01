@@ -2,16 +2,6 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
-/**
- * POST /api/admin/upload — 上傳圖片檔案到 Supabase Storage，回傳可直接用的公開網址
- *
- * 跟商品的「貼網址」欄位是並存的兩種方式：
- * - 貼網址：適合已經有現成圖床連結或 Google Drive 分享連結的情況
- * - 這支上傳 API：適合手上直接有一張圖檔、想直接丟上去，不用自己先找地方寄放
- *
- * 事前準備：要先到 Supabase 後台 → Storage，建立一個名叫 "product-images" 的
- * public bucket（設為公開，否則上傳後的圖片網址打不開）
- */
 export async function POST(req: Request) {
   try {
     requireAdminSession(req);
@@ -37,12 +27,7 @@ export async function POST(req: Request) {
   const { error: upErr } = await supabase.storage
     .from("product-images")
     .upload(path, buffer, { contentType: file.type, upsert: false });
-  if (upErr) {
-    return NextResponse.json(
-      { error: `上傳失敗：${upErr.message}（請確認 Supabase Storage 裡已建立名為 "product-images" 的 public bucket）` },
-      { status: 500 }
-    );
-  }
+  if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
 
   const { data } = supabase.storage.from("product-images").getPublicUrl(path);
   return NextResponse.json({ ok: true, url: data.publicUrl });

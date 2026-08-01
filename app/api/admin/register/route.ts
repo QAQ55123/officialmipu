@@ -4,14 +4,6 @@ import { hashAdminPw, isOwnerInviteCode, signSession, sessionCookieHeader } from
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
 
-/**
- * POST /api/admin/register
- * body: { username, email, password, inviteCode }
- *
- * 邀請碼決定拿到的權限：
- * - 跟 ADMIN_INVITE_CODE_OWNER（環境變數）相符 → owner（最高權限）
- * - 是資料庫裡一組沒用過的一次性邀請碼 → staff（一般管理者，看不到會員相關工具）
- */
 export async function POST(req: Request) {
   const body = await req.json();
   const username = String(body.username || "").trim();
@@ -32,6 +24,7 @@ export async function POST(req: Request) {
   if (isOwnerInviteCode(inviteCode)) {
     role = "owner";
   } else {
+    // staff 用的是一次性邀請碼，存在資料庫裡，要沒被用過才算數
     const { data: codeRow } = await supabase
       .from("admin_invite_codes")
       .select("*")
@@ -64,7 +57,7 @@ export async function POST(req: Request) {
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // 帳號真的建立成功後，才把一次性邀請碼標記為已使用（避免中途失敗白白燒掉一組邀請碼）
+  // 帳號真的建立成功後，才把這組一次性邀請碼標記為已使用（避免中途失敗白白燒掉一組邀請碼）
   if (inviteCodeRowId) {
     await supabase
       .from("admin_invite_codes")
@@ -72,11 +65,12 @@ export async function POST(req: Request) {
       .eq("id", inviteCodeRowId);
   }
 
+  // 寄驗證信（就算寄信失敗也不擋註冊流程，只是要讓前端知道信有沒有真的寄出去）
   let verifyEmailSent = true;
   try {
-    const link = `${getSiteUrl()}/api/admin/verify-email?token=${verifyToken}`;
+    const link = `${getSiteUrl()}/api/admin/auth/verify-email?token=${verifyToken}`;
     const { html, text } = verifyEmailContent(username, link);
-    await sendEmail(email, "請驗證你的後台帳號信箱", html, text);
+    await sendEmail(email, "請驗證你的米舖後台帳號信箱", html, text);
   } catch (e) {
     console.error("驗證信寄送失敗：", e);
     verifyEmailSent = false;
