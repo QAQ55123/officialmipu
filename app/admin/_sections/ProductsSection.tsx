@@ -30,6 +30,7 @@ export default function ProductsSection() {
   // 編輯單一款式
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [editRow, setEditRow] = useState<Row>(emptyRow());
+  const [editOriginalImageUrl, setEditOriginalImageUrl] = useState("");
   const [uploadingEdit, setUploadingEdit] = useState(false);
 
   async function load() {
@@ -47,7 +48,6 @@ export default function ProductsSection() {
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
   }
   function addRow() { setRows((prev) => [...prev, emptyRow()]); }
-  function removeRow(i: number) { setRows((prev) => prev.filter((_, idx) => idx !== i)); }
 
   async function uploadImage(file: File): Promise<string | null> {
     const formData = new FormData();
@@ -57,12 +57,27 @@ export default function ProductsSection() {
     return res.ok ? data.url : null;
   }
 
+  async function deleteUnusedImage(url: string) {
+    if (!url) return;
+    await fetch("/api/admin/upload/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) }).catch(() => {});
+  }
+
   async function handleRowUpload(i: number, file: File) {
+    const oldUrl = rows[i].imageUrl;
     setUploadingRow(i);
     const url = await uploadImage(file);
-    if (url) updateRow(i, "imageUrl", url);
+    if (url) {
+      updateRow(i, "imageUrl", url);
+      if (oldUrl) deleteUnusedImage(oldUrl); // 換圖：舊的還沒存進資料庫，立刻清掉
+    }
     else setMsg("圖片上傳失敗");
     setUploadingRow(null);
+  }
+
+  function removeRow(i: number) {
+    const url = rows[i].imageUrl;
+    if (url) deleteUnusedImage(url); // 整列被移除：這張還沒存進資料庫的圖也一起清掉
+    setRows((prev) => prev.filter((_, idx) => idx !== i));
   }
 
   async function saveNewProduct() {
@@ -97,6 +112,15 @@ export default function ProductsSection() {
   function startEditVariant(v: Variant) {
     setEditingVariantId(v.id);
     setEditRow({ styleName: v.style_name || "", amount: String(v.amount), shippingFee: String(v.shipping_fee), hasDiscountFlag: v.has_discount_flag, codAllowed: v.cod_allowed, imageUrl: v.image_url || "" });
+    setEditOriginalImageUrl(v.image_url || "");
+  }
+
+  function cancelEditVariant() {
+    // 編輯過程中如果上傳了新圖但取消不儲存，那張還沒存進資料庫的新圖要清掉，原本資料庫裡那張不動
+    if (editRow.imageUrl && editRow.imageUrl !== editOriginalImageUrl) {
+      deleteUnusedImage(editRow.imageUrl);
+    }
+    setEditingVariantId(null);
   }
 
   async function saveEditVariant() {
@@ -194,9 +218,13 @@ export default function ProductsSection() {
                           <span className="id-label">或上傳</span>
                           <input type="file" accept="image/*" disabled={uploadingEdit} onChange={async (e) => {
                             if (!e.target.files?.[0]) return;
+                            const prevUnsavedUrl = editRow.imageUrl !== editOriginalImageUrl ? editRow.imageUrl : "";
                             setUploadingEdit(true);
                             const url = await uploadImage(e.target.files[0]);
-                            if (url) setEditRow((r) => ({ ...r, imageUrl: url }));
+                            if (url) {
+                              setEditRow((r) => ({ ...r, imageUrl: url }));
+                              if (prevUnsavedUrl) deleteUnusedImage(prevUnsavedUrl);
+                            }
                             setUploadingEdit(false);
                           }} />
                         </div>
@@ -204,7 +232,7 @@ export default function ProductsSection() {
                         <div className="id-row"><span className="id-label">開放取付</span><input type="checkbox" checked={editRow.codAllowed} onChange={(e) => setEditRow((r) => ({ ...r, codAllowed: e.target.checked }))} /></div>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button className="btn small" onClick={saveEditVariant}>儲存</button>
-                          <button className="btn small secondary" onClick={() => setEditingVariantId(null)}>取消</button>
+                          <button className="btn small secondary" onClick={cancelEditVariant}>取消</button>
                         </div>
                       </div>
                     )}
@@ -235,7 +263,7 @@ export default function ProductsSection() {
             </div>
           )}
 
-          <div className="id-row" style={{ alignItems: "flex-start" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14 }}>
             <span className="id-label" style={{ paddingTop: 8 }}>款式／金額／圖片</span>
             <div style={{ flex: 1 }}>
               {rows.map((row, i) => (

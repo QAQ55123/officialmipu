@@ -87,17 +87,20 @@ create index if not exists idx_products_series on products (series_id);
 -- 款式（比照 mibu-app 原本模式：每個款式各自有自己的金額/圖片/運費/取付設定，
 -- 不是共用商品本身那一份；同一個商品名稱底下可以有好幾個款式，各自完全獨立）
 create table if not exists product_variants (
-  id                uuid primary key default gen_random_uuid(),
-  product_id        uuid not null references products(id) on delete cascade,
-  style_name        text,
-  amount            numeric not null default 0,
-  shipping_fee      numeric not null default 0,
-  has_discount_flag boolean not null default false,
-  cod_allowed       boolean not null default true,
-  image_url         text,
-  sort_order        int default 0,
-  created_at        timestamptz default now()
+  id            uuid primary key default gen_random_uuid(),
+  product_id    uuid not null references products(id) on delete cascade,
+  style_name    text,
+  sort_order    int default 0,
+  created_at    timestamptz default now()
 );
+-- 如果 product_variants 表在更早的版本就已經建立過（沒有這些欄位），
+-- create table if not exists 不會補上新欄位，這裡明確用 alter table 補齊，
+-- 不管表是全新建立還是舊表沿用都能正常運作
+alter table product_variants add column if not exists amount numeric not null default 0;
+alter table product_variants add column if not exists shipping_fee numeric not null default 0;
+alter table product_variants add column if not exists has_discount_flag boolean not null default false;
+alter table product_variants add column if not exists cod_allowed boolean not null default true;
+alter table product_variants add column if not exists image_url text;
 create index if not exists idx_product_variants_product on product_variants (product_id);
 
 -- ============================================================

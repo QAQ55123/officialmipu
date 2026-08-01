@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { toDirectImageUrl } from "@/lib/imageUrl";
+import { deleteStorageFiles } from "@/lib/storage";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -19,8 +20,21 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if ("imageUrl" in body) updates.image_url = body.imageUrl ? toDirectImageUrl(String(body.imageUrl)) : null;
 
   const supabase = getSupabaseAdmin();
+
+  // 圖片被換掉的話，把資料庫裡原本那張舊圖清掉（比照 mibu-app 原本的行為）
+  let oldImageUrl: string | null = null;
+  if ("imageUrl" in body) {
+    const { data: existing } = await supabase.from("product_variants").select("image_url").eq("id", params.id).maybeSingle();
+    oldImageUrl = existing?.image_url ?? null;
+  }
+
   const { data, error } = await supabase.from("product_variants").update(updates).eq("id", params.id).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (oldImageUrl && oldImageUrl !== updates.image_url) {
+    deleteStorageFiles([oldImageUrl]).catch(() => {});
+  }
+
   return NextResponse.json({ variant: data });
 }
 
