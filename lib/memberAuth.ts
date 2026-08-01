@@ -1,6 +1,6 @@
 import crypto from "crypto";
 
-export const MEMBER_SESSION_COOKIE = "mibu_member_session";
+export const MEMBER_SESSION_COOKIE = "neworder_member_session";
 const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 天，重新整理/關掉瀏覽器都不會登出
 
 function secret() {

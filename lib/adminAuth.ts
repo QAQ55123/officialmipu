@@ -18,7 +18,7 @@ export function isOwnerInviteCode(inviteCode: string): boolean {
   return !!ownerCode && inviteCode === ownerCode;
 }
 
-export const SESSION_COOKIE = "mibu_admin_session";
+export const SESSION_COOKIE = "neworder_admin_session";
 const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 小時後要求重新登入
 
 function secret() {

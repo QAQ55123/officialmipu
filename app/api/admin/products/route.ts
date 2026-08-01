@@ -1,130 +1,71 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
-import { deleteStorageFiles } from "@/lib/storage";
-import { syncProductsSheet } from "@/lib/sheetsSync";
+import { toDirectImageUrl } from "@/lib/imageUrl";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-
-/** 後台用：列出某個企劃底下的所有商品 ?pw=&planId= */
+// GET /api/admin/products?seriesId=xxx — 獨立商品庫列表（含款式）
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
   try {
     requireAdminSession(req);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
-  const planId = searchParams.get("planId");
-  if (!planId) return NextResponse.json({ error: "缺少 planId" }, { status: 400 });
+  const { searchParams } = new URL(req.url);
+  const seriesId = searchParams.get("seriesId");
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .eq("plan_id", planId)
-    .order("sort_order", { ascending: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  let query = supabase.from("products").select("*, product_variants(*)").order("sort_order", { ascending: true });
+  if (seriesId) query = query.eq("series_id", seriesId);
 
-  return NextResponse.json({
-    products: (data || []).map((p) => ({
-      id: p.id,
-      planId: p.plan_id,
-      name: p.name,
-      style: p.style,
-      price: Number(p.price),
-      imageUrl: p.image_url,
-    })),
-  });
+  const { data, error } = await query;
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ products: data });
 }
 
+// POST /api/admin/products — 手動新增商品（2.2節：CSV匯入只是捷徑，不是唯一新增方式）
+// body: { seriesId, name, amount, shippingFee, hasDiscountFlag, imageUrl, styles: string[] }
 export async function POST(req: Request) {
-  const body = await req.json();
   try {
     requireAdminSession(req);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
-  if (!body.planId) return NextResponse.json({ error: "缺少企劃" }, { status: 400 });
+  const body = await req.json();
   const name = String(body.name || "").trim();
-  if (!name) return NextResponse.json({ error: "請填寫商品名稱" }, { status: 400 });
+  const amount = Number(body.amount);
+
+  if (!name) return NextResponse.json({ error: "請輸入商品名稱" }, { status: 400 });
+  if (!isFinite(amount) || amount < 0) return NextResponse.json({ error: "商品金額格式不正確" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: existing } = await supabase
-    .from("products")
-    .select("sort_order")
-    .eq("plan_id", body.planId)
-    .order("sort_order", { ascending: false })
-    .limit(1);
-  const nextSortOrder = existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
 
-  const { data, error } = await supabase
+  const { data: product, error: productError } = await supabase
     .from("products")
     .insert({
-      plan_id: body.planId,
+      series_id: body.seriesId ?? null,
       name,
-      style: body.style || "",
-      price: Number(body.price) || 0,
-      image_url: body.imageUrl || null,
-      sort_order: nextSortOrder,
+      amount,
+      shipping_fee: Number(body.shippingFee) || 0,
+      has_discount_flag: !!body.hasDiscountFlag,
+      cod_allowed: body.codAllowed === false ? false : true,
+      image_url: body.imageUrl ? toDirectImageUrl(String(body.imageUrl)) : null,
     })
     .select()
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  syncProductsSheet().catch(() => {});
-  return NextResponse.json({ ok: true, product: data });
-}
+  if (productError) return NextResponse.json({ error: productError.message }, { status: 500 });
 
-export async function PUT(req: Request) {
-  const body = await req.json();
-  try {
-    requireAdminSession(req);
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 401 });
-  }
-  if (!body.id) return NextResponse.json({ error: "缺少商品 id" }, { status: 400 });
+  // 款式用逗號分隔，留空 = 單一款式（2.2節）
+  const styles: string[] = Array.isArray(body.styles) ? body.styles.filter(Boolean) : [];
+  const variantRows: { product_id: string; style_name: string | null }[] =
+    styles.length > 0
+      ? styles.map((s) => ({ product_id: product.id, style_name: s }))
+      : [{ product_id: product.id, style_name: null }];
 
-  const supabase = getSupabaseAdmin();
-  const { data: oldProduct } = await supabase.from("products").select("image_url").eq("id", body.id).single();
+  const { data: variants, error: variantError } = await supabase.from("product_variants").insert(variantRows).select();
+  if (variantError) return NextResponse.json({ error: variantError.message }, { status: 500 });
 
-  const { error } = await supabase
-    .from("products")
-    .update({
-      name: body.name,
-      style: body.style || "",
-      price: Number(body.price) || 0,
-      image_url: body.imageUrl || null,
-    })
-    .eq("id", body.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const newImageUrl = body.imageUrl || null;
-  if (oldProduct?.image_url && oldProduct.image_url !== newImageUrl) {
-    deleteStorageFiles([oldProduct.image_url]).catch(() => {});
-  }
-
-  syncProductsSheet().catch(() => {});
-  return NextResponse.json({ ok: true });
-}
-
-export async function DELETE(req: Request) {
-  const body = await req.json();
-  try {
-    requireAdminSession(req);
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 401 });
-  }
-  if (!body.id) return NextResponse.json({ error: "缺少商品 id" }, { status: 400 });
-
-  const supabase = getSupabaseAdmin();
-  const { data: product } = await supabase.from("products").select("image_url").eq("id", body.id).single();
-
-  const { error } = await supabase.from("products").delete().eq("id", body.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  if (product?.image_url) deleteStorageFiles([product.image_url]).catch(() => {});
-
-  syncProductsSheet().catch(() => {});
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ product: { ...product, product_variants: variants } });
 }
