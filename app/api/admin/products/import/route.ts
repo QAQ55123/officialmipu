@@ -55,13 +55,18 @@ export async function POST(req: Request) {
     try {
       let productId = productIdByName.get(name);
       if (!productId) {
-        const { data: product, error: productError } = await supabase
-          .from("products")
-          .insert({ series_id: seriesId || null, name })
-          .select()
-          .single();
-        if (productError) throw new Error(productError.message);
-        productId = product.id;
+        const { data: existingProduct } = await supabase.from("products").select("id").eq("name", name).maybeSingle();
+        if (existingProduct) {
+          productId = existingProduct.id;
+        } else {
+          const { data: product, error: productError } = await supabase
+            .from("products")
+            .insert({ series_id: seriesId || null, name })
+            .select()
+            .single();
+          if (productError) throw new Error(productError.message);
+          productId = product.id;
+        }
         productIdByName.set(name, productId!);
       }
 

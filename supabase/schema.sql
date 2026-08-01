@@ -82,6 +82,8 @@ create table if not exists products (
   created_at        timestamptz default now(),
   updated_at        timestamptz default now()
 );
+-- 商品本身的封面圖，用在格線卡片，跟每個款式各自的照片分開另外一張
+alter table products add column if not exists image_url text;
 create index if not exists idx_products_series on products (series_id);
 
 -- 款式（比照 mibu-app 原本模式：每個款式各自有自己的金額/圖片/運費/取付設定，

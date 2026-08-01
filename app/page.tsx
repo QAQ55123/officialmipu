@@ -23,6 +23,15 @@ export default function Home() {
   const [isOpen, setIsOpen] = useState(false);
 
   const [toast, setToast] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [announcementPanelOpen, setAnnouncementPanelOpen] = useState(false);
+  const [announcements, setAnnouncements] = useState<{ id: string; content: string; createdAt: string }[]>([]);
+  const [username, setUsername] = useState("");
+  useEffect(() => {
+    fetch("/api/announcements").then((r) => r.json()).then((d) => setAnnouncements(d.announcements || []));
+  }, []);
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(""), 2200);

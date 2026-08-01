@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { toDirectImageUrl } from "@/lib/imageUrl";
 
-// PATCH /api/admin/products/:id — 修改商品本身（名稱／系列，不含款式細節）
+// PATCH /api/admin/products/:id — 修改商品本身（名稱／系列／封面圖，不含款式細節）
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
     requireAdminSession(req);
@@ -13,6 +14,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const updates: Record<string, any> = {};
   if ("name" in body) updates.name = String(body.name).trim();
   if ("seriesId" in body) updates.series_id = body.seriesId;
+  if ("imageUrl" in body) updates.image_url = body.imageUrl ? toDirectImageUrl(String(body.imageUrl)) : null;
 
   const supabase = getSupabaseAdmin();
   if (Object.keys(updates).length > 0) {
