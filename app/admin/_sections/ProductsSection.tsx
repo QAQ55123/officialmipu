@@ -331,48 +331,68 @@ export default function ProductsSection() {
       ) : products.length === 0 ? (
         <div className="admin-empty">還沒有任何商品</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {products
-            .filter((p) => productSearch === "" || p.name.includes(productSearch))
-            .map((p) => {
-              const seriesName = seriesList.find((s) => s.id === p.series_id)?.name;
-              return (
-                <div
-                  key={p.id}
-                  draggable
-                  onDragStart={() => setDraggedId(p.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleDrop(p.id)}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "20px 1fr 1fr 60px 60px 40px auto",
-                    gap: 8,
-                    alignItems: "center",
-                    padding: "8px 12px",
-                    background: "#fff",
-                    border: "1px solid #E5E1D3",
-                    borderRadius: 8,
-                    cursor: "grab",
-                    fontSize: 13,
-                  }}
-                >
-                  <span>⠿</span>
-                  <span>
-                    {p.name}
-                    {seriesName && <span style={{ color: "var(--muted)" }}> （{seriesName}）</span>}
-                  </span>
-                  <span style={{ color: "var(--muted)" }}>
-                    {p.product_variants.map((v) => v.style_name).filter(Boolean).join("、") || "（單一款式）"}
-                  </span>
-                  <span>{p.amount}</span>
-                  <span>{p.shipping_fee}</span>
-                  <span>{p.has_discount_flag ? "v" : ""}</span>
-                  <button className="admin-link-btn danger" onClick={() => handleDelete(p.id)}>
-                    刪除
-                  </button>
-                </div>
-              );
-            })}
+        <div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "20px 1fr 1fr 60px 60px 40px auto",
+              gap: 8,
+              padding: "0 12px 6px",
+              fontSize: 12,
+              color: "var(--muted)",
+            }}
+          >
+            <span></span>
+            <span>商品名稱</span>
+            <span>款式</span>
+            <span>金額</span>
+            <span>運費</span>
+            <span>滿減</span>
+            <span></span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {products
+              .filter((p) => productSearch === "" || p.name.includes(productSearch))
+              .map((p) => {
+                const seriesName = seriesList.find((s) => s.id === p.series_id)?.name;
+                return (
+                  <div
+                    key={p.id}
+                    draggable
+                    onDragStart={() => setDraggedId(p.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleDrop(p.id)}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "20px 1fr 1fr 60px 60px 40px auto",
+                      gap: 8,
+                      alignItems: "center",
+                      padding: "8px 12px",
+                      background: "#fff",
+                      border: "1px solid #E5E1D3",
+                      borderRadius: 8,
+                      cursor: "grab",
+                      fontSize: 13,
+                    }}
+                  >
+                    <span style={{ color: "var(--muted)" }}>⠿</span>
+                    <span>
+                      {p.name}
+                      {seriesName && <span style={{ color: "var(--muted)" }}> （{seriesName}）</span>}
+                    </span>
+                    <span style={{ color: "var(--muted)" }}>
+                      {p.product_variants.map((v) => v.style_name).filter(Boolean).join("、") || "（單一款式）"}
+                    </span>
+                    <span>{p.amount}</span>
+                    <span>{p.shipping_fee}</span>
+                    <span>{p.has_discount_flag ? "v" : ""}</span>
+                    <button className="admin-link-btn danger" onClick={() => handleDelete(p.id)}>
+                      刪除
+                    </button>
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
     </div>

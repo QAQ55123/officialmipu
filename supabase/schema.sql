@@ -353,3 +353,39 @@ create index if not exists idx_shipping_batch_items_batch on shipping_batch_item
 create index if not exists idx_vendor_purchase_order_items_order on vendor_purchase_order_items(purchase_order_id);
 create index if not exists idx_vendor_shipment_items_shipment on vendor_shipment_items(shipment_id);
 create index if not exists idx_backorders_campaign_fulfilled on backorders(campaign_id, fulfilled);
+
+-- ============================================================
+-- 明確關閉所有表格的 Row Level Security
+-- 這個專案的權限判斷全部寫在後端 API 程式碼裡（見 lib/adminAuth.ts、lib/memberAuth.ts），
+-- 不使用 Supabase RLS 機制。如果你的 Supabase 專案有開啟「新表格自動套用RLS」，
+-- 沒有這段的話，前台用 anon key 查詢會被擋下、回傳空結果（不是錯誤，容易誤判成沒資料）。
+-- ============================================================
+alter table admin_invite_codes disable row level security;
+alter table admins disable row level security;
+alter table members disable row level security;
+alter table series disable row level security;
+alter table site_settings disable row level security;
+alter table products disable row level security;
+alter table product_variants disable row level security;
+alter table campaigns disable row level security;
+alter table campaign_products disable row level security;
+alter table gift_styles disable row level security;
+alter table orders disable row level security;
+alter table order_items disable row level security;
+alter table order_gift_selections disable row level security;
+alter table shipping_batches disable row level security;
+alter table shipping_batch_items disable row level security;
+alter table vendor_gift_tiers disable row level security;
+alter table vendor_platforms disable row level security;
+alter table vendor_platform_tier_caps disable row level security;
+alter table vendor_purchase_batches disable row level security;
+alter table vendor_purchase_orders disable row level security;
+alter table vendor_purchase_order_items disable row level security;
+alter table vendor_purchase_order_gifts disable row level security;
+alter table vendor_extra_purchases disable row level security;
+alter table vendor_order_numbers disable row level security;
+alter table vendor_shipments disable row level security;
+alter table vendor_shipment_items disable row level security;
+alter table backorders disable row level security;
+alter table cost_sheets disable row level security;
+alter table announcements disable row level security;

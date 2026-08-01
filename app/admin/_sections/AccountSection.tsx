@@ -97,7 +97,7 @@ export default function AccountSection({
         </div>
         <div className="admin-form-row">
           <label>新Email（留空＝重新寄一次驗證信給目前的信箱）</label>
-          <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder={email || "輸入新的Email"} />
+          <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="輸入新的Email，留空則沿用目前信箱" />
         </div>
         <button className="btn" onClick={handleSaveEmail} disabled={savingEmail}>
           {savingEmail ? "處理中…" : "更新Email"}

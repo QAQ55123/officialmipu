@@ -14,11 +14,19 @@ type Campaign = {
 export default function CampaignListPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/campaigns")
       .then((r) => r.json())
-      .then((d) => setCampaigns(d.campaigns || []))
+      .then((d) => {
+        if (d.error) {
+          setError(d.error);
+          return;
+        }
+        setCampaigns(d.campaigns || []);
+      })
+      .catch((e) => setError(e.message || "連線失敗"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -31,6 +39,8 @@ export default function CampaignListPage() {
 
       {loading ? (
         <div style={{ color: "#9A9787" }}>載入中…</div>
+      ) : error ? (
+        <div style={{ color: "#C0392B", background: "#FDE8E8", padding: 12, borderRadius: 8 }}>錯誤：{error}</div>
       ) : campaigns.length === 0 ? (
         <div style={{ color: "#9A9787" }}>目前沒有任何檔期</div>
       ) : (
