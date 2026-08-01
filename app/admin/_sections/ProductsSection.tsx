@@ -19,6 +19,7 @@ type Series = { id: string; name: string; is_gift_series: boolean };
 export default function ProductsSection() {
   const [products, setProducts] = useState<Product[]>([]);
   const [seriesList, setSeriesList] = useState<Series[]>([]);
+  const [campaignList, setCampaignList] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -26,6 +27,8 @@ export default function ProductsSection() {
 
   const [name, setName] = useState("");
   const [seriesId, setSeriesId] = useState("");
+  const [seriesSearchText, setSeriesSearchText] = useState("");
+  const [addToCampaignId, setAddToCampaignId] = useState("");
   const [amount, setAmount] = useState("");
   const [shippingFee, setShippingFee] = useState("");
   const [hasDiscountFlag, setHasDiscountFlag] = useState(false);
@@ -34,22 +37,30 @@ export default function ProductsSection() {
 
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSeriesId, setImportSeriesId] = useState("");
+  const [importCampaignId, setImportCampaignId] = useState("");
   const [importResult, setImportResult] = useState<any>(null);
   const [importing, setImporting] = useState(false);
 
   const [uploading, setUploading] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [pRes, sRes] = await Promise.all([fetch("/api/admin/products"), fetch("/api/admin/series")]);
+      const [pRes, sRes, cRes] = await Promise.all([
+        fetch("/api/admin/products"),
+        fetch("/api/admin/series"),
+        fetch("/api/admin/campaigns"),
+      ]);
       const pData = await pRes.json();
       const sData = await sRes.json();
+      const cData = await cRes.json();
       if (!pRes.ok) throw new Error(pData.error || "載入商品失敗");
       if (!sRes.ok) throw new Error(sData.error || "載入系列失敗");
       setProducts(pData.products || []);
       setSeriesList(sData.series || []);
+      setCampaignList((cData.campaigns || []).map((c: any) => ({ id: c.id, name: c.name })));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -80,6 +91,7 @@ export default function ProductsSection() {
           hasDiscountFlag,
           imageUrl: imageUrl || null,
           styles,
+          campaignId: addToCampaignId || null,
         }),
       });
       const data = await res.json();
@@ -90,6 +102,8 @@ export default function ProductsSection() {
       setImageUrl("");
       setStylesText("");
       setHasDiscountFlag(false);
+      setAddToCampaignId("");
+      setSeriesSearchText("");
       load();
     } catch (e: any) {
       setError(e.message);
@@ -117,6 +131,7 @@ export default function ProductsSection() {
       const formData = new FormData();
       formData.append("file", importFile);
       if (importSeriesId) formData.append("seriesId", importSeriesId);
+      if (importCampaignId) formData.append("campaignId", importCampaignId);
       const res = await fetch("/api/admin/products/import", { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "匯入失敗");
@@ -185,6 +200,17 @@ export default function ProductsSection() {
           </select>
         </div>
         <div className="admin-form-row">
+          <label>順便加進哪個檔期（可留空）</label>
+          <select value={importCampaignId} onChange={(e) => setImportCampaignId(e.target.value)}>
+            <option value="">（先不加進任何檔期）</option>
+            {campaignList.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="admin-form-row">
           <label>選擇檔案</label>
           <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
         </div>
@@ -224,13 +250,31 @@ export default function ProductsSection() {
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="admin-form-row">
-            <label>系列</label>
-            <select value={seriesId} onChange={(e) => setSeriesId(e.target.value)}>
-              <option value="">（不指定）</option>
+            <label>系列（輸入文字搜尋）</label>
+            <input
+              list="series-options"
+              value={seriesSearchText}
+              onChange={(e) => {
+                const text = e.target.value;
+                setSeriesSearchText(text);
+                const matched = seriesList.find((s) => s.name === text);
+                setSeriesId(matched ? matched.id : "");
+              }}
+              placeholder="輸入系列名稱，留空＝不指定"
+            />
+            <datalist id="series-options">
               {seriesList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                  {s.is_gift_series ? "（贈品/滿贈系列）" : ""}
+                <option key={s.id} value={s.name} />
+              ))}
+            </datalist>
+          </div>
+          <div className="admin-form-row">
+            <label>順便加進哪個檔期（選填，之後也能到「檔期商品」補加）</label>
+            <select value={addToCampaignId} onChange={(e) => setAddToCampaignId(e.target.value)}>
+              <option value="">（先不加進任何檔期）</option>
+              {campaignList.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
                 </option>
               ))}
             </select>
@@ -275,45 +319,60 @@ export default function ProductsSection() {
         </div>
       )}
 
+      <input
+        placeholder="搜尋商品名稱"
+        value={productSearch}
+        onChange={(e) => setProductSearch(e.target.value)}
+        style={{ width: "100%", marginBottom: 10, boxSizing: "border-box" }}
+      />
+
       {loading ? (
         <div className="admin-empty">載入中…</div>
       ) : products.length === 0 ? (
         <div className="admin-empty">還沒有任何商品</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {products.map((p) => (
-            <div
-              key={p.id}
-              draggable
-              onDragStart={() => setDraggedId(p.id)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => handleDrop(p.id)}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "20px 1fr 1fr 60px 60px 40px auto",
-                gap: 8,
-                alignItems: "center",
-                padding: "8px 12px",
-                background: "#fff",
-                border: "1px solid #E5E1D3",
-                borderRadius: 8,
-                cursor: "grab",
-                fontSize: 13,
-              }}
-            >
-              <span>⠿</span>
-              <span>{p.name}</span>
-              <span style={{ color: "var(--muted)" }}>
-                {p.product_variants.map((v) => v.style_name).filter(Boolean).join("、") || "（單一款式）"}
-              </span>
-              <span>{p.amount}</span>
-              <span>{p.shipping_fee}</span>
-              <span>{p.has_discount_flag ? "v" : ""}</span>
-              <button className="admin-link-btn danger" onClick={() => handleDelete(p.id)}>
-                刪除
-              </button>
-            </div>
-          ))}
+          {products
+            .filter((p) => productSearch === "" || p.name.includes(productSearch))
+            .map((p) => {
+              const seriesName = seriesList.find((s) => s.id === p.series_id)?.name;
+              return (
+                <div
+                  key={p.id}
+                  draggable
+                  onDragStart={() => setDraggedId(p.id)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => handleDrop(p.id)}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "20px 1fr 1fr 60px 60px 40px auto",
+                    gap: 8,
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    background: "#fff",
+                    border: "1px solid #E5E1D3",
+                    borderRadius: 8,
+                    cursor: "grab",
+                    fontSize: 13,
+                  }}
+                >
+                  <span>⠿</span>
+                  <span>
+                    {p.name}
+                    {seriesName && <span style={{ color: "var(--muted)" }}> （{seriesName}）</span>}
+                  </span>
+                  <span style={{ color: "var(--muted)" }}>
+                    {p.product_variants.map((v) => v.style_name).filter(Boolean).join("、") || "（單一款式）"}
+                  </span>
+                  <span>{p.amount}</span>
+                  <span>{p.shipping_fee}</span>
+                  <span>{p.has_discount_flag ? "v" : ""}</span>
+                  <button className="admin-link-btn danger" onClick={() => handleDelete(p.id)}>
+                    刪除
+                  </button>
+                </div>
+              );
+            })}
         </div>
       )}
     </div>

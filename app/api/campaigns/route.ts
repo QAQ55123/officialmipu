@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // GET /api/campaigns — 前台檔期列表（不需要登入）
 export async function GET() {
   const supabase = getSupabase();

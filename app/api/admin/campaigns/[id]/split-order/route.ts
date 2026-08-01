@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { computeSplitOrderBatch } from "@/lib/splitOrderEngine";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/campaigns/:id/split-order — 這個檔期所有拆單批次列表
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {

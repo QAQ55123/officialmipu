@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/admin/orders/:orderId/items
  * 回傳這張顧客訂單的每個品項（含滿贈），各自的到貨狀態；

@@ -71,37 +71,39 @@ export default function OrdersSection({ isOwner }: { isOwner: boolean }) {
           {cancelRequests.length === 0 ? (
             <div className="admin-empty">目前沒有待審核的取消申請</div>
           ) : (
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>顧客</th>
-                  <th>檔期</th>
-                  <th>交易方式</th>
-                  <th>金額</th>
-                  <th>申請時間</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {cancelRequests.map((r) => (
-                  <tr key={r.orderId}>
-                    <td>{r.username}</td>
-                    <td>{r.campaignName}</td>
-                    <td>{r.txnMethod}</td>
-                    <td>NT$ {r.total}</td>
-                    <td style={{ fontSize: 13, color: "var(--muted)" }}>{new Date(r.cancelRequestedAt).toLocaleString("zh-TW")}</td>
-                    <td className="admin-row-actions">
-                      <button className="admin-link-btn" onClick={() => handleApprove(r.orderId)}>
-                        核准取消
-                      </button>
-                      <button className="admin-link-btn danger" onClick={() => handleReject(r.orderId)}>
-                        拒絕
-                      </button>
-                    </td>
+            <div className="admin-card">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>顧客</th>
+                    <th>檔期</th>
+                    <th>交易方式</th>
+                    <th>金額</th>
+                    <th>申請時間</th>
+                    <th></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {cancelRequests.map((r) => (
+                    <tr key={r.orderId}>
+                      <td>{r.username}</td>
+                      <td>{r.campaignName}</td>
+                      <td>{r.txnMethod}</td>
+                      <td>NT$ {r.total}</td>
+                      <td style={{ fontSize: 13, color: "var(--muted)" }}>{new Date(r.cancelRequestedAt).toLocaleString("zh-TW")}</td>
+                      <td className="admin-row-actions">
+                        <button className="admin-link-btn" onClick={() => handleApprove(r.orderId)}>
+                          核准取消
+                        </button>
+                        <button className="admin-link-btn danger" onClick={() => handleReject(r.orderId)}>
+                          拒絕
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

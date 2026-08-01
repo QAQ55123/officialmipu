@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/campaigns — 檔期列表
 export async function GET(req: Request) {
   try {

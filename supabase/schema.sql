@@ -8,7 +8,7 @@
 -- ------------------------------------------------------------
 
 -- 一次性邀請碼（給 staff 等級用；owner 用固定的環境變數邀請碼 ADMIN_INVITE_CODE_OWNER，不受影響）
-create table admin_invite_codes (
+create table if not exists admin_invite_codes (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
   used boolean not null default false,
@@ -18,7 +18,7 @@ create table admin_invite_codes (
 );
 
 -- role: 'owner'（最高權限，能碰會員相關工具）／'staff'（一般管理者，不能碰會員資料）
-create table admins (
+create table if not exists admins (
   id uuid primary key default gen_random_uuid(),
   username text not null unique,
   email text unique,
@@ -35,7 +35,7 @@ create table admins (
 -- ------------------------------------------------------------
 -- 1. 會員系統
 -- ------------------------------------------------------------
-create table members (
+create table if not exists members (
   id uuid primary key default gen_random_uuid(),
   username text unique not null,
   password_hash text not null,
@@ -56,7 +56,7 @@ create table members (
 -- ------------------------------------------------------------
 -- 2. 系列分類（含特殊「贈品/滿贈」系列）
 -- ------------------------------------------------------------
-create table series (
+create table if not exists series (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   is_gift_series boolean default false, -- 標記是否為「贈品/滿贈」特殊系列
@@ -65,7 +65,7 @@ create table series (
 );
 
 -- 網站設定（如結帳頁提示文字），僅owner可改
-create table site_settings (
+create table if not exists site_settings (
   key text primary key,
   value text,
   updated_at timestamptz default now()
@@ -74,7 +74,7 @@ create table site_settings (
 -- ------------------------------------------------------------
 -- 3. 商品與款式
 -- ------------------------------------------------------------
-create table products (
+create table if not exists products (
   id uuid primary key default gen_random_uuid(),
   series_id uuid references series(id),
   name text not null,
@@ -87,7 +87,7 @@ create table products (
   updated_at timestamptz default now()
 );
 
-create table product_variants (
+create table if not exists product_variants (
   id uuid primary key default gen_random_uuid(),
   product_id uuid references products(id) on delete cascade,
   style_name text, -- 留空 = 單一款式（無款式選項）
@@ -97,7 +97,7 @@ create table product_variants (
 -- ------------------------------------------------------------
 -- 4. 檔期（Campaign）
 -- ------------------------------------------------------------
-create table campaigns (
+create table if not exists campaigns (
   id uuid primary key default gen_random_uuid(),
   name text not null, -- 如「男生宿舍第三彈訂購」，同時是分頁名稱
   opens_at timestamptz not null,
@@ -139,7 +139,7 @@ create table campaigns (
 
 -- 檔期 × 商品：多對多關聯，商品是獨立商品庫，檔期只是從庫裡「挑」商品進來賣
 -- 同一個商品可以被挑進不同檔期重複銷售，不需要每次重建
-create table campaign_products (
+create table if not exists campaign_products (
   campaign_id uuid references campaigns(id) on delete cascade,
   product_id uuid references products(id) on delete cascade,
   added_at timestamptz default now(),
@@ -147,7 +147,7 @@ create table campaign_products (
 );
 
 -- 滿贈款式登記表（2.7節，顧客端無上限公式；只需登記一次：名稱＋門檻金額）
-create table gift_styles (
+create table if not exists gift_styles (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references campaigns(id) on delete cascade,
   style_name text not null,
@@ -158,7 +158,7 @@ create table gift_styles (
 -- ------------------------------------------------------------
 -- 5. 訂單與品項
 -- ------------------------------------------------------------
-create table orders (
+create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references campaigns(id),
   member_id uuid references members(id),
@@ -170,7 +170,7 @@ create table orders (
   created_at timestamptz default now()
 );
 
-create table order_items (
+create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
   order_id uuid references orders(id) on delete cascade,
   product_variant_id uuid references product_variants(id),
@@ -181,7 +181,7 @@ create table order_items (
 );
 
 -- 訂單實際選擇的滿贈品項與數量（2.7 即時拆單試算結果）
-create table order_gift_selections (
+create table if not exists order_gift_selections (
   id uuid primary key default gen_random_uuid(),
   order_id uuid references orders(id) on delete cascade,
   gift_style_id uuid references gift_styles(id),
@@ -192,7 +192,7 @@ create table order_gift_selections (
 -- ------------------------------------------------------------
 -- 6. 出貨批次（以「訂單品項」為單位，非整張訂單）
 -- ------------------------------------------------------------
-create table shipping_batches (
+create table if not exists shipping_batches (
   id uuid primary key default gen_random_uuid(),
   order_id uuid references orders(id), -- 批次仍歸屬同一張顧客訂單（不同批次可能同一張訂單多筆）
   confirmed_at timestamptz, -- 批次確定時間，決定何時對顧客顯示運費；null=尚未確定
@@ -200,7 +200,7 @@ create table shipping_batches (
   created_at timestamptz default now()
 );
 
-create table shipping_batch_items (
+create table if not exists shipping_batch_items (
   id uuid primary key default gen_random_uuid(),
   batch_id uuid references shipping_batches(id) on delete cascade,
   order_item_id uuid references order_items(id),
@@ -213,7 +213,7 @@ create table shipping_batch_items (
 -- ============================================================
 
 -- 廠商贈品門檻金額與折扣金額（三平台共用同一份，店家自行輸入設定）
-create table vendor_gift_tiers (
+create table if not exists vendor_gift_tiers (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references campaigns(id) on delete cascade,
   threshold_amount numeric not null, -- 如 100/200/300/400
@@ -222,7 +222,7 @@ create table vendor_gift_tiers (
 );
 
 -- 平台清單（如 A/B/C 平台）
-create table vendor_platforms (
+create table if not exists vendor_platforms (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references campaigns(id) on delete cascade,
   name text not null,
@@ -230,7 +230,7 @@ create table vendor_platforms (
 );
 
 -- 平台 × 門檻等級 × 每款上限（可能依門檻等級不同而不同，如 C 平台）
-create table vendor_platform_tier_caps (
+create table if not exists vendor_platform_tier_caps (
   id uuid primary key default gen_random_uuid(),
   platform_id uuid references vendor_platforms(id) on delete cascade,
   threshold_amount numeric not null, -- 對應 vendor_gift_tiers 的門檻等級
@@ -238,7 +238,7 @@ create table vendor_platform_tier_caps (
 );
 
 -- 拆單批次（支援檔期中重複試算）
-create table vendor_purchase_batches (
+create table if not exists vendor_purchase_batches (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references campaigns(id),
   fx_rate numeric, -- 外幣換算台幣匯率；實際應與2.6的8種交易組合匯率共用同一份設定（見 campaigns 表）
@@ -247,7 +247,7 @@ create table vendor_purchase_batches (
 );
 
 -- 我方採購單（第3節拆單工具產生的一筆）
-create table vendor_purchase_orders (
+create table if not exists vendor_purchase_orders (
   id uuid primary key default gen_random_uuid(),
   batch_id uuid references vendor_purchase_batches(id) on delete cascade,
   platform_id uuid references vendor_platforms(id), -- 可隨時更改，觸發重算
@@ -256,7 +256,7 @@ create table vendor_purchase_orders (
 );
 
 -- 我方採購單品項（含可編輯對調的顧客欄位）
-create table vendor_purchase_order_items (
+create table if not exists vendor_purchase_order_items (
   id uuid primary key default gen_random_uuid(),
   purchase_order_id uuid references vendor_purchase_orders(id) on delete cascade,
   order_item_id uuid references order_items(id), -- 對應回原始顧客訂單品項
@@ -267,7 +267,7 @@ create table vendor_purchase_order_items (
 );
 
 -- 該採購單實際配置的贈品（可手動編輯增減）
-create table vendor_purchase_order_gifts (
+create table if not exists vendor_purchase_order_gifts (
   id uuid primary key default gen_random_uuid(),
   purchase_order_id uuid references vendor_purchase_orders(id) on delete cascade,
   gift_style_id uuid references gift_styles(id),
@@ -275,7 +275,7 @@ create table vendor_purchase_order_gifts (
 );
 
 -- 額外採購紀錄（超賣時去別處採購贈品的成本登記）
-create table vendor_extra_purchases (
+create table if not exists vendor_extra_purchases (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references campaigns(id),
   order_ref text not null, -- 訂單編號/採購單號
@@ -288,20 +288,20 @@ create table vendor_extra_purchases (
 -- ------------------------------------------------------------
 -- 到貨追蹤（三層結構：我方採購單 → 廠商訂單編號 → 物流單號）
 -- ------------------------------------------------------------
-create table vendor_order_numbers (
+create table if not exists vendor_order_numbers (
   id uuid primary key default gen_random_uuid(),
   purchase_order_id uuid references vendor_purchase_orders(id) on delete cascade,
   vendor_order_no text not null -- 廠商給的訂單編號，如 A/B/C
 );
 
-create table vendor_shipments (
+create table if not exists vendor_shipments (
   id uuid primary key default gen_random_uuid(),
   vendor_order_number_id uuid references vendor_order_numbers(id) on delete cascade,
   tracking_no text not null, -- 物流單號
   arrived boolean default false -- 只記到貨/未到貨兩種簡單狀態
 );
 
-create table vendor_shipment_items (
+create table if not exists vendor_shipment_items (
   id uuid primary key default gen_random_uuid(),
   shipment_id uuid references vendor_shipments(id) on delete cascade,
   purchase_order_item_id uuid references vendor_purchase_order_items(id), -- 一般商品品項
@@ -312,7 +312,7 @@ create table vendor_shipment_items (
 -- ------------------------------------------------------------
 -- 欠貨追蹤（跨顧客挪用商品後產生的補償紀錄）
 -- ------------------------------------------------------------
-create table backorders (
+create table if not exists backorders (
   id uuid primary key default gen_random_uuid(),
   campaign_id uuid references campaigns(id),
   customer_member_id uuid references members(id), -- 欠貨對象
@@ -327,7 +327,7 @@ create table backorders (
 -- ------------------------------------------------------------
 -- 成本SHEET（自製簡易試算表，支援公式，不依賴有商業授權疑慮的第三方套件）
 -- ------------------------------------------------------------
-create table cost_sheets (
+create table if not exists cost_sheets (
   campaign_id uuid primary key references campaigns(id) on delete cascade,
   data jsonb not null default '[]', -- 二維陣列，每格是原始輸入文字（公式以 = 開頭）
   updated_at timestamptz default now()
@@ -336,7 +336,7 @@ create table cost_sheets (
 -- ------------------------------------------------------------
 -- 公告
 -- ------------------------------------------------------------
-create table announcements (
+create table if not exists announcements (
   id uuid primary key default gen_random_uuid(),
   content text not null,
   created_at timestamptz default now()
@@ -344,12 +344,12 @@ create table announcements (
 
 -- 索引（依常用查詢路徑建立）
 -- ============================================================
-create index idx_campaign_products_product on campaign_products(product_id);
-create index idx_products_series on products(series_id);
-create index idx_orders_campaign on orders(campaign_id);
-create index idx_orders_member on orders(member_id);
-create index idx_order_items_order on order_items(order_id);
-create index idx_shipping_batch_items_batch on shipping_batch_items(batch_id);
-create index idx_vendor_purchase_order_items_order on vendor_purchase_order_items(purchase_order_id);
-create index idx_vendor_shipment_items_shipment on vendor_shipment_items(shipment_id);
-create index idx_backorders_campaign_fulfilled on backorders(campaign_id, fulfilled);
+create index if not exists idx_campaign_products_product on campaign_products(product_id);
+create index if not exists idx_products_series on products(series_id);
+create index if not exists idx_orders_campaign on orders(campaign_id);
+create index if not exists idx_orders_member on orders(member_id);
+create index if not exists idx_order_items_order on order_items(order_id);
+create index if not exists idx_shipping_batch_items_batch on shipping_batch_items(batch_id);
+create index if not exists idx_vendor_purchase_order_items_order on vendor_purchase_order_items(purchase_order_id);
+create index if not exists idx_vendor_shipment_items_shipment on vendor_shipment_items(shipment_id);
+create index if not exists idx_backorders_campaign_fulfilled on backorders(campaign_id, fulfilled);

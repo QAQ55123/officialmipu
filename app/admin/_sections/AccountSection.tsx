@@ -16,7 +16,7 @@ export default function AccountSection({
   onLogout: () => void;
 }) {
   const [pw, setPw] = useState("");
-  const [newEmail, setNewEmail] = useState(email);
+  const [newEmail, setNewEmail] = useState("");
   const [emailMsg, setEmailMsg] = useState("");
   const [savingEmail, setSavingEmail] = useState(false);
 
@@ -29,11 +29,12 @@ export default function AccountSection({
   async function handleSaveEmail() {
     setEmailMsg("");
     setSavingEmail(true);
+    const targetEmail = newEmail.trim() || email; // 留空 = 重新寄驗證信給目前的信箱
     try {
       const res = await fetch("/api/admin/account", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pw, newEmail }),
+        body: JSON.stringify({ password: pw, newEmail: targetEmail }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "更新失敗");
@@ -80,7 +81,8 @@ export default function AccountSection({
             權限：{role === "owner" ? "最高權限管理者(owner)" : "一般管理者(staff)"}
           </div>
           <div style={{ fontSize: 13, color: "var(--muted)" }}>
-            Email：{email || "（尚未設定）"} {email && (emailVerified ? "（已驗證）" : "（未驗證）")}
+            Email：{email || "（尚未設定）"}{" "}
+            {email && (emailVerified ? <span style={{ color: "#1E7A3D" }}>（已驗證）</span> : <span>（未驗證）</span>)}
           </div>
         </div>
         <button onClick={onLogout}>登出</button>
@@ -94,8 +96,8 @@ export default function AccountSection({
           <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} />
         </div>
         <div className="admin-form-row">
-          <label>新Email</label>
-          <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+          <label>新Email（留空＝重新寄一次驗證信給目前的信箱）</label>
+          <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder={email || "輸入新的Email"} />
         </div>
         <button className="btn" onClick={handleSaveEmail} disabled={savingEmail}>
           {savingEmail ? "處理中…" : "更新Email"}

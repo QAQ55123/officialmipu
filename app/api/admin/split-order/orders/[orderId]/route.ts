@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/split-order/orders/:orderId — 這張採購單的品項與贈品清單
 // （供到貨追蹤頁面建立物流單號時勾選要包含哪些品項用）
 export async function GET(req: Request, { params }: { params: { orderId: string } }) {

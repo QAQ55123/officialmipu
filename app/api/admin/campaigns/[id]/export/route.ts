@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/campaigns/:id/export — 匯出這個檔期的訂單明細為 Excel
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {

@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { toDirectImageUrl } from "@/lib/imageUrl";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/products?seriesId=xxx&campaignId=xxx
 // 商品庫是獨立的，campaignId 只是選填的過濾條件（查「這個檔期挑了哪些商品」時用）
 export async function GET(req: Request) {

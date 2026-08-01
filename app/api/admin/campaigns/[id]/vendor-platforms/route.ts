@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/campaigns/:id/vendor-platforms — 平台清單（含每個門檻等級的每款上限）
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {

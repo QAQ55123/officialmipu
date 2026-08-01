@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/campaigns/:id — 檔期詳細資料＋商品清單（依系列分組）
 // 檔期外時間仍可瀏覽（isOpen=false 時前端只是不給下單，不是整頁擋掉）
 export async function GET(_req: Request, { params }: { params: { id: string } }) {

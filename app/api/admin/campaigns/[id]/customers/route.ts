@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/campaigns/:id/customers?q=xxx — 這個檔期已下單的顧客名單（搜尋過濾）
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {

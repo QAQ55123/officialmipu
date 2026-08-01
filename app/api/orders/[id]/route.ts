@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getMemberSession } from "@/lib/memberAuth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   const session = getMemberSession(req);
   if (!session) return NextResponse.json({ error: "請先登入" }, { status: 401 });

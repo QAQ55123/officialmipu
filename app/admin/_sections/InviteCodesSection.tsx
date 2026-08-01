@@ -62,28 +62,30 @@ export default function InviteCodesSection() {
         ) : staffList.length === 0 ? (
           !error && <div className="admin-empty">還沒有任何管理者帳號</div>
         ) : (
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>帳號</th>
-                <th>權限</th>
-                <th>Email</th>
-                <th>建立時間</th>
-              </tr>
-            </thead>
-            <tbody>
-              {staffList.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.username}</td>
-                  <td>{a.role === "owner" ? "最高權限(owner)" : "一般管理者(staff)"}</td>
-                  <td>
-                    {a.email} {a.email && (a.emailVerified ? "（已驗證）" : "（未驗證）")}
-                  </td>
-                  <td style={{ fontSize: 13, color: "var(--muted)" }}>{new Date(a.createdAt).toLocaleString("zh-TW")}</td>
+          <div className="admin-card">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>帳號</th>
+                  <th>權限</th>
+                  <th>Email</th>
+                  <th>建立時間</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {staffList.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.username}</td>
+                    <td>{a.role === "owner" ? "最高權限(owner)" : "一般管理者(staff)"}</td>
+                    <td>
+                      {a.email} {a.email && (a.emailVerified ? "（已驗證）" : "（未驗證）")}
+                    </td>
+                    <td style={{ fontSize: 13, color: "var(--muted)" }}>{new Date(a.createdAt).toLocaleString("zh-TW")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -94,32 +96,34 @@ export default function InviteCodesSection() {
       </div>
 
       {!loading && codes.length > 0 && (
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>邀請碼</th>
-              <th>狀態</th>
-              <th>使用者</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {codes.map((c) => (
-              <tr key={c.id}>
-                <td style={{ fontFamily: "monospace" }}>{c.code}</td>
-                <td>{c.used ? "已使用" : "未使用"}</td>
-                <td>{c.usedBy || "—"}</td>
-                <td className="admin-row-actions">
-                  {!c.used && (
-                    <button className="admin-link-btn danger" onClick={() => handleRevoke(c.id)}>
-                      撤銷
-                    </button>
-                  )}
-                </td>
+        <div className="admin-card">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>邀請碼</th>
+                <th>狀態</th>
+                <th>使用者</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {codes.map((c) => (
+                <tr key={c.id}>
+                  <td style={{ fontFamily: "monospace" }}>{c.code}</td>
+                  <td>{c.used ? "已使用" : "未使用"}</td>
+                  <td>{c.usedBy || "—"}</td>
+                  <td className="admin-row-actions">
+                    {!c.used && (
+                      <button className="admin-link-btn danger" onClick={() => handleRevoke(c.id)}>
+                        撤銷
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

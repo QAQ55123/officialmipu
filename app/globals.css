@@ -548,6 +548,8 @@ html, body {
 .admin-table tr:hover td { background: #FAF8F2; }
 .admin-empty { padding: 40px 0; text-align: center; color: var(--muted); font-size: 14px; }
 .admin-form-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+.admin-card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+.admin-card .admin-table { margin: 0; }
 .admin-form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
 .admin-form-row label { font-size: 13px; color: var(--muted); }
 .admin-form-row input, .admin-form-row textarea, .admin-form-row select {

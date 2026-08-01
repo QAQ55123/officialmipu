@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { bracketFor, orderQuotaForPlatform, styleMaxForPlatform, netAmount, parseAdjustmentText } from "@/lib/vendorPlatform";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/admin/campaigns/:id/split-order/:batchId — 拆單批次完整資料
 export async function GET(req: Request, { params }: { params: { id: string; batchId: string } }) {
   try {

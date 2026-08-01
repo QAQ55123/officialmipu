@@ -45,44 +45,46 @@ export default function MembersSection() {
       <p className="admin-sub">搜尋與查看會員資料（僅最高權限管理者可用）</p>
       {error && <div className="admin-error-box">{error}</div>}
 
-      <div className="admin-toolbar">
-        <input placeholder="搜尋帳號或Email" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load(q)} />
-        <button onClick={() => load(q)}>搜尋</button>
-      </div>
+      <div className="admin-card">
+        <div className="admin-toolbar" style={{ marginBottom: loading || members.length > 0 ? 16 : 0 }}>
+          <input placeholder="搜尋帳號或Email" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load(q)} />
+          <button onClick={() => load(q)}>搜尋</button>
+        </div>
 
-      {loading ? (
-        <div className="admin-empty">載入中…</div>
-      ) : members.length === 0 ? (
-        !error && <div className="admin-empty">沒有符合的會員</div>
-      ) : (
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>帳號</th>
-              <th>Email</th>
-              <th>Email驗證</th>
-              <th>註冊時間</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => (
-              <tr key={m.id}>
-                <td>{m.username}</td>
-                <td>{m.email}</td>
-                <td>{m.email_verified ? "已驗證" : "未驗證"}</td>
-                <td style={{ fontSize: 13, color: "var(--muted)" }}>{new Date(m.created_at).toLocaleString("zh-TW")}</td>
-                <td className="admin-row-actions">
-                  <button className="admin-link-btn" onClick={() => handleResetPassword(m.username)}>
-                    重設密碼為0000
-                  </button>
-                  {resetMsg[m.username] && <span style={{ fontSize: 12, color: "var(--muted)" }}>{resetMsg[m.username]}</span>}
-                </td>
+        {loading ? (
+          <div className="admin-empty">載入中…</div>
+        ) : members.length === 0 ? (
+          !error && <div className="admin-empty">沒有符合的會員</div>
+        ) : (
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>帳號</th>
+                <th>Email</th>
+                <th>Email驗證</th>
+                <th>註冊時間</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {members.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.username}</td>
+                  <td>{m.email}</td>
+                  <td>{m.email_verified ? "已驗證" : "未驗證"}</td>
+                  <td style={{ fontSize: 13, color: "var(--muted)" }}>{new Date(m.created_at).toLocaleString("zh-TW")}</td>
+                  <td className="admin-row-actions">
+                    <button className="admin-link-btn" onClick={() => handleResetPassword(m.username)}>
+                      重設密碼為0000
+                    </button>
+                    {resetMsg[m.username] && <span style={{ fontSize: 12, color: "var(--muted)" }}>{resetMsg[m.username]}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
