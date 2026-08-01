@@ -22,6 +22,8 @@ export default function ProductsSection() {
   const [importing, setImporting] = useState(false);
 
   // 新增商品表單
+  const [addMode, setAddMode] = useState<"new" | "existing">("new");
+  const [targetProductId, setTargetProductId] = useState("");
   const [name, setName] = useState("");
   const [seriesId, setSeriesId] = useState("");
   const [rows, setRows] = useState<Row[]>([emptyRow()]);
@@ -82,8 +84,26 @@ export default function ProductsSection() {
 
   async function saveNewProduct() {
     setMsg("");
-    if (!name.trim()) return setMsg("請輸入商品名稱");
     try {
+      if (addMode === "existing") {
+        if (!targetProductId) return setMsg("請選擇要加到哪個既有商品");
+        for (const r of rows) {
+          const res = await fetch("/api/admin/products", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              productId: targetProductId,
+              variant: { styleName: r.styleName || null, amount: Number(r.amount), shippingFee: Number(r.shippingFee) || 0, hasDiscountFlag: r.hasDiscountFlag, codAllowed: r.codAllowed, imageUrl: r.imageUrl || null },
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "儲存失敗");
+        }
+        setRows([emptyRow()]); setTargetProductId("");
+        load();
+        return;
+      }
+
+      if (!name.trim()) return setMsg("請輸入商品名稱");
       const res = await fetch("/api/admin/products", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -132,6 +152,12 @@ export default function ProductsSection() {
     const data = await res.json();
     if (!res.ok) return setMsg(data.error);
     setEditingVariantId(null);
+    load();
+  }
+
+  async function deleteWholeProduct(id: string) {
+    if (!confirm("確定要刪除這整個商品（含所有款式）嗎？")) return;
+    await fetch(`/api/admin/products/${id}`, { method: "DELETE" });
     load();
   }
 
@@ -190,8 +216,12 @@ export default function ProductsSection() {
           ) : (
             filtered.map((p) => (
               <div key={p.id} style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#33415C", padding: "6px 0" }}>
-                  {p.name}{seriesName(p.series_id) && <span style={{ fontWeight: 400, color: "#8A8779" }}> （{seriesName(p.series_id)}）</span>}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#33415C" }}>
+                    {p.name}{seriesName(p.series_id) && <span style={{ fontWeight: 400, color: "#8A8779" }}> （{seriesName(p.series_id)}）</span>}
+                    {p.product_variants.length === 0 && <span style={{ fontWeight: 400, color: "#dc2626" }}>（沒有任何款式，異常資料）</span>}
+                  </span>
+                  <button className="btn small danger" onClick={() => deleteWholeProduct(p.id)}>刪除整個商品</button>
                 </div>
                 {p.product_variants.map((v) => (
                   <div key={v.id}>
@@ -245,22 +275,40 @@ export default function ProductsSection() {
 
         <div style={{ borderTop: "1px solid #EDE9DC", paddingTop: 12 }}>
           <h4 style={{ margin: "0 0 8px" }}>新增商品</h4>
-          <div className="id-row"><span className="id-label">商品名稱</span><input type="text" value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="id-row">
-            <span className="id-label">系列</span>
-            <select value={seriesId} onChange={(e) => setSeriesId(e.target.value)} style={{ flex: 1, padding: 8 }}>
-              <option value="">（不指定）</option>
-              {seriesList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <span className="id-label">新增方式</span>
+            <label style={{ marginRight: 16 }}><input type="radio" checked={addMode === "new"} onChange={() => setAddMode("new")} /> 建立新商品</label>
+            <label><input type="radio" checked={addMode === "existing"} onChange={() => setAddMode("existing")} /> 加到既有商品（新增款式）</label>
           </div>
-          {products.length > 0 && (
+
+          {addMode === "existing" ? (
             <div className="id-row">
-              <span className="id-label">複製款式</span>
-              <select defaultValue="" onChange={(e) => { if (e.target.value) copyStylesFrom(e.target.value); e.target.value = ""; }} style={{ flex: 1, padding: 8 }}>
-                <option value="">選一個商品複製款式（記得修改金額）</option>
+              <span className="id-label">選擇商品</span>
+              <select value={targetProductId} onChange={(e) => setTargetProductId(e.target.value)} style={{ flex: 1, padding: 8 }}>
+                <option value="">請選擇要加款式的商品</option>
                 {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
+          ) : (
+            <>
+              <div className="id-row"><span className="id-label">商品名稱</span><input type="text" value={name} onChange={(e) => setName(e.target.value)} /></div>
+              <div className="id-row">
+                <span className="id-label">系列</span>
+                <select value={seriesId} onChange={(e) => setSeriesId(e.target.value)} style={{ flex: 1, padding: 8 }}>
+                  <option value="">（不指定）</option>
+                  {seriesList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              {products.length > 0 && (
+                <div className="id-row">
+                  <span className="id-label">複製款式</span>
+                  <select defaultValue="" onChange={(e) => { if (e.target.value) copyStylesFrom(e.target.value); e.target.value = ""; }} style={{ flex: 1, padding: 8 }}>
+                    <option value="">選一個商品複製款式（記得修改金額）</option>
+                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+              )}
+            </>
           )}
 
           <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14 }}>
@@ -296,7 +344,7 @@ export default function ProductsSection() {
             </div>
           </div>
 
-          <button className="btn" onClick={saveNewProduct}>新增商品</button>
+          <button className="btn" onClick={saveNewProduct}>{addMode === "existing" ? "新增款式" : "新增商品"}</button>
           {msg && <div style={{ fontSize: 13, color: "#dc2626", marginTop: 6 }}>{msg}</div>}
         </div>
       </div>

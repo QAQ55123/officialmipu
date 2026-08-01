@@ -68,6 +68,13 @@ export async function POST(req: Request) {
     const name = String(body.name || "").trim();
     if (!name) return NextResponse.json({ error: "請輸入商品名稱" }, { status: 400 });
 
+    // 先驗證所有款式資料合法，再建立商品，避免建立到一半失敗留下孤兒商品
+    const variantsInput: any[] = Array.isArray(body.variants) && body.variants.length > 0 ? body.variants : [{}];
+    for (const v of variantsInput) {
+      const amount = Number(v.amount);
+      if (!isFinite(amount) || amount < 0) return NextResponse.json({ error: "款式的金額格式不正確" }, { status: 400 });
+    }
+
     const { data: product, error: productError } = await supabase
       .from("products")
       .insert({ series_id: body.seriesId ?? null, name })
@@ -75,12 +82,16 @@ export async function POST(req: Request) {
       .single();
     if (productError) throw new Error(productError.message);
 
-    const variants: any[] = Array.isArray(body.variants) && body.variants.length > 0 ? body.variants : [{}];
-    const rows = variants.map((v) => buildVariantRow(product.id, v));
-    const { data: createdVariants, error: variantError } = await supabase.from("product_variants").insert(rows).select();
-    if (variantError) throw new Error(variantError.message);
-
-    return NextResponse.json({ product: { ...product, product_variants: createdVariants } });
+    try {
+      const rows = variantsInput.map((v) => buildVariantRow(product.id, v));
+      const { data: createdVariants, error: variantError } = await supabase.from("product_variants").insert(rows).select();
+      if (variantError) throw new Error(variantError.message);
+      return NextResponse.json({ product: { ...product, product_variants: createdVariants } });
+    } catch (innerError: any) {
+      // 保險：就算前面驗證過了，這裡萬一還是失敗，也要把剛建立的商品一起刪掉，不留孤兒商品
+      await supabase.from("products").delete().eq("id", product.id);
+      throw innerError;
+    }
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 400 });
   }
