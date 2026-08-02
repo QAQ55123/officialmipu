@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   try {
     const link = `${getSiteUrl()}/api/admin/auth/verify-email?token=${verifyToken}`;
     const { html, text } = verifyEmailContent(username, link);
-    await sendEmail(email, "請驗證你的米舖後台帳號信箱", html, text);
+    await sendEmail(email, "請驗證你的米舖-官方周邊代購後台帳號信箱", html, text);
   } catch (e) {
     console.error("驗證信寄送失敗：", e);
     verifyEmailSent = false;

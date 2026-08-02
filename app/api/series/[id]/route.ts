@@ -8,35 +8,30 @@ export const fetchCache = "force-no-store";
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   const supabase = getSupabaseAdmin();
 
-  const { data: plan, error: planErr } = await supabase
-    .from("plans")
+  const { data: series, error: seriesErr } = await supabase
+    .from("series")
     .select("*, categories(id, name, parent_id)")
     .eq("id", params.id)
     .single();
-  if (planErr || !plan) return NextResponse.json({ error: "找不到企劃" }, { status: 404 });
+  if (seriesErr || !series) return NextResponse.json({ error: "找不到系列" }, { status: 404 });
 
   const { data: products, error: prodErr } = await supabase
     .from("products")
     .select("id, name, style, price, image_url, has_discount_flag, cod_allowed")
-    .eq("plan_id", params.id)
+    .eq("series_id", params.id)
     .order("sort_order", { ascending: true });
   if (prodErr) return NextResponse.json({ error: prodErr.message }, { status: 500 });
-
-  const closed = plan.deadline ? new Date(plan.deadline).getTime() < Date.now() : false;
 
   return NextResponse.json(
     {
       plan: {
-        id: plan.id,
-        name: plan.name,
-        imageUrl: plan.image_url,
-        allowCodOnRemitLink: !!plan.allow_cod_on_remit_link,
-        deadline: plan.deadline,
-        closed,
-        categoryId: plan.category_id,
-        categoryName: plan.categories?.name || null,
-        categoryParentId: plan.categories?.parent_id || null,
-        promoImages: plan.promo_images || [],
+        id: series.id,
+        name: series.name,
+        imageUrl: series.image_url,
+        categoryId: series.category_id,
+        categoryName: series.categories?.name || null,
+        categoryParentId: series.categories?.parent_id || null,
+        promoImages: series.promo_images || [],
       },
       products: (products || []).map((p) => ({
         id: p.id,

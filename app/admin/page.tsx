@@ -3,16 +3,15 @@ import { useEffect, useState, useRef } from "react";
 import { toDirectImageUrl } from "@/lib/imageUrl";
 
 type Category = { id: string; name: string; parent_id: string | null; created_at?: string; sort_order?: number };
-type PlanAdmin = {
-  id: string; name: string; deadline: string | null; imageUrl: string | null;
-  allowCodOnRemitLink?: boolean; visibleTo: string[]; categoryId: string | null; categoryName: string | null;
-  promoImages?: string[]; sortOrder?: number;
-  hideAfterDays?: number | null; fulfillmentStatus?: string | null;
+type SeriesAdmin = {
+  id: string; name: string; imageUrl: string | null;
+  visibleTo: string[]; categoryId: string | null; categoryName: string | null;
+  promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
 };
 type ProductAdmin = { id: string; planId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "" };
-const emptyPlanForm = { id: "", name: "", deadline: "", imageUrl: "", allowCodOnRemitLink: false, visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], hideAfterDays: "", fulfillmentStatus: "" };
+const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
 const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true };
 
 export default function AdminPage() {
@@ -35,7 +34,7 @@ export default function AdminPage() {
   const [savingAdminPw, setSavingAdminPw] = useState(false);
   const [savingAdminEmail, setSavingAdminEmail] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
-  const [activeSection, setActiveSection] = useState<"account" | "categories" | "plans" | "campaigns" | "products" | "orders" | "members" | "codes" | "legacy" | "announcements">("account");
+  const [activeSection, setActiveSection] = useState<"account" | "categories" | "series" | "campaigns" | "products" | "orders" | "members" | "codes" | "legacy" | "announcements">("account");
   const categoryFormRef = useRef<HTMLDivElement>(null);
   const planFormRef = useRef<HTMLDivElement>(null);
   const [categoryFilterText, setCategoryFilterText] = useState("");
@@ -47,12 +46,12 @@ export default function AdminPage() {
   const [categoryForm, setCategoryForm] = useState(emptyCategoryForm);
   const [categoryMsg, setCategoryMsg] = useState("");
 
-  // ---- 企劃 ----
-  const [plans, setPlans] = useState<PlanAdmin[]>([]);
+  // ---- 系列 ----
+  const [plans, setPlans] = useState<SeriesAdmin[]>([]);
   const [planForm, setPlanForm] = useState(emptyPlanForm);
   const [planMsg, setPlanMsg] = useState("");
 
-  // ---- 檔期（2.4~2.7節：純粹時間窗口，跟企劃/商品無關）----
+  // ---- 檔期（2.4~2.7節：純粹時間窗口，跟系列/商品無關）----
   const emptyCampaignRates = () => ({
     txn_bank_discount_gift_enabled: true, txn_bank_discount_gift_rate: "",
     txn_bank_discount_nogift_enabled: true, txn_bank_discount_nogift_rate: "",
@@ -87,6 +86,22 @@ export default function AdminPage() {
     { key: "txn_cod_nodiscount_gift", label: "取付・無滿減・有滿贈" },
     { key: "txn_cod_nodiscount_nogift", label: "取付・無滿減・無滿贈" },
   ];
+
+  /** 把資料庫存的 UTC 時間，轉成台灣時間格式的 datetime-local 字串（給表單顯示用） */
+  function toTaipeiDatetimeLocal(iso: string): string {
+    const d = new Date(iso);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value || "00";
+    return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+  }
+
+  /** 把表單填的 datetime-local 字串，當成台灣時間解讀，轉成正確的 UTC ISO 字串存進資料庫
+   *  （不管管理者的瀏覽器本身設定在哪個時區，都固定用台灣時間解讀，避免跳時區） */
+  function fromTaipeiDatetimeLocal(value: string): string {
+    return new Date(`${value}:00+08:00`).toISOString();
+  }
 
   async function loadCampaigns() {
     const r = await fetch("/api/admin/campaigns");
@@ -190,20 +205,11 @@ export default function AdminPage() {
     openGiftStyles(activeCampaignForGifts);
   }
 
-  // 到貨通知信
-  const [notifyPlan, setNotifyPlan] = useState<PlanAdmin | null>(null);
-  const [notifySubject, setNotifySubject] = useState("");
-  const [notifyBody, setNotifyBody] = useState("");
-  const [notifyShopLink, setNotifyShopLink] = useState("");
-  const [notifyRecipientInfo, setNotifyRecipientInfo] = useState<{ emailCount: number; orderUsernameCount: number } | null>(null);
-  const [notifyLoadingRecipients, setNotifyLoadingRecipients] = useState(false);
-  const [notifySending, setNotifySending] = useState(false);
-  const [notifyResult, setNotifyResult] = useState<any>(null);
   const [uploadingPlanImg, setUploadingPlanImg] = useState(false);
   const [uploadingPromoImg, setUploadingPromoImg] = useState(false);
 
   // ---- 商品 ----
-  const [activePlanForProducts, setActivePlanForProducts] = useState<PlanAdmin | null>(null);
+  const [activePlanForProducts, setActivePlanForProducts] = useState<SeriesAdmin | null>(null);
   const [products, setProducts] = useState<ProductAdmin[]>([]);
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [productRows, setProductRows] = useState<{ style: string; price: string; imageUrl: string; hasDiscountFlag: boolean; codAllowed: boolean }[]>([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
@@ -354,9 +360,9 @@ export default function AdminPage() {
     }
   }, [unlocked, currentRole]);
 
-  // 切到「企劃管理」分頁時重新抓一次最新清單（避免同一個登入階段裡，用其他功能新增的企劃不會自動出現）
+  // 切到「系列管理」分頁時重新抓一次最新清單（避免同一個登入階段裡，用其他功能新增的系列不會自動出現）
   useEffect(() => {
-    if (unlocked && activeSection === "plans") {
+    if (unlocked && activeSection === "series") {
       loadPlans();
     }
   }, [unlocked, activeSection]);
@@ -518,7 +524,7 @@ export default function AdminPage() {
   }
 
   async function deleteCategory(id: string) {
-    if (!confirm("確定要刪除這個分類嗎？（子分類會一起被刪除，底下企劃不會被刪除，只是會變成未分類）")) return;
+    if (!confirm("確定要刪除這個分類嗎？（子分類會一起被刪除，底下系列不會被刪除，只是會變成未分類）")) return;
     try {
       await callJson("/api/admin/categories", "DELETE", { id });
       loadCategories();
@@ -561,33 +567,24 @@ export default function AdminPage() {
     setDraggedCategoryId(null);
   }
 
-  // ================= 企劃 =================
+  // ================= 系列 =================
   async function loadPlans() {
-    const r = await fetch(`/api/admin/plans`);
+    const r = await fetch(`/api/admin/series`);
     if (r.status === 401) { setUnlocked(false); setLoginMsg("登入已過期，請重新登入"); return; }
     const d = await r.json();
     setPlans(d.plans || []);
   }
 
-  function getPlanStatus(p: PlanAdmin): "permanent" | "ongoing" | "closed" {
-    if (!p.deadline) return "permanent";
-    return new Date(p.deadline).getTime() < Date.now() ? "closed" : "ongoing";
-  }
-
   function handlePlanDrop(targetId: string) {
     if (!draggedPlanId || draggedPlanId === targetId) return;
     setPlans((prev) => {
-      const dragged = prev.find((p) => p.id === draggedPlanId);
-      const target = prev.find((p) => p.id === targetId);
-      if (!dragged || !target) return prev;
-      if (getPlanStatus(dragged) !== getPlanStatus(target)) return prev; // 不同狀態分組不能互換順序
       const next = [...prev];
       const fromIdx = next.findIndex((p) => p.id === draggedPlanId);
       const toIdx = next.findIndex((p) => p.id === targetId);
       const [moved] = next.splice(fromIdx, 1);
       next.splice(toIdx, 0, moved);
-      const groupIds = next.filter((p) => getPlanStatus(p) === getPlanStatus(dragged)).map((p) => p.id);
-      callJson("/api/admin/plans/reorder", "POST", { ids: groupIds }).catch((e: any) => {
+      const ids = next.map((p) => p.id);
+      callJson("/api/admin/series/reorder", "POST", { ids }).catch((e: any) => {
         setPlanMsg("排序儲存失敗：" + e.message);
       });
       return next;
@@ -595,58 +592,36 @@ export default function AdminPage() {
     setDraggedPlanId(null);
   }
 
-  /** 把資料庫存的 UTC 時間，轉成台灣時間格式的 datetime-local 字串（給表單顯示用） */
-  function toTaipeiDatetimeLocal(iso: string): string {
-    const d = new Date(iso);
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
-    }).formatToParts(d);
-    const get = (t: string) => parts.find((p) => p.type === t)?.value || "00";
-    return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
-  }
-
-  /** 把表單填的 datetime-local 字串，當成台灣時間解讀，轉成正確的 UTC ISO 字串存進資料庫
-   *  （不管管理者的瀏覽器本身設定在哪個時區，都固定用台灣時間解讀，避免跳時區） */
-  function fromTaipeiDatetimeLocal(value: string): string {
-    return new Date(`${value}:00+08:00`).toISOString();
-  }
-
-  function editPlan(p: PlanAdmin) {
+  function editPlan(p: SeriesAdmin) {
     setPlanForm({
       id: p.id,
       name: p.name,
-      deadline: p.deadline ? toTaipeiDatetimeLocal(p.deadline) : "",
       imageUrl: p.imageUrl || "",
-      allowCodOnRemitLink: !!(p as any).allowCodOnRemitLink,
       visibleTo: p.visibleTo || [],
       categoryId: p.categoryId || "",
       promoImages: p.promoImages || [],
-      hideAfterDays: p.hideAfterDays != null ? String(p.hideAfterDays) : "",
-      fulfillmentStatus: p.fulfillmentStatus || "",
+      isVisible: p.isVisible !== false,
     });
     planFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function savePlan() {
-    if (!planForm.name.trim()) return setPlanMsg("請填寫企劃名稱");
+    if (!planForm.name.trim()) return setPlanMsg("請填寫系列名稱");
     setPlanMsg("處理中…");
     const payload = {
       name: planForm.name,
-      deadline: planForm.deadline ? fromTaipeiDatetimeLocal(planForm.deadline) : null,
       imageUrl: planForm.imageUrl || null,
-      allowCodOnRemitLink: planForm.allowCodOnRemitLink,
       visibleTo: planForm.visibleTo,
       categoryId: planForm.categoryId || null,
       promoImages: planForm.promoImages,
-      hideAfterDays: planForm.hideAfterDays,
-      fulfillmentStatus: planForm.fulfillmentStatus || null,
+      isVisible: planForm.isVisible,
     };
     try {
       let d: any;
       if (planForm.id) {
-        d = await callJson("/api/admin/plans", "PUT", { id: planForm.id, ...payload });
+        d = await callJson("/api/admin/series", "PUT", { id: planForm.id, ...payload });
       } else {
-        d = await callJson("/api/admin/plans", "POST", payload);
+        d = await callJson("/api/admin/series", "POST", payload);
       }
       setPlanForm(emptyPlanForm);
       setPlanMsg(d?.syncWarning || "已儲存");
@@ -657,9 +632,9 @@ export default function AdminPage() {
   }
 
   async function deletePlan(id: string) {
-    if (!confirm("確定要刪除這個企劃嗎？底下的商品會一起被刪除，無法復原！（訂單記錄會保留，不會被刪除）")) return;
+    if (!confirm("確定要刪除這個系列嗎？底下的商品會一起被刪除，無法復原！（訂單記錄會保留，不會被刪除）")) return;
     try {
-      await callJson("/api/admin/plans", "DELETE", { id });
+      await callJson("/api/admin/series", "DELETE", { id });
       if (activePlanForProducts?.id === id) setActivePlanForProducts(null);
       loadPlans();
     } catch (e: any) {
@@ -668,52 +643,14 @@ export default function AdminPage() {
   }
 
   async function purgePlan(id: string, name: string) {
-    if (!confirm(`確定要「徹底刪除」企劃「${name}」嗎？\n\n這會連同底下所有訂單、商品明細一起永久刪除，也會把 Google Sheet 上這個企劃的訂單分頁刪掉，無法復原！\n\n（成本試算表的分頁不會被動到，財務紀錄會保留）`)) return;
+    if (!confirm(`確定要「徹底刪除」系列「${name}」嗎？\n\n這會連同底下所有訂單、商品明細一起永久刪除，也會把 Google Sheet 上這個系列的訂單分頁刪掉，無法復原！\n\n（成本試算表的分頁不會被動到，財務紀錄會保留）`)) return;
     try {
-      const d = await callJson("/api/admin/plans", "DELETE", { id, purgeOrders: true });
+      const d = await callJson("/api/admin/series", "DELETE", { id, purgeOrders: true });
       if (activePlanForProducts?.id === id) setActivePlanForProducts(null);
       setPlanMsg(d.syncWarning || `已徹底刪除，一併清除了 ${d.purgedOrderCount} 筆訂單。`);
       loadPlans();
     } catch (e: any) {
       setPlanMsg("失敗：" + e.message);
-    }
-  }
-
-  async function openNotifyPanel(p: PlanAdmin) {
-    setNotifyPlan(p);
-    setNotifySubject(`【米舖】您訂購的「${p.name}」已開立賣場！`);
-    setNotifyBody(`親愛的顧客您好：\n您在「{企劃名稱}」訂購的商品已經到貨、開放賣場囉！\n請前往賣場下單，謝謝。\n謝謝您的訂購！`);
-    setNotifyShopLink("");
-    setNotifyResult(null);
-    setNotifyRecipientInfo(null);
-    setNotifyLoadingRecipients(true);
-    try {
-      const r = await fetch(`/api/admin/plans/notify-recipients?planId=${p.id}`, { cache: "no-store" });
-      const d = await r.json();
-      if (r.ok) setNotifyRecipientInfo({ emailCount: d.emailCount, orderUsernameCount: d.orderUsernameCount });
-    } catch {}
-    setNotifyLoadingRecipients(false);
-  }
-
-  async function sendNotifyEmail() {
-    if (!notifyPlan) return;
-    if (!notifySubject.trim() || !notifyBody.trim()) { setNotifyResult({ error: "請填寫信件標題與內文" }); return; }
-    const count = notifyRecipientInfo?.emailCount ?? 0;
-    if (!confirm(`確定要寄送這封信給 ${count} 位顧客的信箱嗎？送出後無法收回。`)) return;
-    setNotifySending(true);
-    setNotifyResult(null);
-    try {
-      const d = await callJson("/api/admin/plans/notify", "POST", {
-        planId: notifyPlan.id,
-        subject: notifySubject.trim(),
-        body: notifyBody.trim(),
-        shopLink: notifyShopLink.trim(),
-      });
-      setNotifyResult(d);
-    } catch (e: any) {
-      setNotifyResult({ error: e.message });
-    } finally {
-      setNotifySending(false);
     }
   }
 
@@ -783,7 +720,7 @@ export default function AdminPage() {
     setProducts(d.products || []);
   }
 
-  async function openProductManager(p: PlanAdmin) {
+  async function openProductManager(p: SeriesAdmin) {
     setActivePlanForProducts(p);
     setProductForm(emptyProductForm);
     setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
@@ -1299,7 +1236,7 @@ export default function AdminPage() {
 
   async function runResetAllData() {
     if (resetConfirmText !== "清空所有資料" || !resetConfirmChecked) return;
-    if (!confirm("真的要清空所有資料嗎？這個動作無法復原，包含企劃、訂單、會員、分類、公告、行事曆事件、Google Sheet 分頁，以及所有管理者帳號（含你自己）都會被清掉。")) return;
+    if (!confirm("真的要清空所有資料嗎？這個動作無法復原，包含系列、訂單、會員、分類、公告、Google Sheet 分頁，以及所有管理者帳號（含你自己）都會被清掉。")) return;
     if (!confirm("再確認一次：這是最後一次提醒，按下確定之後就會立刻執行，沒有回頭路。")) return;
     setResetRunning(true);
     setResetResult(null);
@@ -1316,8 +1253,8 @@ export default function AdminPage() {
       alert(
         `已清空完成。\n\n刪除筆數：${Object.entries(d.deleted || {}).map(([k, v]) => `${k}(${v})`).join("、")}\n\n` +
         (warnCount > 0
-          ? `有 ${warnCount} 項 Google Sheet／行事曆沒有清成功，需要自己手動處理，詳情：\n${d.warnings.join("\n")}`
-          : "Google Sheet／行事曆也都清乾淨了。") +
+          ? `有 ${warnCount} 項 Google Sheet沒有清成功，需要自己手動處理，詳情：\n${d.warnings.join("\n")}`
+          : "Google Sheet也都清乾淨了。") +
         `\n\n即將登出，請用最高管理者邀請碼重新註冊 owner 帳號。`
       );
       setUnlocked(false);
@@ -1489,7 +1426,7 @@ export default function AdminPage() {
   if (!unlocked) {
     return (
       <div style={{ maxWidth: 380, margin: "80px auto", padding: 20 }}>
-        <h2>米舖 後台</h2>
+        <h2>米舖-官方周邊代購 後台</h2>
         {verifyMsg && <div style={{ background: "#EAF3DE", color: "#27500A", fontSize: 13, padding: "8px 12px", borderRadius: 8, marginBottom: 10 }}>{verifyMsg}</div>}
         <div className="id-row">
           <span className="id-label">帳號</span>
@@ -1514,7 +1451,7 @@ export default function AdminPage() {
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2>米舖 後台</h2>
+        <h2>米舖-官方周邊代購 後台</h2>
         <div style={{ fontSize: 13, color: "#6B6858", display: "flex", alignItems: "center", gap: 10 }}>
           <span>已登入：{currentUsername}（{currentRole === "owner" ? "最高權限" : "一般管理者"}）</span>
           <button className="btn secondary small" onClick={doLogout}>登出</button>
@@ -1527,7 +1464,7 @@ export default function AdminPage() {
           <p className="category-tree-title">後台功能</p>
           <div className={`account-nav-item ${activeSection === "account" ? "active" : ""}`} onClick={() => setActiveSection("account")}>帳號設定</div>
           <div className={`account-nav-item ${activeSection === "categories" ? "active" : ""}`} onClick={() => setActiveSection("categories")}>分類管理</div>
-          <div className={`account-nav-item ${activeSection === "plans" ? "active" : ""}`} onClick={() => setActiveSection("plans")}>企劃管理</div>
+          <div className={`account-nav-item ${activeSection === "series" ? "active" : ""}`} onClick={() => setActiveSection("series")}>系列管理</div>
           <div className={`account-nav-item ${activeSection === "campaigns" ? "active" : ""}`} onClick={() => setActiveSection("campaigns")}>檔期管理</div>
           {currentRole === "owner" && (
             <>
@@ -1595,7 +1532,7 @@ export default function AdminPage() {
         <div className="auth-card">
           <h3>Google Sheet 同步</h3>
           <p style={{ fontSize: 12, color: "#8A8779", margin: 0 }}>
-            訂單會在下單當下自動加一列進去；會員/企劃/商品資料有變動時也會自動同步整份；
+            訂單會在下單當下自動加一列進去；會員/系列/商品資料有變動時也會自動同步整份；
             訂單同時也會自動同步到獨立的「成本」試算表（成本欄留空給你手動填，利潤欄用公式自動算，不會洗掉你填過的成本）。
             這個按鈕是手動觸發一次完整同步，適合剛設定好、或想確保資料一致的時候用。
           </p>
@@ -1610,8 +1547,8 @@ export default function AdminPage() {
         <div className="auth-card" style={{ border: "1px solid #F1B4B4", background: "#FFF7F7" }}>
           <h3 style={{ color: "#B3261E" }}>危險區域：清空所有資料</h3>
           <p style={{ fontSize: 12, color: "#8A7373", margin: 0 }}>
-            會把企劃、商品、訂單、會員、分類、公告、舊會員身份名冊、管理者帳號（含你自己）全部刪除，
-            並且盡量一併清除對應的 Google 行事曆事件跟 Google Sheet 分頁（無法保證 100% 清乾淨，個別失敗會列在下面）。
+            會把系列、商品、訂單、會員、分類、公告、舊會員身份名冊、管理者帳號（含你自己）全部刪除，
+            並且盡量一併清除對應的 Google Sheet 分頁（無法保證 100% 清乾淨，個別失敗會列在下面）。
             <strong>這個動作無法復原</strong>，清空後要用最高管理者邀請碼重新註冊 owner 帳號。
           </p>
           <div className="id-row" style={{ marginTop: 10 }}>
@@ -1641,7 +1578,7 @@ export default function AdminPage() {
                   </div>
                   {resetResult.warnings?.length > 0 && (
                     <>
-                      <div style={{ fontWeight: 600, color: "#B08E5A" }}>以下項目沒有清成功，需要自己去 Google Sheet／行事曆手動處理：</div>
+                      <div style={{ fontWeight: 600, color: "#B08E5A" }}>以下項目沒有清成功，需要自己去 Google Sheet手動處理：</div>
                       {resetResult.warnings.map((w: string, i: number) => <div key={i} style={{ color: "#B08E5A" }}>・{w}</div>)}
                     </>
                   )}
@@ -1733,14 +1670,14 @@ export default function AdminPage() {
       </div>
           )}
 
-          {activeSection === "plans" && (
+          {activeSection === "series" && (
             <>
       <div className="auth-card" ref={planFormRef}>
-        <h3>企劃管理</h3>
+        <h3>系列管理</h3>
 
         <div className="id-row">
           <span className="id-label">名稱</span>
-          <input type="text" value={planForm.name} onChange={(e) => setPlanForm((f) => ({ ...f, name: e.target.value }))} placeholder="企劃名稱" />
+          <input type="text" value={planForm.name} onChange={(e) => setPlanForm((f) => ({ ...f, name: e.target.value }))} placeholder="系列名稱" />
         </div>
         <div className="id-row">
           <span className="id-label">分類</span>
@@ -1757,38 +1694,18 @@ export default function AdminPage() {
           </select>
         </div>
         <div className="id-row">
-          <span className="id-label">截止時間</span>
-          <input type="datetime-local" value={planForm.deadline} onChange={(e) => setPlanForm((f) => ({ ...f, deadline: e.target.value }))} style={{ flex: 1, padding: 8 }} />
-          <span style={{ fontSize: 12, color: "#8A8779" }}>留空＝常駐（沒有截止日）</span>
-        </div>
-        <div className="id-row">
-          <span className="id-label">截止後隱藏</span>
-          <input type="number" min={0} value={planForm.hideAfterDays} onChange={(e) => setPlanForm((f) => ({ ...f, hideAfterDays: e.target.value }))} placeholder="留空＝永遠不自動隱藏" />
-          <span style={{ fontSize: 12, color: "#8A8779" }}>天後從瀏覽清單隱藏</span>
-        </div>
-        <div className="id-row">
-          <span className="id-label">企劃狀態</span>
-          <select value={planForm.fulfillmentStatus} onChange={(e) => setPlanForm((f) => ({ ...f, fulfillmentStatus: e.target.value }))} style={{ flex: 1, padding: 8 }}>
-            <option value="">（尚未開始）</option>
-            <option value="purchased">企劃商品已購買</option>
-            <option value="shipping">運輸中</option>
-            <option value="arrived">已到貨</option>
-            <option value="distributing">已開賣場</option>
-          </select>
-        </div>
-        <div className="id-row">
-          <span className="id-label">限定連結取付</span>
+          <span className="id-label">顯示狀態</span>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#33415C" }}>
             <input
               type="checkbox"
-              checked={planForm.allowCodOnRemitLink}
-              onChange={(e) => setPlanForm((f) => ({ ...f, allowCodOnRemitLink: e.target.checked }))}
+              checked={planForm.isVisible}
+              onChange={(e) => setPlanForm((f) => ({ ...f, isVisible: e.target.checked }))}
             />
-            透過 ?pay=remit 連結進來的訪客，這個企劃仍然開放取付
+            要顯示給顧客看（取消勾選＝隱藏，不受任何時間影響，店家自己決定）
           </label>
         </div>
         <div className="id-row">
-          <span className="id-label">企劃圖片</span>
+          <span className="id-label">系列圖片</span>
           <input type="file" accept="image/*" onChange={handlePlanImageUpload} />
         </div>
         <div className="id-row">
@@ -1828,7 +1745,7 @@ export default function AdminPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn" onClick={savePlan}>{planForm.id ? "儲存修改" : "新增企劃"}</button>
+          <button className="btn" onClick={savePlan}>{planForm.id ? "儲存修改" : "新增系列"}</button>
           {planForm.id && <button className="btn secondary" onClick={() => setPlanForm(emptyPlanForm)}>取消編輯</button>}
         </div>
         <div style={{ fontSize: 13, marginTop: 6 }}>{planMsg}</div>
@@ -1837,48 +1754,41 @@ export default function AdminPage() {
           type="text"
           value={planFilterText}
           onChange={(e) => setPlanFilterText(e.target.value)}
-          placeholder="搜尋企劃名稱…"
+          placeholder="搜尋系列名稱…"
           style={{ width: "100%", padding: 8, marginTop: 16, border: "1px solid #EDE9DC", borderRadius: 8 }}
         />
 
-        {(["ongoing", "permanent", "closed"] as const).map((status) => {
-          const group = plans.filter((p) => getPlanStatus(p) === status && (!planFilterText.trim() || p.name.toLowerCase().includes(planFilterText.toLowerCase())));
-          const label = status === "ongoing" ? "進行中" : status === "permanent" ? "常駐" : "已截止";
-          return (
-            <div key={status} style={{ marginTop: 16, borderTop: "1px solid #EDE9DC", paddingTop: 12 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: "#33415C", margin: "0 0 8px" }}>{label}（{group.length}）</p>
-              <div style={{ maxHeight: 260, overflowY: "auto", paddingRight: 4 }}>
-                {group.map((p) => (
-                  <div
-                    key={p.id}
-                    draggable
-                    onDragStart={() => setDraggedPlanId(p.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => handlePlanDrop(p.id)}
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", rowGap: 8, padding: "10px 0", borderBottom: "1px dashed #EDE9DC", cursor: "grab", opacity: draggedPlanId === p.id ? 0.4 : 1 }}
-                  >
-                    <div>
-                      <div style={{ fontSize: 14 }}><span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>{p.name}</div>
-                      <div style={{ fontSize: 12, color: "#8A8779" }}>{p.categoryName || "未分類"}{p.deadline ? `　截止 ${new Date(p.deadline).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}` : ""}</div>
-                    </div>
-                    <span style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      <button className="btn small secondary" onClick={() => openProductManager(p)}>管理商品</button>
-                      <button className="btn small secondary" onClick={() => editPlan(p)}>編輯</button>
-                      {currentRole === "owner" && (
-                        <button className="btn small secondary" onClick={() => openNotifyPanel(p)}>發送到貨通知信</button>
-                      )}
-                      <button className="btn small danger" onClick={() => deletePlan(p.id)}>刪除</button>
-                      {currentRole === "owner" && (
-                        <button className="btn small danger" onClick={() => purgePlan(p.id, p.name)} title="連訂單一起永久刪除，成本試算表資料會保留">徹底刪除（含訂單）</button>
-                      )}
-                    </span>
+        <div style={{ marginTop: 16, borderTop: "1px solid #EDE9DC", paddingTop: 12 }}>
+          <div style={{ maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
+            {plans.filter((p) => !planFilterText.trim() || p.name.toLowerCase().includes(planFilterText.toLowerCase())).map((p) => (
+              <div
+                key={p.id}
+                draggable
+                onDragStart={() => setDraggedPlanId(p.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handlePlanDrop(p.id)}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", rowGap: 8, padding: "10px 0", borderBottom: "1px dashed #EDE9DC", cursor: "grab", opacity: draggedPlanId === p.id ? 0.4 : 1 }}
+              >
+                <div>
+                  <div style={{ fontSize: 14 }}>
+                    <span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>{p.name}
+                    {p.isVisible === false && <span style={{ fontSize: 11, color: "#B3261E", marginLeft: 8 }}>已隱藏</span>}
                   </div>
-                ))}
-                {group.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>沒有企劃</div>}
+                  <div style={{ fontSize: 12, color: "#8A8779" }}>{p.categoryName || "未分類"}</div>
+                </div>
+                <span style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button className="btn small secondary" onClick={() => openProductManager(p)}>管理商品</button>
+                  <button className="btn small secondary" onClick={() => editPlan(p)}>編輯</button>
+                  <button className="btn small danger" onClick={() => deletePlan(p.id)}>刪除</button>
+                  {currentRole === "owner" && (
+                    <button className="btn small danger" onClick={() => purgePlan(p.id, p.name)} title="連訂單一起永久刪除，成本試算表資料會保留">徹底刪除（含訂單）</button>
+                  )}
+                </span>
               </div>
-            </div>
-          );
-        })}
+            ))}
+            {plans.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>沒有系列</div>}
+          </div>
+        </div>
       </div>
             </>
           )}
@@ -1887,7 +1797,7 @@ export default function AdminPage() {
             <div className="auth-card">
               <h3>檔期管理</h3>
               <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
-                檔期純粹是時間窗口，開放時間內可下單，時間外僅能瀏覽，跟商品／企劃完全無關
+                檔期純粹是時間窗口，開放時間內可下單，時間外僅能瀏覽，跟商品／系列完全無關
               </p>
 
               <div className="id-row"><span className="id-label">名稱</span><input type="text" value={campaignForm.name} onChange={(e) => setCampaignForm((f) => ({ ...f, name: e.target.value }))} placeholder="例如：XX訂購" /></div>
@@ -2006,7 +1916,7 @@ export default function AdminPage() {
                 ))}
               </div>
             ))}
-            {products.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>這個企劃還沒有商品</div>}
+            {products.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>這個系列還沒有商品</div>}
           </div>
 
           <div className="id-row">
@@ -2148,7 +2058,7 @@ export default function AdminPage() {
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn" onClick={saveProduct}>{productForm.id ? "儲存修改" : "新增商品"}</button>
             {productForm.id && <button className="btn secondary" onClick={() => { setProductForm(emptyProductForm); setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]); }}>取消編輯</button>}
-            <button className="btn secondary" onClick={() => { setActivePlanForProducts(null); setActiveSection("plans"); }}>關閉商品管理</button>
+            <button className="btn secondary" onClick={() => { setActivePlanForProducts(null); setActiveSection("series"); }}>關閉商品管理</button>
           </div>
           <div style={{ fontSize: 13, marginTop: 6 }}>{productMsg}</div>
         </div>
@@ -2248,13 +2158,13 @@ export default function AdminPage() {
                         <button className="btn small secondary" onClick={() => setEditingOrderItems(true)} style={{ marginTop: 8 }}>編輯商品／款式</button>
                       )}
                       {currentRole === "owner" && !orderLookupResult.planId && (
-                        <div style={{ fontSize: 12, color: "#8A8779", marginTop: 8 }}>這張訂單沒有對應的企劃了，沒辦法編輯商品內容（企劃可能已被刪除）。</div>
+                        <div style={{ fontSize: 12, color: "#8A8779", marginTop: 8 }}>這張訂單沒有對應的系列了，沒辦法編輯商品內容（系列可能已被刪除）。</div>
                       )}
                     </>
                   ) : (
                     <div style={{ marginTop: 4 }}>
                       <p style={{ fontSize: 12, color: "#8A8779", margin: "0 0 8px" }}>
-                        每一列選一個商品／款式跟數量，價格會用企劃目前的商品目錄重新計算（不是沿用舊價格）。
+                        每一列選一個商品／款式跟數量，價格會用系列目前的商品目錄重新計算（不是沿用舊價格）。
                       </p>
                       {editItemRows.map((row, i) => {
                         const uniqueNames = Array.from(new Set(orderPlanProducts.map((p) => p.name)));
@@ -2270,7 +2180,7 @@ export default function AdminPage() {
                               }}
                               style={{ flex: 2, minWidth: 0 }}
                             >
-                              {uniqueNames.length === 0 && <option value={row.name}>{row.name}（企劃商品目錄找不到，請改選）</option>}
+                              {uniqueNames.length === 0 && <option value={row.name}>{row.name}（系列商品目錄找不到，請改選）</option>}
                               {uniqueNames.map((n) => <option key={n} value={n}>{n}</option>)}
                             </select>
                             <select
@@ -2626,7 +2536,7 @@ export default function AdminPage() {
           <>
           <p style={{ fontSize: 12, color: "#8A8779", margin: 0 }}>
             只掃描「舊資料匯入」建立的訂單（前台客人正常下單不會列入，因為本來就可能真的買兩次一樣的東西）。
-            同一個人、同企劃底下，商品內容跟交易方式一模一樣，很可能是舊資料被重複匯入造成的。
+            同一個人、同系列底下，商品內容跟交易方式一模一樣，很可能是舊資料被重複匯入造成的。
             這裡列出來讓你確認，預設會勾選「保留最早那筆、其餘刪除」，可以自己調整勾選後再刪除。
           </p>
           <button className="btn small" onClick={loadDuplicateGroups} disabled={duplicateScanning} style={{ marginTop: 8 }}>
@@ -2722,53 +2632,6 @@ export default function AdminPage() {
         </main>
       </div>
 
-      {notifyPlan && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }} onClick={() => setNotifyPlan(null)}>
-          <div className="auth-card" style={{ maxWidth: 480, width: "100%", maxHeight: "90vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <h3>發送到貨通知信：{notifyPlan.name}</h3>
-            <p style={{ fontSize: 12, color: "#8A8779", margin: 0 }}>
-              會寄給這個企劃底下所有訂單的顧客（不管取付/匯款，取消審核中的也算，只要訂單還存在資料庫裡）。
-              內文可以用 <code>{"{企劃名稱}"}</code> 這個佔位符，會自動換成企劃名稱；如果有填「賣場連結」，內文裡所有「賣場」兩字都會自動變成可以點擊的連結。
-            </p>
-            <div style={{ fontSize: 13, margin: "8px 0", color: "#33415C" }}>
-              {notifyLoadingRecipients
-                ? "正在計算收件人數量…"
-                : notifyRecipientInfo
-                ? `這次會寄給 ${notifyRecipientInfo.emailCount} 個信箱（共 ${notifyRecipientInfo.orderUsernameCount} 個下單帳號）`
-                : ""}
-            </div>
-            <div className="id-row">
-              <span className="id-label">標題</span>
-              <input type="text" value={notifySubject} onChange={(e) => setNotifySubject(e.target.value)} style={{ flex: 1 }} />
-            </div>
-            <div className="id-row">
-              <span className="id-label">賣場連結</span>
-              <input type="text" value={notifyShopLink} onChange={(e) => setNotifyShopLink(e.target.value)} placeholder="貼上賣場網址，內文裡的「賣場」兩字會自動變成這個連結" style={{ flex: 1 }} />
-            </div>
-            <textarea
-              value={notifyBody}
-              onChange={(e) => setNotifyBody(e.target.value)}
-              rows={8}
-              style={{ width: "100%", marginTop: 8, padding: 8, border: "1px solid #EDE9DC", borderRadius: 8, fontFamily: "inherit", fontSize: 14, resize: "vertical" }}
-            />
-            <div style={{ fontSize: 13, margin: "8px 0" }}>
-              {notifyResult?.error && <span style={{ color: "#B3261E" }}>失敗：{notifyResult.error}</span>}
-              {notifyResult && !notifyResult.error && (
-                <span>
-                  已寄出 {notifyResult.sent} 封
-                  {notifyResult.failed?.length > 0 && `，${notifyResult.failed.length} 封失敗：${notifyResult.failed.join("；")}`}
-                </span>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" onClick={sendNotifyEmail} disabled={notifySending || notifyLoadingRecipients}>
-                {notifySending ? "寄送中…" : "確認發送"}
-              </button>
-              <button className="btn secondary" onClick={() => setNotifyPlan(null)}>關閉</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

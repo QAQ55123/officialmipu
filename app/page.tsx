@@ -5,7 +5,7 @@ import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 
 type Category = { id: string; name: string; parentId: string | null };
 type Plan = {
-  id: string; name: string; imageUrl?: string; allowCodOnRemitLink?: boolean; deadline?: string; closed: boolean;
+  id: string; name: string; imageUrl?: string;
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
@@ -14,7 +14,6 @@ type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
   planName: string;
-  planDeadline: string | null;
   productName: string;
   style: string;
   qty: number;
@@ -23,7 +22,7 @@ type GlobalCartEntry = {
 };
 
 const FULFILLMENT_STATUS_MAP: Record<string, { label: string; color: string }> = {
-  purchased: { label: "企劃商品已購買", color: "#4bd6af" },
+  purchased: { label: "商品已購買", color: "#4bd6af" },
   shipping: { label: "運輸中", color: "#f5cf78" },
   arrived: { label: "已到貨", color: "#fa4166" },
   distributing: { label: "已開賣場", color: "#16a34a" },
@@ -41,7 +40,7 @@ export default function Home() {
   const [toast, setToast] = useState("");
   // 2.5節：檔期是否開放中，只影響「能不能結帳」，不影響瀏覽／加入購物車
   const [campaignOpen, setCampaignOpen] = useState(true); // 先預設true，抓到真實狀態前不擋顧客
-  // 2.4節：檔期層級的取付總上限（不是每個企劃各自的上限）
+  // 2.4節：檔期層級的取付總上限（不是每個系列各自的上限）
   const [campaignCodAvailable, setCampaignCodAvailable] = useState(true);
   const [campaignCodCap, setCampaignCodCap] = useState<number | null>(null);
   const [campaignCodUsed, setCampaignCodUsed] = useState(0);
@@ -163,7 +162,7 @@ export default function Home() {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [activePlan, setActivePlan] = useState<Plan | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
-  const [cart, setCart] = useState<Record<string, number>>({}); // key: name||style（目前正在瀏覽的企劃、還沒加入購物車前的暫存）
+  const [cart, setCart] = useState<Record<string, number>>({}); // key: name||style（目前正在瀏覽的系列、還沒加入購物車前的暫存）
 
   const [globalCart, setGlobalCart] = useState<GlobalCartEntry[]>(() => {
     if (typeof window === "undefined") return [];
@@ -180,12 +179,12 @@ export default function Home() {
     } catch {}
   }, [globalCart]);
 
-  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; deadline: string | null; closed: boolean; allowCodOnRemitLink: boolean; found: boolean; products: { id: string; name: string; style: string; hasDiscountFlag: boolean; codAllowed: boolean }[] }>>({});
+  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; hasDiscountFlag: boolean; codAllowed: boolean }[] }>>({});
   const [cartPaymentByPlan, setCartPaymentByPlan] = useState<Record<string, string>>({});
   const [checkoutingPlanId, setCheckoutingPlanId] = useState<string | null>(null);
   const [selectedCartKeys, setSelectedCartKeys] = useState<Set<string>>(new Set());
   const [checkoutPaymentByPlan, setCheckoutPaymentByPlan] = useState<Record<string, string>>({});
-  // 2.7節：每個企劃分組各自決定要不要滿贈、選了哪些款式（範圍是這個企劃分組送出的這張訂單）
+  // 2.7節：每個系列分組各自決定要不要滿贈、選了哪些款式（範圍是這個系列分組送出的這張訂單）
   const [wantsGiftByPlan, setWantsGiftByPlan] = useState<Record<string, boolean>>({});
   const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; max: number }[] }>>({});
   const [giftPicksByPlan, setGiftPicksByPlan] = useState<Record<string, Record<string, number>>>({});
@@ -196,7 +195,6 @@ export default function Home() {
   const [historySearch, setHistorySearch] = useState("");
   const [historyStatusFilter, setHistoryStatusFilter] = useState<string>("all"); // all | purchased | shipping | arrived | distributing
   const [historyCancelFilter, setHistoryCancelFilter] = useState<string>("all"); // all | normal | pending
-  const [remitOnlyMode, setRemitOnlyMode] = useState(false); // true＝目前網址路徑是 /remit，固定只能匯款；個別企劃如果有勾選「限定連結取付」，取付選項仍會保留
   const [announcements, setAnnouncements] = useState<{ id: string; content: string; createdAt: string }[]>([]);
   const [announcementPanelOpen, setAnnouncementPanelOpen] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -211,11 +209,6 @@ export default function Home() {
     fetch("/api/site-settings", { cache: "no-store" }).then((r) => r.json()).then((d) => setCheckoutNotice(d.checkoutNotice || "")).catch(() => {});
 
     const params = new URLSearchParams(window.location.search);
-
-    // 用網址路徑判斷是不是「限定匯款」模式：/remit 這個路徑進來的訪客固定只能匯款，
-    // 個別企劃如果有勾選「限定連結取付」，取付選項仍會保留；純粹依當下網址判斷，不會被瀏覽器記住、
-    // 也沒辦法被使用者自己解除，因為狀態只跟「現在在哪個路徑」有關
-    setRemitOnlyMode(window.location.pathname === "/remit" || window.location.pathname.startsWith("/remit/"));
 
     const verify = params.get("verify");
     if (verify === "success") setVerifyBannerMsg("信箱驗證成功！");
@@ -280,7 +273,7 @@ export default function Home() {
     const params = new URLSearchParams();
     if (categoryId) params.set("categoryId", categoryId);
     if (q) params.set("q", q);
-    const r = await fetch(`/api/plans?${params.toString()}`, { cache: "no-store" });
+    const r = await fetch(`/api/series?${params.toString()}`, { cache: "no-store" });
     const d = await r.json();
     setPlans(d.plans || []);
     setPlansLoading(false);
@@ -322,14 +315,14 @@ export default function Home() {
     return chain;
   }
 
-  // 逛企劃、看商品完全不需要登入；只有「送出訂單」「查歷史訂單」才會要求先選身分
+  // 逛系列、看商品完全不需要登入；只有「送出訂單」「查歷史訂單」才會要求先選身分
   async function openPlan(p: Plan) {
     syncUrl({ view: "plan", id: p.id });
     setView("order");
     setActivePlan(null);
     setProducts([]);
     setProductsLoading(true);
-    const r = await fetch(`/api/plans/${p.id}`, { cache: "no-store" });
+    const r = await fetch(`/api/series/${p.id}`, { cache: "no-store" });
     const d = await r.json();
     setActivePlan(d.plan);
     setProducts(d.products || []);
@@ -415,7 +408,7 @@ export default function Home() {
     }
   }
 
-  // 登入成功後，回到原本想做的事（送出訂單 / 查歷史），沒有的話就回企劃列表
+  // 登入成功後，回到原本想做的事（送出訂單 / 查歷史），沒有的話就回系列列表
   function continueAfterRegister() {
     setRegisterDone(false);
     if (identity) afterAuthSuccess(identity);
@@ -618,11 +611,11 @@ export default function Home() {
     if (!id) return;
     const r = await fetch(`/api/favorites?username=${encodeURIComponent(id.username)}`, { cache: "no-store" });
     const d = await r.json();
-    setFavoritedPlanIds(new Set<string>(d.planIds || []));
+    setFavoritedPlanIds(new Set<string>(d.seriesIds || []));
     setFavoritePlans(
       (d.favorites || []).map((f: any) => ({
-        id: f.id, name: f.name, imageUrl: f.imageUrl, deadline: f.deadline,
-        closed: f.closed, categoryId: null, categoryName: f.categoryName, categoryParentId: null,
+        id: f.id, name: f.name, imageUrl: f.imageUrl,
+        categoryId: null, categoryName: f.categoryName, categoryParentId: null,
       }))
     );
   }
@@ -645,7 +638,7 @@ export default function Home() {
       const r = await fetch("/api/favorites", {
         method: isFav ? "DELETE" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: identity.username, planId }),
+        body: JSON.stringify({ username: identity.username, seriesId: planId }),
       });
       if (!r.ok) throw new Error();
       loadFavorites();
@@ -732,7 +725,6 @@ export default function Home() {
           next.push({
             planId: activePlan.id,
             planName: activePlan.name,
-            planDeadline: activePlan.deadline || null,
             productName: it.name,
             style: it.style,
             qty: it.qty,
@@ -754,7 +746,7 @@ export default function Home() {
       planIds.map(async (id) => {
         try {
           const qs = uname ? `?username=${encodeURIComponent(uname)}` : "";
-          const r = await fetch(`/api/plans/${id}${qs}`, { cache: "no-store" });
+          const r = await fetch(`/api/series/${id}${qs}`, { cache: "no-store" });
           if (!r.ok) return [id, null, null] as const;
           const d = await r.json();
           return [id, d.plan, d.products] as const;
@@ -768,11 +760,11 @@ export default function Home() {
       for (const [id, plan, products] of results) {
         if (plan) {
           next[id] = {
-            name: plan.name, deadline: plan.deadline, closed: plan.closed, allowCodOnRemitLink: !!plan.allowCodOnRemitLink, found: true,
+            name: plan.name, found: true,
             products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false })),
           };
         } else {
-          next[id] = { name: "", deadline: null, closed: true, allowCodOnRemitLink: false, found: false, products: [] };
+          next[id] = { name: "", found: false, products: [] };
         }
       }
       return next;
@@ -807,7 +799,7 @@ export default function Home() {
 
   function isGroupActive(planId: string) {
     const live = cartPlanStatus[planId];
-    return live ? live.found && !live.closed : true; // 還沒問過的話先當作可選，畫面上也不會顯示成失效
+    return live ? live.found : true; // 還沒問過的話先當作可選，畫面上也不會顯示成失效
   }
 
   function toggleCartItemSelect(key: string) {
@@ -855,7 +847,7 @@ export default function Home() {
 
   function goToCheckout() {
     const selectedActive = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isGroupActive(e.planId));
-    if (selectedActive.length === 0) return showToast("請先勾選要結帳的商品（已失效的企劃無法結帳）");
+    if (selectedActive.length === 0) return showToast("請先勾選要結帳的商品（已失效的系列無法結帳）");
     syncUrl({ view: "checkout" });
     setView("checkout");
     const grouped = selectedActive.reduce<Record<string, GlobalCartEntry[]>>((acc, e) => {
@@ -890,7 +882,7 @@ export default function Home() {
     const errors: string[] = [];
     for (const planId of planIds) {
       const groupItems = selectedEntries.filter((e) => e.planId === planId);
-      const planAllowsCod = !remitOnlyMode || !!cartPlanStatus[planId]?.allowCodOnRemitLink;
+      const planAllowsCod = true;
       const payment = planAllowsCod ? (checkoutPaymentByPlan[planId] || "匯款") : "匯款";
       const wantsGift = wantsGiftByPlan[planId] ?? true;
       const picks = giftPicksByPlan[planId] || {};
@@ -1121,7 +1113,7 @@ export default function Home() {
   }
 
   // ---- 麵包屑 ----
-  // 在企劃詳細頁時，路徑要用「這個企劃實際歸屬的分類」，而不是使用者是從哪個篩選點進來的
+  // 在系列詳細頁時，路徑要用「這個系列實際歸屬的分類」，而不是使用者是從哪個篩選點進來的
   const chain =
     view === "order" && activePlan ? getCategoryChain(activePlan.categoryId ?? null) : getCategoryChain(selectedCategoryId);
   const breadcrumbParts: { label: string; onClick?: () => void }[] = [
@@ -1268,7 +1260,7 @@ export default function Home() {
                 >
                   <Menu size={20} />
                 </button>
-                <span className="mibu-logo" onClick={goHome} style={{ cursor: "pointer" }}>米舖</span>
+                <span className="mibu-logo" onClick={goHome} style={{ cursor: "pointer" }}>米舖-官方周邊代購</span>
               </div>
               <div className="mibu-right-group">
                 <div className="mibu-search-desktop">
@@ -1277,7 +1269,7 @@ export default function Home() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
-                    placeholder="搜尋企劃、商品"
+                    placeholder="搜尋系列、商品"
                   />
                 </div>
                 <button className="mibu-icon-btn mibu-search-icon-mobile" aria-label="搜尋" onClick={() => setSearchOpen(true)}>
@@ -1370,7 +1362,7 @@ export default function Home() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
-                placeholder="搜尋企劃、商品"
+                placeholder="搜尋系列、商品"
               />
               <button className="mibu-icon-btn" aria-label="關閉搜尋" onClick={() => setSearchOpen(false)}>
                 <X size={18} />
@@ -1403,7 +1395,7 @@ export default function Home() {
                 <a className="auth-back-link" onClick={() => { setPendingAction(null); setView("plans"); }}>← 返回</a>
                 {verifyBannerMsg && <div className="rules-box">{verifyBannerMsg}</div>}
                 {authTab !== "legacy" && pendingAction === "order" && <div className="rules-box">送出訂單前，請先登入</div>}
-                {authTab !== "legacy" && pendingAction === "favorites" && <div className="rules-box">收藏企劃前，請先登入</div>}
+                {authTab !== "legacy" && pendingAction === "favorites" && <div className="rules-box">收藏系列前，請先登入</div>}
 
                 <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
                   <button className={`src-btn ${authTab === "login" ? "active" : ""}`} onClick={() => { setAuthTab("login"); setAuthMsg(""); }}>登入</button>
@@ -1602,26 +1594,17 @@ export default function Home() {
                 ) : (
                   <div className="plan-grid">
                     {plans.map((p) => (
-                      <div key={p.id} className={`plan-card-v2 ${p.closed ? "closed" : ""}`} onClick={() => openPlan(p)}>
+                      <div key={p.id} className="plan-card-v2" onClick={() => openPlan(p)}>
                         <div className="plan-card-v2-img">
                           {p.imageUrl && <img src={p.imageUrl} alt={p.name} />}
                           {p.categoryName && <span className="plan-card-v2-tag">{p.categoryName}</span>}
-                          <span className={`plan-card-v2-status ${p.closed ? "closed-tag" : "open"}`}>
-                            {p.closed ? "已截止" : "開放中"}
-                          </span>
                         </div>
                         <div className="plan-card-v2-body">
                           <p className="plan-card-v2-name">{p.name}</p>
-                          {p.deadline && (
-                            <p className="plan-card-v2-meta">
-                              {p.closed ? "已於 " : "截止 "}
-                              {new Date(p.deadline).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
-                            </p>
-                          )}
                         </div>
                       </div>
                     ))}
-                    {plans.length === 0 && <div className="spinner">沒有符合條件的企劃</div>}
+                    {plans.length === 0 && <div className="spinner">沒有符合條件的系列</div>}
                   </div>
                 )}
               </div>
@@ -1633,8 +1616,6 @@ export default function Home() {
 
             {view === "order" && !productsLoading && activePlan && (
               <div>
-                {activePlan.closed && <div className="banner warn">此企劃已截止，無法新增訂單</div>}
-
                 {activePlan.promoImages && activePlan.promoImages.length > 0 && (
                   <div className="promo-gallery">
                     {activePlan.promoImages.map((url, i) => (
@@ -1666,12 +1647,6 @@ export default function Home() {
                     <div className="product-card-v3">
                       <div className="product-title-block">
                         <h2 className="product-plan-title">{activePlan.name}</h2>
-                        {activePlan.deadline && (
-                          <div className="product-plan-deadline">
-                            {activePlan.closed ? "已於 " : "截止 "}
-                            {new Date(activePlan.deadline).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
-                          </div>
-                        )}
                       </div>
 
                       <div className="product-gallery-v3">
@@ -1737,23 +1712,22 @@ export default function Home() {
 
                         <div className="product-info-v3-label">數量</div>
                         <div className="stepper stepper-lg">
-                          <button className="step-btn" disabled={qty <= 0 || activePlan.closed} onClick={() => changeQty(current.name, current.style, -1)}>－</button>
+                          <button className="step-btn" disabled={qty <= 0} onClick={() => changeQty(current.name, current.style, -1)}>－</button>
                           <input
                             className="qty"
                             type="number"
                             min={0}
                             value={qty}
-                            disabled={activePlan.closed}
                             onChange={(e) => setQtyExact(current.name, current.style, e.target.value)}
                           />
-                          <button className="step-btn" disabled={activePlan.closed} onClick={() => changeQty(current.name, current.style, 1)}>＋</button>
+                          <button className="step-btn" onClick={() => changeQty(current.name, current.style, 1)}>＋</button>
                         </div>
 
                         <div className="product-checkout-row">
                           <span className="product-checkout-total">合計 NT$ {fmt(cartTotal)}</span>
                           <button
                             className="btn"
-                            disabled={activePlan.closed || cartCount === 0}
+                            disabled={cartCount === 0}
                             onClick={addToCart}
                           >
                             加入購物車
@@ -1776,7 +1750,7 @@ export default function Home() {
                       <Search size={16} className="hist-search-icon" />
                       <input
                         type="text"
-                        placeholder="搜尋訂單編號／企劃名稱／商品"
+                        placeholder="搜尋訂單編號／系列名稱／商品"
                         value={historySearch}
                         onChange={(e) => setHistorySearch(e.target.value)}
                         className="hist-search-input"
@@ -1792,7 +1766,7 @@ export default function Home() {
                       value={historyStatusFilter}
                       onChange={(e) => setHistoryStatusFilter(e.target.value)}
                     >
-                      <option value="all">全部企劃狀態</option>
+                      <option value="all">全部檔期狀態</option>
                       {Object.entries(FULFILLMENT_STATUS_MAP).map(([key, v]) => (
                         <option key={key} value={key}>{v.label}</option>
                       ))}
@@ -1838,7 +1812,7 @@ export default function Home() {
                               e.stopPropagation();
                               openPlan({ id: o.planId } as Plan);
                             }}
-                            title={o.planId ? "點擊查看這個企劃" : "這個企劃無法查看（已刪除或資料不完整）"}
+                            title={o.planId ? "點擊查看這個系列" : "這個系列無法查看（已刪除或資料不完整）"}
                           >
                             {o.planName}
                           </span>
@@ -1870,8 +1844,6 @@ export default function Home() {
                           <div className="hist-actions">
                             {o.cancelRequested ? (
                               <span className="hist-cancel-badge">取消審核中，請等待管理者確認</span>
-                            ) : o.planClosed ? (
-                              <span style={{ fontSize: 12, color: "var(--muted)" }}>企劃已截止，無法申請取消</span>
                             ) : (
                               <button className="btn danger small" onClick={() => requestCancelOrder(o.orderNo)}>申請取消訂單</button>
                             )}
@@ -1888,26 +1860,17 @@ export default function Home() {
               <div>
                 <h2 className="section-title">我的收藏</h2>
                 {favoritesLoading && <div className="spinner">載入中…</div>}
-                {!favoritesLoading && favoritePlans.length === 0 && <div className="spinner">還沒有收藏任何企劃</div>}
+                {!favoritesLoading && favoritePlans.length === 0 && <div className="spinner">還沒有收藏任何系列</div>}
                 {!favoritesLoading && favoritePlans.length > 0 && (
                   <div className="plan-grid">
                     {favoritePlans.map((p) => (
-                      <div key={p.id} className={`plan-card-v2 ${p.closed ? "closed" : ""}`} onClick={() => openPlan(p)}>
+                      <div key={p.id} className="plan-card-v2" onClick={() => openPlan(p)}>
                         <div className="plan-card-v2-img">
                           {p.imageUrl && <img src={p.imageUrl} alt={p.name} />}
                           {p.categoryName && <span className="plan-card-v2-tag">{p.categoryName}</span>}
-                          <span className={`plan-card-v2-status ${p.closed ? "closed-tag" : "open"}`}>
-                            {p.closed ? "已截止" : "開放中"}
-                          </span>
                         </div>
                         <div className="plan-card-v2-body">
                           <p className="plan-card-v2-name">{p.name}</p>
-                          {p.deadline && (
-                            <p className="plan-card-v2-meta">
-                              {p.closed ? "已於 " : "截止 "}
-                              {new Date(p.deadline).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
-                            </p>
-                          )}
                         </div>
                       </div>
                     ))}
@@ -1924,7 +1887,7 @@ export default function Home() {
                   <div className="cart-empty">
                     <div className="cart-empty-icon"><ShoppingCart size={32} /></div>
                     <p>購物車是空的</p>
-                    <button className="btn" onClick={goHome}>去逛逛企劃</button>
+                    <button className="btn" onClick={goHome}>去逛逛系列</button>
                   </div>
                 )}
 
@@ -1949,15 +1912,14 @@ export default function Home() {
                   }, {})
                 )
                   .sort(([planIdA], [planIdB]) => {
-                    const inactiveA = cartPlanStatus[planIdA] ? (!cartPlanStatus[planIdA].found || cartPlanStatus[planIdA].closed) : false;
-                    const inactiveB = cartPlanStatus[planIdB] ? (!cartPlanStatus[planIdB].found || cartPlanStatus[planIdB].closed) : false;
+                    const inactiveA = cartPlanStatus[planIdA] ? !cartPlanStatus[planIdA].found : false;
+                    const inactiveB = cartPlanStatus[planIdB] ? !cartPlanStatus[planIdB].found : false;
                     return Number(inactiveA) - Number(inactiveB);
                   })
                   .map(([planId, entries]) => {
                   const live = cartPlanStatus[planId];
                   const planName = live?.name || entries[0].planName;
-                  const deadline = live ? live.deadline : entries[0].planDeadline;
-                  const isInactive = live ? (!live.found || live.closed) : false;
+                  const isInactive = live ? !live.found : false;
                   const groupTotal = entries.reduce((s, e) => s + e.qty * e.price, 0);
 
                   return (
@@ -1968,14 +1930,8 @@ export default function Home() {
                             className="cart-group-plan-name"
                             onClick={() => { if (live?.found !== false) openPlan({ id: planId } as Plan); }}
                           >
-                            {planName || "（找不到這個企劃）"}
+                            {planName || "（找不到這個系列）"}
                           </span>
-                          {deadline && (
-                            <span className="cart-group-deadline">
-                              {isInactive ? "已於 " : "截止 "}
-                              {new Date(deadline).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
-                            </span>
-                          )}
                         </div>
                         {isInactive && <span className="cart-inactive-badge">已失效</span>}
                       </div>
@@ -2091,7 +2047,7 @@ export default function Home() {
                       {Object.entries(grouped).map(([planId, entries]) => {
                         const live = cartPlanStatus[planId];
                         const planName = live?.name || entries[0].planName;
-                        const codOffered = campaignCodAvailable && (!remitOnlyMode || live?.allowCodOnRemitLink);
+                        const codOffered = campaignCodAvailable;
                         const codDisabled = !codOffered;
                         const rawPayment = checkoutPaymentByPlan[planId] || "匯款";
                         const payment = (rawPayment === "取付" && codDisabled) ? "匯款" : rawPayment;
@@ -2127,7 +2083,7 @@ export default function Home() {
                             <div className="cart-checkout-footer">
                               <span style={{ fontWeight: 600 }}>小計 NT$ {fmt(groupTotal)}</span>
                               <div className="cart-checkout-payment">
-                                <div className="id-label" style={{ marginBottom: 6 }}>這個企劃的交易方式</div>
+                                <div className="id-label" style={{ marginBottom: 6 }}>這個系列的交易方式</div>
                                 <div className="source-btns">
                                   {(!codOffered ? ["匯款"] : ["匯款", "取付"]).map((p) => (
                                     <button

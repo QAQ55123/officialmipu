@@ -31,12 +31,12 @@ export async function PATCH(req: Request) {
   if (items.length === 0) return NextResponse.json({ error: "訂單至少要有一項商品" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: order } = await supabase.from("orders").select("id, plan_id, plans(name)").eq("order_no", orderNo).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id, series_id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
-  if (!order.plan_id) return NextResponse.json({ error: "這張訂單沒有對應的企劃，沒辦法修改商品內容" }, { status: 400 });
+  if (!order.series_id) return NextResponse.json({ error: "這張訂單沒有對應的系列，沒辦法修改商品內容" }, { status: 400 });
 
   // 用企劃目前的商品目錄，找出每個品項現在的正確單價（含圖片快照）
-  const { data: catalog } = await supabase.from("products").select("name, style, price, image_url").eq("plan_id", order.plan_id);
+  const { data: catalog } = await supabase.from("products").select("name, style, price, image_url").eq("series_id", order.series_id);
   const catalogMap = new Map((catalog || []).map((p) => [`${p.name}|${p.style || ""}`, p]));
 
   const newItemRows: { order_id: string; product_name: string; style: string; qty: number; unit_price: number; subtotal: number; image_url: string | null }[] = [];
@@ -69,12 +69,12 @@ export async function PATCH(req: Request) {
   const { error: insErr } = await supabase.from("order_items").insert(newItemRows);
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 });
 
-  const planName = (order as any).plans?.name;
+  const campaignName = (order as any).campaigns?.name;
   let syncWarning = "";
-  if (order.plan_id && planName) {
+  if (order.campaign_id && campaignName) {
     try {
-      await syncOrderRealtimeToPlanTab(order.plan_id, planName);
-      await syncOnePlanCostTab(order.plan_id, planName);
+      await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "訂單商品內容已更新，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

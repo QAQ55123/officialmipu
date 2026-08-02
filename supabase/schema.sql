@@ -39,29 +39,25 @@ create table if not exists categories (
 );
 create index if not exists idx_categories_parent on categories (parent_id);
 
--- 企劃（原本「企劃清單」分頁）
-create table if not exists plans (
+-- 系列（原本「企劃清單」分頁，已改名為系列）
+create table if not exists series (
   id            uuid primary key default gen_random_uuid(),
-  name          text not null,               -- 企劃名稱
-  deadline      timestamptz,                 -- 截止時間（null = 不限期）
-  image_url     text,                        -- 企劃圖片
+  name          text not null,               -- 系列名稱
+  image_url     text,                        -- 系列圖片
   visible_to    text[] default '{}',         -- 顯示對象，例如 {LINE,DC}；空陣列 = 全部看得到
   category_id   uuid references categories(id) on delete set null,  -- 歸屬的分類或子分類（可為任一層）
   promo_images  text[] default '{}',         -- 宣傳圖（可多張），顯示在商品頁最上方
-  hide_after_days   int,                     -- 截止後幾天要從瀏覽清單隱藏（留空＝永遠不自動隱藏）
-  fulfillment_status text,                   -- 企劃目前狀態：purchased 已購買／shipping 運輸中／arrived 已到貨／distributing 已開賣場（留空＝尚未開始）
-  is_legacy_archive boolean not null default false, -- true＝舊資料匯入建立的封存企劃（商品目錄不完整，前台不可點擊進入）
-  calendar_event_id text,                     -- 對應的 Google 行事曆事件 ID（截止時間自動同步用）
-  allow_cod_on_remit_link boolean not null default false, -- 在 ?pay=remit 限定連結下，這個企劃是否仍開放取付
+  is_visible    boolean not null default true, -- 店家手動決定要不要顯示給顧客看，跟時間/檔期無關
+  is_legacy_archive boolean not null default false, -- true＝舊資料匯入建立的封存系列（商品目錄不完整，前台不可點擊進入）
   sort_order    int default 0,
   created_at    timestamptz default now()
 );
-create index if not exists idx_plans_category on plans (category_id);
+create index if not exists idx_series_category on series (category_id);
 
--- 商品（原本每個企劃分頁裡的價目表）
+-- 商品（原本每個系列分頁裡的價目表）
 create table if not exists products (
   id            uuid primary key default gen_random_uuid(),
-  plan_id       uuid not null references plans(id) on delete cascade,
+  series_id       uuid not null references series(id) on delete cascade,
   name          text not null,
   style         text default '',
   price         numeric not null default 0,
@@ -93,13 +89,13 @@ create unique index if not exists idx_members_email on members (lower(email));
 create unique index if not exists idx_members_profile_url_norm on members (profile_url_norm);
 create index if not exists idx_members_discord_user_id on members (discord_user_id);
 
--- 收藏清單（會員收藏的企劃）
+-- 收藏清單（會員收藏的系列）
 create table if not exists favorites (
   id          uuid primary key default gen_random_uuid(),
   member_id   uuid not null references members(id) on delete cascade,
-  plan_id     uuid not null references plans(id) on delete cascade,
+  series_id     uuid not null references series(id) on delete cascade,
   created_at  timestamptz default now(),
-  unique (member_id, plan_id)
+  unique (member_id, series_id)
 );
 create index if not exists idx_favorites_member on favorites (member_id);
 
@@ -107,8 +103,8 @@ create index if not exists idx_favorites_member on favorites (member_id);
 create table if not exists orders (
   id                 uuid primary key default gen_random_uuid(),
   order_no           text not null unique,
-  plan_id            uuid references plans(id) on delete set null,  -- 企劃被刪除後，訂單仍然保留（只是不再連到那筆企劃）
-  plan_name_snapshot text,                        -- 下單當下的企劃名稱快照，不會因企劃被刪而遺失
+  series_id            uuid references series(id) on delete set null,  -- 系列被刪除後，訂單仍然保留（只是不再連到那筆系列）
+  series_name_snapshot text,                      -- 下單當下的系列名稱快照，不會因系列被刪而遺失
   username           text not null,               -- 下單當時的帳號
   profile_url        text not null,               -- 下單當時的個人頁網址快照
   payment            text not null,               -- 匯款 / 取付
@@ -121,7 +117,7 @@ create table if not exists orders (
   created_at         timestamptz default now(),
   updated_at         timestamptz default now()
 );
-create index if not exists idx_orders_plan on orders (plan_id);
+create index if not exists idx_orders_series on orders (series_id);
 create index if not exists idx_orders_username on orders (lower(username));
 
 create table if not exists order_items (
@@ -202,7 +198,7 @@ create table if not exists site_settings (
 );
 
 -- ============================================================
--- 檔期（Campaign）— 規格書 2.4~2.7 節，全新概念，跟企劃(plans)無關
+-- 檔期（Campaign）— 規格書 2.4~2.7 節，全新概念，跟系列(series)無關
 -- 純粹是時間窗口：開放時間內可下單，時間外僅能瀏覽，跟商品/系列完全沒有關聯
 -- ============================================================
 
@@ -211,6 +207,7 @@ create table if not exists campaigns (
   name          text not null,
   opens_at      timestamptz not null,
   closes_at     timestamptz not null,
+  fulfillment_status text, -- 已購買/運輸中/已到貨/已開賣場，店家手動選的顯示標記，顯示在該檔期底下每張訂單上，跟通知信無關
 
   -- 2.4節：取付檔期總上限（可留空=不限），已用金額由系統自動累計，不是店家手動輸入
   cod_campaign_cap   numeric,
@@ -261,7 +258,7 @@ alter table products add column if not exists has_discount_flag boolean not null
 alter table campaigns disable row level security;
 alter table gift_styles disable row level security;
 
--- 完全移除企劃層級的取付上限機制（改用檔期層級的 campaigns.cod_campaign_cap，見2.4節）
+-- 完全移除系列層級的取付上限機制（改用檔期層級的 campaigns.cod_campaign_cap，見2.4節）
 alter table plans drop column if exists cod_limit;
 
 -- 2.5節：訂單記錄下單當下屬於哪個檔期；2.7節：是否選滿贈、選了哪些款式各幾個

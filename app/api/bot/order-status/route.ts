@@ -20,7 +20,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: order } = await supabase
     .from("orders")
-    .select("order_no, username, profile_url, plan_name_snapshot")
+    .select("order_no, username, profile_url, series_name_snapshot")
     .eq("order_no", orderNo)
     .maybeSingle();
 
@@ -31,6 +31,6 @@ export async function GET(req: Request) {
     orderNo: order.order_no,
     username: order.username,
     profileUrl: order.profile_url,
-    planName: order.plan_name_snapshot,
+    seriesName: order.series_name_snapshot,
   });
 }

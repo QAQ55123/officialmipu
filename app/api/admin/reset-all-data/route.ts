@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession, clearSessionCookieHeader } from "@/lib/adminAuth";
 import { requireSheetId, requireCostSheetId, deleteSheetTabIfExists } from "@/lib/googleSheets";
-import { deletePlanDeadlineEvent } from "@/lib/googleCalendar";
 import { syncPlansSheet, syncMembersSheet } from "@/lib/sheetsSync";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +9,7 @@ export const dynamic = "force-dynamic";
 const CONFIRM_PHRASE = "清空所有資料";
 
 /**
- * 把整個系統的資料清空回一片白紙：先清 Google 行事曆事件、Google Sheet 分頁（best-effort，
+ * 把整個系統的資料清空回一片白紙：先清 Google Sheet 分頁（best-effort，
  * 個別失敗不會擋住整體流程），再清資料庫所有表。清完之後所有管理者帳號也會被刪除，
  * 需要用「最高管理者邀請碼」（環境變數 OWNER_INVITE_CODE）重新註冊 owner 帳號。
  * body: { confirm: "清空所有資料" }（一定要完全符合這個字串才會執行）
@@ -35,19 +34,7 @@ export async function POST(req: Request) {
   const supabase = getSupabaseAdmin();
   const warnings: string[] = [];
 
-  // ---------- 1. 清 Google 行事曆事件 ----------
-  const { data: plans } = await supabase.from("plans").select("id, name, calendar_event_id");
-  for (const p of plans || []) {
-    if (p.calendar_event_id) {
-      try {
-        await deletePlanDeadlineEvent(p.calendar_event_id);
-      } catch (e: any) {
-        warnings.push(`行事曆事件「${p.name}」刪除失敗：${e?.message || "未知錯誤"}`);
-      }
-    }
-  }
-
-  // ---------- 2. 清 Google Sheet 分頁（主試算表 + 成本試算表，含隱藏明細分頁）----------
+  // ---------- 1. 清 Google Sheet 分頁（主試算表 + 成本試算表，含隱藏明細分頁）----------
   let mainSheetId = "";
   let costSheetId = "";
   try {
@@ -57,7 +44,9 @@ export async function POST(req: Request) {
     costSheetId = requireCostSheetId();
   } catch {}
 
-  for (const p of plans || []) {
+  const { data: allSeries } = await supabase.from("series").select("id, name");
+
+  for (const p of allSeries || []) {
     if (mainSheetId) {
       try {
         await deleteSheetTabIfExists(mainSheetId, p.name);
@@ -81,7 +70,7 @@ export async function POST(req: Request) {
     "orders",
     "favorites",
     "products",
-    "plans",
+    "series",
     "categories",
     "legacy_claim_requests",
     "legacy_identities",

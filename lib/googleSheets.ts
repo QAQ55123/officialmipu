@@ -164,6 +164,17 @@ export function buildHideSheetRequest(sheetId: number, hidden: boolean): BatchRe
   return { updateSheetProperties: { properties: { sheetId, hidden }, fields: "hidden" } };
 }
 
+/** 建構「隱藏指定欄位範圍」的請求（不是隱藏整個分頁，只隱藏某幾欄，資料還在，只是打開試算表的人看不到） */
+export function buildHideColumnsRequest(sheetId: number, startColIndex: number, endColIndex: number): BatchRequest {
+  return {
+    updateDimensionProperties: {
+      range: { sheetId, dimension: "COLUMNS", startIndex: startColIndex, endIndex: endColIndex },
+      properties: { hiddenByUser: true },
+      fields: "hiddenByUser",
+    },
+  };
+}
+
 /** 把一批請求一次送出（這是真正打 API 的地方，不管裡面包了幾個操作，Google 都只算「一次」寫入用量） */
 export async function runBatch(sheets: SheetsClient, spreadsheetId: string, requests: BatchRequest[]) {
   if (requests.length === 0) return;

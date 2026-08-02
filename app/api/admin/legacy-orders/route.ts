@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("orders")
-    .select("id, order_no, username, profile_url, plan_name_snapshot, payment, paid_amount, created_at, order_items(product_name, style, qty, unit_price, subtotal)")
+    .select("id, order_no, username, profile_url, series_name_snapshot, payment, paid_amount, created_at, order_items(product_name, style, qty, unit_price, subtotal)")
     .eq("legacy_unmatched", true)
     .order("created_at", { ascending: false })
     .limit(300);
@@ -33,7 +33,7 @@ export async function GET(req: Request) {
       orderNo: o.order_no,
       username: o.username,
       profileUrl: o.profile_url,
-      planName: o.plan_name_snapshot,
+      planName: o.series_name_snapshot,
       payment: o.payment,
       paidAmount: Number(o.paid_amount) || 0,
       createdAt: o.created_at,
@@ -67,7 +67,7 @@ export async function PATCH(req: Request) {
   const { data: member } = await supabase.from("members").select("*").ilike("username", targetUsername).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到這個會員帳號" }, { status: 404 });
 
-  const { data: order } = await supabase.from("orders").select("id, plan_id, plans(name)").eq("order_no", orderNo).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
 
   const { error } = await supabase
@@ -76,12 +76,12 @@ export async function PATCH(req: Request) {
     .eq("id", order.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const planName = (order as any).plans?.name;
+  const campaignName = (order as any).campaigns?.name;
   let syncWarning = "";
-  if (order.plan_id && planName) {
+  if (order.campaign_id && campaignName) {
     try {
-      await syncOrderRealtimeToPlanTab(order.plan_id, planName);
-      await syncOnePlanCostTab(order.plan_id, planName);
+      await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "訂單擁有者已改派，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }
@@ -108,19 +108,19 @@ export async function DELETE(req: Request) {
   if (!orderNo) return NextResponse.json({ error: "缺少訂單編號" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: order } = await supabase.from("orders").select("id, plan_id, plans(name)").eq("order_no", orderNo).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
 
   await supabase.from("order_items").delete().eq("order_id", order.id);
   const { error } = await supabase.from("orders").delete().eq("id", order.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const planName = (order as any).plans?.name;
+  const campaignName = (order as any).campaigns?.name;
   let syncWarning = "";
-  if (order.plan_id && planName) {
+  if (order.campaign_id && campaignName) {
     try {
-      await syncOrderRealtimeToPlanTab(order.plan_id, planName);
-      await syncOnePlanCostTab(order.plan_id, planName);
+      await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "訂單已刪除，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

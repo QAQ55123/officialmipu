@@ -11,11 +11,11 @@ export const revalidate = 0;
 /** 新增訂單 */
 export async function POST(req: Request) {
   const body = await req.json();
-  const { planId, items, username, payment, wantsGift, giftSelections } = body; // items: [{ name, style, qty }]
+  const { seriesId, items, username, payment, wantsGift, giftSelections } = body; // items: [{ name, style, qty }]
 
   const supabase = getSupabaseAdmin();
 
-  if (!planId) return NextResponse.json({ error: "缺少企劃" }, { status: 400 });
+  if (!seriesId) return NextResponse.json({ error: "缺少系列" }, { status: 400 });
   if (!Array.isArray(items) || items.length === 0) {
     return NextResponse.json({ error: "請至少選擇一項商品的數量" }, { status: 400 });
   }
@@ -32,12 +32,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "請先驗證信箱後才能下單，可以到「編輯會員資料」重新寄送驗證信。" }, { status: 403 });
   }
 
-  // 企劃 / 截止時間 / 取付上限
-  const { data: plan, error: planErr } = await supabase.from("plans").select("*").eq("id", planId).single();
-  if (planErr || !plan) return NextResponse.json({ error: "找不到企劃" }, { status: 404 });
-  if (plan.deadline && new Date(plan.deadline).getTime() < Date.now()) {
-    return NextResponse.json({ error: `此企劃已截止，無法新增訂單。` }, { status: 400 });
-  }
+  // 系列 / 取付上限
+  const { data: series, error: seriesErr } = await supabase.from("series").select("*").eq("id", seriesId).single();
+  if (seriesErr || !series) return NextResponse.json({ error: "找不到系列" }, { status: 404 });
 
   // 2.5節：檔期是否開放中，這是最後一道防線（前端按鈕已經先擋過一次，這裡避免分頁停留太久後才送出）
   // 2.6節：一併把8種匯率設定抓出來，計價要用
@@ -54,7 +51,7 @@ export async function POST(req: Request) {
   const campaign = openCampaigns[0];
 
   // 價目表對照（避免前端竄改價格），順便記錄圖片快照跟2.6/2.4節需要的滿減標記／取付開關
-  const { data: products } = await supabase.from("products").select("*").eq("plan_id", planId);
+  const { data: products } = await supabase.from("products").select("*").eq("series_id", seriesId);
   const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean }> = {};
   (products || []).forEach((p) => {
     productMap[`${p.name}||${p.style || ""}`] = {
@@ -104,7 +101,7 @@ export async function POST(req: Request) {
   if (rows.length === 0) return NextResponse.json({ error: "請至少選擇一項商品的數量" }, { status: 400 });
 
   if (payment === "取付") {
-    // 2.4節：這是「檔期」層級的總上限，不是每單、也不是單一企劃的上限
+    // 2.4節：這是「檔期」層級的總上限，不是每單、也不是單一系列的上限
     if (campaign.cod_campaign_cap != null && Number(campaign.cod_campaign_cap) > 0) {
       const cap = Number(campaign.cod_campaign_cap);
       const used = Number(campaign.cod_campaign_used) || 0;
@@ -125,8 +122,8 @@ export async function POST(req: Request) {
       .from("orders")
       .insert({
         order_no: orderNo,
-        plan_id: planId,
-        plan_name_snapshot: plan.name,
+        series_id: seriesId,
+        series_name_snapshot: series.name,
         username: member.username,
         profile_url: member.profile_url,
         payment,
@@ -192,7 +189,7 @@ export async function POST(req: Request) {
           { name: "訂單編號", value: order.order_no, inline: true },
           { name: "交易方式", value: payment, inline: true },
           { name: "帳號", value: member.username, inline: true },
-          { name: "企劃", value: plan.name, inline: true },
+          { name: "系列", value: series.name, inline: true },
           { name: "金額", value: `NT$ ${fmtMoney(orderTotal)}`, inline: true },
           { name: "個人頁", value: member.profile_url },
           { name: "品項", value: lines || "(無)" },
@@ -203,8 +200,8 @@ export async function POST(req: Request) {
   });
 
   syncOrderToSheet({
-    planId: plan.id,
-    planName: plan.name,
+    campaignId: campaign.id,
+    campaignName: campaign.name,
   }).catch(() => {});
 
   return NextResponse.json({ ok: true, orderNo: order.order_no, count: rows.length, total: orderTotal });
@@ -219,7 +216,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("*, plans(name, image_url, deadline, fulfillment_status, is_legacy_archive), order_items(*)")
+    .select("*, series(name, image_url, is_legacy_archive), campaigns(fulfillment_status), order_items(*)")
     .ilike("username", username)
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -227,17 +224,16 @@ export async function GET(req: Request) {
   return NextResponse.json({
     orders: (orders || []).map((o: any) => ({
       orderNo: o.order_no,
-      planId: o.plan_id && !o.plans?.is_legacy_archive ? o.plan_id : null,
-      planName: o.plan_name_snapshot || o.plans?.name || "（企劃已刪除）",
-      planImage: o.plans?.image_url,
+      seriesId: o.series_id && !o.series?.is_legacy_archive ? o.series_id : null,
+      seriesName: o.series_name_snapshot || o.series?.name || "（系列已刪除）",
+      planImage: o.series?.image_url,
       username: o.username,
       payment: o.payment,
       paidStatus: o.paid_status,
       paidAmount: Number(o.paid_amount) || 0,
       createdAt: o.created_at,
       cancelRequested: !!o.cancel_requested_at,
-      planClosed: o.plans?.deadline ? new Date(o.plans.deadline).getTime() < Date.now() : false,
-      fulfillmentStatus: o.plans?.fulfillment_status || null,
+      fulfillmentStatus: o.campaigns?.fulfillment_status || null,
       items: (o.order_items || []).map((it: any) => ({
         name: it.product_name,
         style: it.style,

@@ -177,17 +177,17 @@ async function buildIdentityIndex() {
 async function findOrCreateArchivedPlan(planCache: Map<string, any>, planName: string, orderDate: Date, commit: boolean) {
   if (planCache.has(planName)) return planCache.get(planName);
   const supabase = getSupabaseAdmin();
-  // 同名的話優先合併：不管是正常進行中的企劃、還是之前匯入建立的封存企劃，只要名字一樣就用同一筆，
-  // 舊訂單會直接掛進那個企劃底下，不會另外建立重複的封存版本。找不到同名的才新建一個封存企劃。
-  const { data: existing } = await supabase.from("plans").select("*").eq("name", planName).order("created_at", { ascending: true }).limit(1).maybeSingle();
+  // 同名的話優先合併：不管是正常進行中的系列、還是之前匯入建立的封存系列，只要名字一樣就用同一筆，
+  // 舊訂單會直接掛進那個系列底下，不會另外建立重複的封存版本。找不到同名的才新建一個封存系列。
+  const { data: existing } = await supabase.from("series").select("*").eq("name", planName).order("created_at", { ascending: true }).limit(1).maybeSingle();
   let plan = existing;
   if (!plan && commit) {
     const { data: created, error } = await supabase
-      .from("plans")
-      .insert({ name: planName, deadline: orderDate.toISOString(), hide_after_days: 0, fulfillment_status: "purchased", is_legacy_archive: true })
+      .from("series")
+      .insert({ name: planName, is_visible: false, is_legacy_archive: true })
       .select()
       .single();
-    if (error) throw new Error("建立封存企劃失敗：" + error.message);
+    if (error) throw new Error("建立封存系列失敗：" + error.message);
     plan = created;
   }
   planCache.set(planName, plan);
@@ -259,15 +259,15 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
 
       const plan = await findOrCreateArchivedPlan(planCache, g.planName, g.orderDate, true);
       for (const it of g.items) {
-        const { data: existingProduct } = await supabase.from("products").select("id").eq("plan_id", plan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
-        if (!existingProduct) await supabase.from("products").insert({ plan_id: plan.id, name: it.name, style: it.style, price: it.unitPrice });
+        const { data: existingProduct } = await supabase.from("products").select("id").eq("series_id", plan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
+        if (!existingProduct) await supabase.from("products").insert({ series_id: plan.id, name: it.name, style: it.style, price: it.unitPrice });
       }
       const claimedMember = identity?.claimedMember;
       const targetUsername = claimedMember?.username || g.nickname;
       const profileUrl = claimedMember?.profile_url || g.fbUrl || identity?.fb_profile_url || "（尚未確認）";
       const paddedOrderNo = g.originalOrderNo ? padOrderNo(g.originalOrderNo) : genOrderNo();
       const { data: order, error: orderErr } = await supabase.from("orders").insert({
-        order_no: paddedOrderNo, plan_id: plan.id, plan_name_snapshot: g.planName,
+        order_no: paddedOrderNo, series_id: plan.id, series_name_snapshot: g.planName,
         username: targetUsername, profile_url: profileUrl, payment: g.payment, paid_amount: g.paidAmount,
         created_at: g.orderDate.toISOString(), legacy_identity_id: identity ? identity.id : null, legacy_unmatched: !identity,
         legacy_source_ref: sourceRef,
@@ -379,10 +379,10 @@ export async function importLegacySheetTab(sheetId: string, tabName: string, com
       }
 
       for (const it of g.items) {
-        const { data: existingProduct } = await supabase.from("products").select("id").eq("plan_id", plan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
+        const { data: existingProduct } = await supabase.from("products").select("id").eq("series_id", plan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
         if (!existingProduct) {
           const imageUrl = catalogImageByKey.get(`${it.name}__${it.style}`) || null;
-          await supabase.from("products").insert({ plan_id: plan.id, name: it.name, style: it.style, price: it.unitPrice, image_url: imageUrl });
+          await supabase.from("products").insert({ series_id: plan.id, name: it.name, style: it.style, price: it.unitPrice, image_url: imageUrl });
         }
       }
       const claimedMember = identity?.claimedMember;
@@ -390,7 +390,7 @@ export async function importLegacySheetTab(sheetId: string, tabName: string, com
       const usernamePlaceholder = claimedMember?.username || g.nickname || identity?.fb_nickname || identity?.line_nickname || identity?.discord_nickname || "（未知）";
       const paddedOrderNo = padOrderNo(g.orderNo);
       const { data: order, error: orderErr } = await supabase.from("orders").insert({
-        order_no: paddedOrderNo, plan_id: plan.id, plan_name_snapshot: tabName,
+        order_no: paddedOrderNo, series_id: plan.id, series_name_snapshot: tabName,
         username: usernamePlaceholder, profile_url: profileUrl, payment: g.payment, paid_amount: 0,
         created_at: g.orderDate.toISOString(), legacy_identity_id: identity ? identity.id : null, legacy_unmatched: !identity,
         legacy_source_ref: sourceRef,

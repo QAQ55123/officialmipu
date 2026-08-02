@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     try {
       const link = `${getSiteUrl()}/admin/reset-password?token=${token}`;
       const { html, text } = resetPasswordContent(admin.username, link);
-      await sendEmail(email, "重設你的米舖後台密碼", html, text);
+      await sendEmail(email, "重設你的米舖-官方周邊代購後台密碼", html, text);
     } catch (e) {
       console.error("重設密碼信寄送失敗：", e);
     }

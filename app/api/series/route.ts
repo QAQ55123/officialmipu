@@ -12,12 +12,13 @@ export async function GET(req: Request) {
   const q = (searchParams.get("q") || "").trim();
 
   let query = supabase
-    .from("plans")
-    .select("id, name, deadline, image_url, visible_to, sort_order, category_id, hide_after_days, categories(id, name, parent_id)")
+    .from("series")
+    .select("id, name, image_url, visible_to, sort_order, category_id, categories(id, name, parent_id)")
+    .eq("is_visible", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
 
-  // 分類篩選：選到上層分類時，要包含它底下所有子分類的企劃
+  // 分類篩選：選到上層分類時，要包含它底下所有子分類的系列
   if (categoryId) {
     const { data: allCats } = await supabase.from("categories").select("id, parent_id");
     const ids = [categoryId];
@@ -27,14 +28,14 @@ export async function GET(req: Request) {
     query = query.in("category_id", ids);
   }
 
-  // 搜尋：企劃名稱符合，或底下有商品名稱符合
-  let matchPlanIdsFromProducts: string[] | null = null;
+  // 搜尋：系列名稱符合，或底下有商品名稱符合
+  let matchSeriesIdsFromProducts: string[] | null = null;
   if (q) {
     const { data: matchedProducts } = await supabase
       .from("products")
-      .select("plan_id")
+      .select("series_id")
       .ilike("name", `%${q}%`);
-    matchPlanIdsFromProducts = [...new Set((matchedProducts || []).map((p) => p.plan_id))];
+    matchSeriesIdsFromProducts = [...new Set((matchedProducts || []).map((p) => p.series_id))];
     query = query.ilike("name", `%${q}%`);
   }
 
@@ -43,34 +44,24 @@ export async function GET(req: Request) {
 
   let rows = data || [];
 
-  // 如果有搜尋，額外把「商品名稱符合、但企劃名稱不符合」的企劃也撈回來
-  if (q && matchPlanIdsFromProducts && matchPlanIdsFromProducts.length > 0) {
+  // 如果有搜尋，額外把「商品名稱符合、但系列名稱不符合」的系列也撈回來
+  if (q && matchSeriesIdsFromProducts && matchSeriesIdsFromProducts.length > 0) {
     const existingIds = new Set(rows.map((r) => r.id));
-    const missingIds = matchPlanIdsFromProducts.filter((id) => !existingIds.has(id));
+    const missingIds = matchSeriesIdsFromProducts.filter((id) => !existingIds.has(id));
     if (missingIds.length > 0) {
       const { data: extra } = await supabase
-        .from("plans")
-        .select("id, name, deadline, image_url, visible_to, sort_order, category_id, hide_after_days, categories(id, name, parent_id)")
+        .from("series")
+        .select("id, name, image_url, visible_to, sort_order, category_id, categories(id, name, parent_id)")
+        .eq("is_visible", true)
         .in("id", missingIds);
       rows = rows.concat(extra || []);
     }
   }
 
-  const now = Date.now();
-
-  // 截止後超過設定天數的企劃，從瀏覽清單自動隱藏（沒設定天數的話永遠不會自動隱藏）
-  rows = rows.filter((p: any) => {
-    if (!p.deadline || p.hide_after_days == null) return true;
-    const hideAt = new Date(p.deadline).getTime() + Number(p.hide_after_days) * 24 * 60 * 60 * 1000;
-    return now < hideAt;
-  });
-
   const plans = rows.map((p: any) => ({
     id: p.id,
     name: p.name,
     imageUrl: p.image_url,
-    deadline: p.deadline,
-    closed: p.deadline ? new Date(p.deadline).getTime() < now : false,
     categoryId: p.category_id,
     categoryName: p.categories?.name || null,
     categoryParentId: p.categories?.parent_id || null,

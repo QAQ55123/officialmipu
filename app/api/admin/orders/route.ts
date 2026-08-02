@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: order, error } = await supabase
     .from("orders")
-    .select("*, plans(name), order_items(*)")
+    .select("*, series(name), order_items(*)")
     .eq("order_no", orderNo)
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -35,10 +35,10 @@ export async function GET(req: Request) {
   return NextResponse.json({
     order: {
       orderNo: order.order_no,
-      planId: order.plan_id,
+      seriesId: order.series_id,
       username: order.username,
       profileUrl: order.profile_url,
-      planName: order.plan_name_snapshot || order.plans?.name || "（企劃已刪除）",
+      seriesName: order.series_name_snapshot || order.series?.name || "（系列已刪除）",
       payment: order.payment,
       paidStatus: order.paid_status,
       paidAmount: Number(order.paid_amount) || 0,
@@ -76,7 +76,7 @@ export async function PATCH(req: Request) {
   if (!Number.isFinite(paidAmount) || paidAmount < 0) return NextResponse.json({ error: "已收金額格式不正確" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: order } = await supabase.from("orders").select("id, plan_id, plans(name)").eq("order_no", orderNo).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
 
   const { error } = await supabase.from("orders").update({ paid_amount: paidAmount }).eq("id", order.id);
@@ -84,12 +84,12 @@ export async function PATCH(req: Request) {
 
   // 同步這筆訂單所屬企劃的 Sheet（讓付款狀態欄跟成本表的「已收」馬上更新）
   // 這裡「不」吞掉錯誤：這是管理者主動的操作，同步失敗要讓管理者知道，不能默默失敗
-  const planName = (order as any).plans?.name;
+  const campaignName = (order as any).campaigns?.name;
   let syncWarning = "";
-  if (order.plan_id && planName) {
+  if (order.campaign_id && campaignName) {
     try {
-      await syncOrderRealtimeToPlanTab(order.plan_id, planName);
-      await syncOnePlanCostTab(order.plan_id, planName);
+      await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "已收金額已存檔，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }
@@ -116,19 +116,19 @@ export async function DELETE(req: Request) {
   if (!orderNo) return NextResponse.json({ error: "請輸入訂單編號" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: order } = await supabase.from("orders").select("id, plan_id, plans(name)").eq("order_no", orderNo).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
 
   const { error } = await supabase.from("orders").delete().eq("id", order.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // 訂單真的刪掉之後，重新同步該企劃的分頁，讓 Sheet 上對應的那幾列也跟著消失
-  const planName = (order as any).plans?.name;
+  const campaignName = (order as any).campaigns?.name;
   let syncWarning = "";
-  if (order.plan_id && planName) {
+  if (order.campaign_id && campaignName) {
     try {
-      await syncOrderRealtimeToPlanTab(order.plan_id, planName);
-      await syncOnePlanCostTab(order.plan_id, planName);
+      await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "訂單已刪除，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

@@ -19,7 +19,7 @@ export async function POST(req: Request) {
 
   const supabase = getSupabaseAdmin();
   const results = await Promise.all(
-    ids.map((id, index) => supabase.from("plans").update({ sort_order: index }).eq("id", id))
+    ids.map((id, index) => supabase.from("series").update({ sort_order: index }).eq("id", id))
   );
   const failed = results.find((r) => r.error);
   if (failed?.error) return NextResponse.json({ error: failed.error.message }, { status: 500 });

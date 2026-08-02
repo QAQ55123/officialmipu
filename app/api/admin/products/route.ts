@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 
-/** 後台用：列出某個企劃底下的所有商品 ?pw=&planId= */
+/** 後台用：列出某個企劃底下的所有商品 ?pw=&seriesId= */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   try {
@@ -16,21 +16,21 @@ export async function GET(req: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
-  const planId = searchParams.get("planId");
-  if (!planId) return NextResponse.json({ error: "缺少 planId" }, { status: 400 });
+  const seriesId = searchParams.get("seriesId");
+  if (!seriesId) return NextResponse.json({ error: "缺少 seriesId" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("products")
     .select("*")
-    .eq("plan_id", planId)
+    .eq("series_id", seriesId)
     .order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({
     products: (data || []).map((p) => ({
       id: p.id,
-      planId: p.plan_id,
+      seriesId: p.series_id,
       name: p.name,
       style: p.style,
       price: Number(p.price),
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
-  if (!body.planId) return NextResponse.json({ error: "缺少企劃" }, { status: 400 });
+  if (!body.seriesId) return NextResponse.json({ error: "缺少企劃" }, { status: 400 });
   const name = String(body.name || "").trim();
   if (!name) return NextResponse.json({ error: "請填寫商品名稱" }, { status: 400 });
 
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
   const { data: existing } = await supabase
     .from("products")
     .select("sort_order")
-    .eq("plan_id", body.planId)
+    .eq("series_id", body.seriesId)
     .order("sort_order", { ascending: false })
     .limit(1);
   const nextSortOrder = existing && existing.length > 0 ? existing[0].sort_order + 1 : 0;
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
   const { data, error } = await supabase
     .from("products")
     .insert({
-      plan_id: body.planId,
+      series_id: body.seriesId,
       name,
       style: body.style || "",
       price: Number(body.price) || 0,
