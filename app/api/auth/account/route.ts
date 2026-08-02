@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { verifyMemberPw, normFb } from "@/lib/util";
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
+import { syncMembersSheet } from "@/lib/sheetsSync";
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -69,6 +70,7 @@ export async function POST(req: Request) {
   if (Object.keys(updates).length > 0) {
     const { error } = await supabase.from("members").update(updates).eq("id", member.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    syncMembersSheet().catch(() => {});
   }
 
   if (sentVerifyEmail) {

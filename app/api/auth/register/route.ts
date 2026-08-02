@@ -4,6 +4,7 @@ import { hashMemberPw, normFb } from "@/lib/util";
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
 import { signMemberSession, memberSessionCookieHeader } from "@/lib/memberAuth";
+import { syncMembersSheet } from "@/lib/sheetsSync";
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
   try {
     const link = `${getSiteUrl()}/api/auth/verify-email?token=${verifyToken}`;
     const { html, text } = verifyEmailContent(username, link);
-    await sendEmail(email, "請驗證你的米舖帳號信箱", html, text);
+    await sendEmail(email, "請驗證你的米舖-官方周邊代購帳號信箱", html, text);
   } catch (e) {
     console.error("驗證信寄送失敗：", e);
     verifyEmailSent = false;
@@ -72,5 +73,6 @@ export async function POST(req: Request) {
     verifyEmailSent,
   });
   res.headers.set("Set-Cookie", memberSessionCookieHeader(token));
+  syncMembersSheet().catch(() => {});
   return res;
 }
