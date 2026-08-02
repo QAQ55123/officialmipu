@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { genOrderNo, fmtMoney } from "@/lib/util";
 import { notifyDiscord } from "@/lib/discord";
 import { syncOrderToSheet } from "@/lib/sheetsSync";
+import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -10,7 +11,7 @@ export const revalidate = 0;
 /** 新增訂單 */
 export async function POST(req: Request) {
   const body = await req.json();
-  const { planId, items, username, payment } = body; // items: [{ name, style, qty }]
+  const { planId, items, username, payment, wantsGift, giftSelections } = body; // items: [{ name, style, qty }]
 
   const supabase = getSupabaseAdmin();
 
@@ -23,6 +24,7 @@ export async function POST(req: Request) {
   if (!["匯款", "取付"].includes(payment)) {
     return NextResponse.json({ error: "請先選擇交易方式（匯款 / 取付）" }, { status: 400 });
   }
+  const finalWantsGift = wantsGift !== false;
 
   const { data: member } = await supabase.from("members").select("*").ilike("username", finalUsername).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到你的會員資料，請重新登入。" }, { status: 400 });
@@ -37,50 +39,81 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `此企劃已截止，無法新增訂單。` }, { status: 400 });
   }
 
-  // 價目表對照（避免前端竄改價格），順便記錄圖片快照
+  // 2.5節：檔期是否開放中，這是最後一道防線（前端按鈕已經先擋過一次，這裡避免分頁停留太久後才送出）
+  // 2.6節：一併把8種匯率設定抓出來，計價要用
+  const nowIso = new Date().toISOString();
+  const { data: openCampaigns } = await supabase
+    .from("campaigns")
+    .select("*")
+    .lte("opens_at", nowIso)
+    .gte("closes_at", nowIso)
+    .limit(1);
+  if (!openCampaigns || openCampaigns.length === 0) {
+    return NextResponse.json({ error: "目前沒有開放中的檔期，暫時無法下單，請稍後再試" }, { status: 400 });
+  }
+  const campaign = openCampaigns[0];
+
+  // 價目表對照（避免前端竄改價格），順便記錄圖片快照跟2.6/2.4節需要的滿減標記／取付開關
   const { data: products } = await supabase.from("products").select("*").eq("plan_id", planId);
-  const priceMap: Record<string, number> = {};
-  const imageMap: Record<string, string | null> = {};
+  const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean }> = {};
   (products || []).forEach((p) => {
-    priceMap[`${p.name}||${p.style || ""}`] = Number(p.price);
-    imageMap[`${p.name}||${p.style || ""}`] = p.image_url || null;
+    productMap[`${p.name}||${p.style || ""}`] = {
+      price: Number(p.price),
+      imageUrl: p.image_url || null,
+      hasDiscountFlag: !!p.has_discount_flag,
+      codAllowed: p.cod_allowed !== false,
+    };
   });
 
+  // 2.4節：取付時，個別不開放取付的商品要擋住（列出品項讓顧客調整，不是整張訂單一起擋）
+  if (payment === "取付") {
+    const blockedNames: string[] = [];
+    for (const it of items) {
+      const p = productMap[`${it.name}||${it.style || ""}`];
+      if (p && !p.codAllowed) blockedNames.push(`${it.name}${it.style ? `（${it.style}）` : ""}`);
+    }
+    if (blockedNames.length > 0) {
+      return NextResponse.json(
+        { error: `以下商品不開放取付，請改用匯款或從購物車移除：${blockedNames.join("、")}` },
+        { status: 400 }
+      );
+    }
+  }
+
   let orderTotal = 0;
+  let anyDisabledCombo = false;
   const rows: { name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null }[] = [];
   for (const it of items) {
     const qty = Number(it.qty) || 0;
     if (qty <= 0) continue;
     const style = it.style || "";
-    const unit = priceMap[`${it.name}||${style}`] ?? 0;
+    const p = productMap[`${it.name}||${style}`];
+    if (!p) continue;
+
+    const { enabled, rate } = resolveTxnRate(campaign as CampaignRates, payment === "取付" ? "cod" : "bank", p.hasDiscountFlag, finalWantsGift);
+    if (!enabled || rate == null) {
+      anyDisabledCombo = true;
+      break;
+    }
+    const unit = ceilToTwd(p.price, rate);
     const subtotal = qty * unit;
     orderTotal += subtotal;
-    rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: imageMap[`${it.name}||${style}`] ?? null });
+    rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl });
   }
+  if (anyDisabledCombo) return NextResponse.json({ error: "這個交易方式與滿贈組合目前未開放，請重新選擇" }, { status: 400 });
   if (rows.length === 0) return NextResponse.json({ error: "請至少選擇一項商品的數量" }, { status: 400 });
 
   if (payment === "取付") {
-    const codLimit = Number(plan.cod_limit) || 0;
-    if (codLimit <= 0) return NextResponse.json({ error: "此企劃不提供取付，請改用匯款。" }, { status: 400 });
-
-    // 取付上限是「這個顧客在這個企劃的累計金額」，不是單筆訂單，要把他之前已經下過的取付訂單也算進去
-    const { data: priorOrders } = await supabase
-      .from("orders")
-      .select("order_items(subtotal)")
-      .eq("plan_id", planId)
-      .ilike("username", finalUsername)
-      .eq("payment", "取付");
-    const priorTotal = (priorOrders || []).reduce(
-      (sum, o: any) => sum + (o.order_items || []).reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0),
-      0
-    );
-
-    if (priorTotal + orderTotal > codLimit) {
-      const priorNote = priorTotal > 0 ? `（含你之前已經取付的 NT$ ${fmtMoney(priorTotal)}）` : "";
-      return NextResponse.json(
-        { error: `取付金額 NT$ ${fmtMoney(priorTotal + orderTotal)} 超過取付上限 NT$ ${fmtMoney(codLimit)}${priorNote}，請改用匯款或減少數量。` },
-        { status: 400 }
-      );
+    // 2.4節：這是「檔期」層級的總上限，不是每單、也不是單一企劃的上限
+    if (campaign.cod_campaign_cap != null && Number(campaign.cod_campaign_cap) > 0) {
+      const cap = Number(campaign.cod_campaign_cap);
+      const used = Number(campaign.cod_campaign_used) || 0;
+      if (used + orderTotal > cap) {
+        return NextResponse.json(
+          { error: `取付金額已超過本檔期設定的數量，請改用匯款或減少數量。` },
+          { status: 400 }
+        );
+      }
     }
   }
 
@@ -97,6 +130,8 @@ export async function POST(req: Request) {
         username: member.username,
         profile_url: member.profile_url,
         payment,
+        campaign_id: campaign.id,
+        wants_gift: finalWantsGift,
       })
       .select()
       .single();
@@ -120,6 +155,31 @@ export async function POST(req: Request) {
   }));
   const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
   if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 });
+
+  if (finalWantsGift && Array.isArray(giftSelections) && giftSelections.length > 0) {
+    const giftStyleIds = giftSelections.map((g: any) => g.giftStyleId).filter(Boolean);
+    const { data: giftStylesData } = await supabase.from("gift_styles").select("id, style_name").in("id", giftStyleIds);
+    const nameById = new Map((giftStylesData || []).map((g: any) => [g.id, g.style_name]));
+    const giftRows = giftSelections
+      .filter((g: any) => Number(g.qty) > 0)
+      .map((g: any) => ({
+        order_id: order.id,
+        gift_style_id: g.giftStyleId,
+        style_name_snapshot: nameById.get(g.giftStyleId) || "",
+        qty: Number(g.qty),
+      }));
+    if (giftRows.length > 0) {
+      const { error: giftErr } = await supabase.from("order_gift_selections").insert(giftRows);
+      if (giftErr) console.error("滿贈選擇儲存失敗：", giftErr.message);
+    }
+  }
+
+  if (payment === "取付") {
+    await supabase
+      .from("campaigns")
+      .update({ cod_campaign_used: (Number(campaign.cod_campaign_used) || 0) + orderTotal })
+      .eq("id", campaign.id);
+  }
 
   const lines = rows.map((r) => `• ${r.name}${r.style ? `（${r.style}）` : ""} x${r.qty} = NT$ ${fmtMoney(r.subtotal)}`).join("\n");
   notifyDiscord({

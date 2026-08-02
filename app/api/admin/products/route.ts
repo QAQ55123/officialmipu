@@ -35,6 +35,8 @@ export async function GET(req: Request) {
       style: p.style,
       price: Number(p.price),
       imageUrl: p.image_url,
+      codAllowed: p.cod_allowed,
+      hasDiscountFlag: p.has_discount_flag,
     })),
   });
 }
@@ -67,6 +69,8 @@ export async function POST(req: Request) {
       style: body.style || "",
       price: Number(body.price) || 0,
       image_url: body.imageUrl || null,
+      cod_allowed: body.codAllowed === false ? false : true,
+      has_discount_flag: !!body.hasDiscountFlag,
       sort_order: nextSortOrder,
     })
     .select()
@@ -95,6 +99,8 @@ export async function PUT(req: Request) {
       style: body.style || "",
       price: Number(body.price) || 0,
       image_url: body.imageUrl || null,
+      cod_allowed: body.codAllowed === false ? false : true,
+      has_discount_flag: !!body.hasDiscountFlag,
     })
     .eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

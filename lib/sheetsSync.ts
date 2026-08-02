@@ -54,11 +54,10 @@ export async function syncPlansSheet() {
     p.name,
     p.categories?.name || "（未分類）",
     p.deadline ? new Date(p.deadline).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }) : "常駐",
-    Number(p.cod_limit) || 0,
     p.fulfillment_status || "",
     new Date(p.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }),
   ]);
-  await overwriteSheet("企劃", ["企劃名稱", "分類", "截止時間", "取付上限", "企劃狀態", "建立時間"], rows);
+  await overwriteSheet("企劃", ["企劃名稱", "分類", "截止時間", "企劃狀態", "建立時間"], rows);
 }
 
 /** 「商品」這個分頁已經不需要了，因為每個企劃自己的分頁裡最上面就有一份商品目錄了，

@@ -5,15 +5,15 @@ import { toDirectImageUrl } from "@/lib/imageUrl";
 type Category = { id: string; name: string; parent_id: string | null; created_at?: string; sort_order?: number };
 type PlanAdmin = {
   id: string; name: string; deadline: string | null; imageUrl: string | null;
-  codLimit: number; allowCodOnRemitLink?: boolean; visibleTo: string[]; categoryId: string | null; categoryName: string | null;
+  allowCodOnRemitLink?: boolean; visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number;
   hideAfterDays?: number | null; fulfillmentStatus?: string | null;
 };
-type ProductAdmin = { id: string; planId: string; name: string; style: string; price: number; imageUrl: string | null };
+type ProductAdmin = { id: string; planId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "" };
-const emptyPlanForm = { id: "", name: "", deadline: "", imageUrl: "", codLimit: "0", allowCodOnRemitLink: false, visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], hideAfterDays: "", fulfillmentStatus: "" };
-const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "" };
+const emptyPlanForm = { id: "", name: "", deadline: "", imageUrl: "", allowCodOnRemitLink: false, visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], hideAfterDays: "", fulfillmentStatus: "" };
+const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true };
 
 export default function AdminPage() {
   const [username, setUsername] = useState("");
@@ -35,7 +35,7 @@ export default function AdminPage() {
   const [savingAdminPw, setSavingAdminPw] = useState(false);
   const [savingAdminEmail, setSavingAdminEmail] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
-  const [activeSection, setActiveSection] = useState<"account" | "categories" | "plans" | "products" | "orders" | "members" | "codes" | "legacy" | "announcements">("account");
+  const [activeSection, setActiveSection] = useState<"account" | "categories" | "plans" | "campaigns" | "products" | "orders" | "members" | "codes" | "legacy" | "announcements">("account");
   const categoryFormRef = useRef<HTMLDivElement>(null);
   const planFormRef = useRef<HTMLDivElement>(null);
   const [categoryFilterText, setCategoryFilterText] = useState("");
@@ -51,6 +51,144 @@ export default function AdminPage() {
   const [plans, setPlans] = useState<PlanAdmin[]>([]);
   const [planForm, setPlanForm] = useState(emptyPlanForm);
   const [planMsg, setPlanMsg] = useState("");
+
+  // ---- 檔期（2.4~2.7節：純粹時間窗口，跟企劃/商品無關）----
+  const emptyCampaignRates = () => ({
+    txn_bank_discount_gift_enabled: true, txn_bank_discount_gift_rate: "",
+    txn_bank_discount_nogift_enabled: true, txn_bank_discount_nogift_rate: "",
+    txn_bank_nodiscount_gift_enabled: true, txn_bank_nodiscount_gift_rate: "",
+    txn_bank_nodiscount_nogift_enabled: true, txn_bank_nodiscount_nogift_rate: "",
+    txn_cod_discount_gift_enabled: true, txn_cod_discount_gift_rate: "",
+    txn_cod_discount_nogift_enabled: true, txn_cod_discount_nogift_rate: "",
+    txn_cod_nodiscount_gift_enabled: true, txn_cod_nodiscount_gift_rate: "",
+    txn_cod_nodiscount_nogift_enabled: true, txn_cod_nodiscount_nogift_rate: "",
+  });
+  const emptyCampaignForm = {
+    id: "", name: "", opensAt: "", closesAt: "",
+    codCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "",
+    rates: emptyCampaignRates(),
+  };
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [campaignForm, setCampaignForm] = useState(emptyCampaignForm);
+  const [campaignMsg, setCampaignMsg] = useState("");
+  const [activeCampaignForGifts, setActiveCampaignForGifts] = useState<any | null>(null);
+  const [giftStyles, setGiftStyles] = useState<any[]>([]);
+  const [giftStyleName, setGiftStyleName] = useState("");
+  const [giftStyleThreshold, setGiftStyleThreshold] = useState("");
+  const [giftStyleMsg, setGiftStyleMsg] = useState("");
+
+  const TXN_COMBOS: { key: string; label: string }[] = [
+    { key: "txn_bank_discount_gift", label: "匯款・有滿減・有滿贈" },
+    { key: "txn_bank_discount_nogift", label: "匯款・有滿減・無滿贈" },
+    { key: "txn_bank_nodiscount_gift", label: "匯款・無滿減・有滿贈" },
+    { key: "txn_bank_nodiscount_nogift", label: "匯款・無滿減・無滿贈" },
+    { key: "txn_cod_discount_gift", label: "取付・有滿減・有滿贈" },
+    { key: "txn_cod_discount_nogift", label: "取付・有滿減・無滿贈" },
+    { key: "txn_cod_nodiscount_gift", label: "取付・無滿減・有滿贈" },
+    { key: "txn_cod_nodiscount_nogift", label: "取付・無滿減・無滿贈" },
+  ];
+
+  async function loadCampaigns() {
+    const r = await fetch("/api/admin/campaigns");
+    if (r.status === 401) { setUnlocked(false); setLoginMsg("登入已過期，請重新登入"); return; }
+    const d = await r.json();
+    setCampaigns(d.campaigns || []);
+  }
+
+  function editCampaign(c: any) {
+    const rates: any = {};
+    for (const combo of TXN_COMBOS) {
+      rates[`${combo.key}_enabled`] = c[`${combo.key}_enabled`] ?? true;
+      rates[`${combo.key}_rate`] = c[`${combo.key}_rate`] != null ? String(c[`${combo.key}_rate`]) : "";
+    }
+    setCampaignForm({
+      id: c.id, name: c.name,
+      opensAt: toTaipeiDatetimeLocal(c.opens_at), closesAt: toTaipeiDatetimeLocal(c.closes_at),
+      codCampaignCap: c.cod_campaign_cap != null ? String(c.cod_campaign_cap) : "",
+      giftBaseUnit: String(c.gift_base_unit ?? 100),
+      vendorOrderGiftCap: c.vendor_order_gift_cap != null ? String(c.vendor_order_gift_cap) : "",
+      rates,
+    });
+    setCampaignMsg("");
+  }
+
+  async function saveCampaign() {
+    setCampaignMsg("");
+    if (!campaignForm.name.trim()) return setCampaignMsg("請填寫檔期名稱");
+    if (!campaignForm.opensAt || !campaignForm.closesAt) return setCampaignMsg("請設定開放起訖時間");
+
+    const rateFields: Record<string, any> = {};
+    for (const combo of TXN_COMBOS) {
+      rateFields[`${combo.key}_enabled`] = (campaignForm.rates as any)[`${combo.key}_enabled`];
+      const rateVal = (campaignForm.rates as any)[`${combo.key}_rate`];
+      rateFields[`${combo.key}_rate`] = rateVal === "" ? null : Number(rateVal);
+    }
+
+    try {
+      if (campaignForm.id) {
+        await callJson(`/api/admin/campaigns/${campaignForm.id}`, "PATCH", {
+          name: campaignForm.name,
+          opens_at: fromTaipeiDatetimeLocal(campaignForm.opensAt),
+          closes_at: fromTaipeiDatetimeLocal(campaignForm.closesAt),
+          cod_campaign_cap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
+          gift_base_unit: Number(campaignForm.giftBaseUnit) || 100,
+          vendor_order_gift_cap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
+          ...rateFields,
+        });
+      } else {
+        await callJson("/api/admin/campaigns", "POST", {
+          name: campaignForm.name,
+          opensAt: fromTaipeiDatetimeLocal(campaignForm.opensAt),
+          closesAt: fromTaipeiDatetimeLocal(campaignForm.closesAt),
+          codCampaignCap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
+          giftBaseUnit: Number(campaignForm.giftBaseUnit) || 100,
+          vendorOrderGiftCap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
+          rates: rateFields,
+        });
+      }
+      setCampaignForm(emptyCampaignForm);
+      loadCampaigns();
+    } catch (e: any) {
+      setCampaignMsg(e.message || "儲存失敗");
+    }
+  }
+
+  async function deleteCampaign(id: string) {
+    if (!confirm("確定要刪除這個檔期嗎？")) return;
+    await callJson(`/api/admin/campaigns/${id}`, "DELETE", {});
+    loadCampaigns();
+  }
+
+  async function openGiftStyles(c: any) {
+    setActiveCampaignForGifts(c);
+    setGiftStyleMsg("");
+    const r = await fetch(`/api/admin/campaigns/${c.id}/gift-styles`);
+    if (r.status === 401) { setUnlocked(false); setLoginMsg("登入已過期，請重新登入"); return; }
+    const d = await r.json();
+    setGiftStyles(d.giftStyles || []);
+  }
+
+  async function saveGiftStyle() {
+    if (!activeCampaignForGifts) return;
+    setGiftStyleMsg("");
+    if (!giftStyleName.trim()) return setGiftStyleMsg("請輸入款式名稱");
+    const threshold = Number(giftStyleThreshold);
+    if (!isFinite(threshold) || threshold <= 0) return setGiftStyleMsg("門檻金額格式不正確");
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForGifts.id}/gift-styles`, "POST", { styleName: giftStyleName, thresholdAmount: threshold });
+      setGiftStyleName(""); setGiftStyleThreshold("");
+      openGiftStyles(activeCampaignForGifts);
+    } catch (e: any) {
+      setGiftStyleMsg(e.message || "儲存失敗");
+    }
+  }
+
+  async function deleteGiftStyle(styleId: string) {
+    if (!activeCampaignForGifts) return;
+    if (!confirm("確定要刪除這個款式嗎？")) return;
+    await callJson(`/api/admin/campaigns/${activeCampaignForGifts.id}/gift-styles/${styleId}`, "DELETE", {});
+    openGiftStyles(activeCampaignForGifts);
+  }
 
   // 到貨通知信
   const [notifyPlan, setNotifyPlan] = useState<PlanAdmin | null>(null);
@@ -68,7 +206,7 @@ export default function AdminPage() {
   const [activePlanForProducts, setActivePlanForProducts] = useState<PlanAdmin | null>(null);
   const [products, setProducts] = useState<ProductAdmin[]>([]);
   const [productForm, setProductForm] = useState(emptyProductForm);
-  const [productRows, setProductRows] = useState<{ style: string; price: string; imageUrl: string }[]>([{ style: "", price: "0", imageUrl: "" }]);
+  const [productRows, setProductRows] = useState<{ style: string; price: string; imageUrl: string; hasDiscountFlag: boolean; codAllowed: boolean }[]>([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
   const [uploadingRowImg, setUploadingRowImg] = useState<number | null>(null);
   const [productRowImageUrlInputs, setProductRowImageUrlInputs] = useState<Record<number, string>>({});
   const [draggedProductId, setDraggedProductId] = useState<string | null>(null);
@@ -220,6 +358,12 @@ export default function AdminPage() {
   useEffect(() => {
     if (unlocked && activeSection === "plans") {
       loadPlans();
+    }
+  }, [unlocked, activeSection]);
+
+  useEffect(() => {
+    if (unlocked && activeSection === "campaigns") {
+      loadCampaigns();
     }
   }, [unlocked, activeSection]);
 
@@ -473,7 +617,6 @@ export default function AdminPage() {
       name: p.name,
       deadline: p.deadline ? toTaipeiDatetimeLocal(p.deadline) : "",
       imageUrl: p.imageUrl || "",
-      codLimit: String(p.codLimit || 0),
       allowCodOnRemitLink: !!(p as any).allowCodOnRemitLink,
       visibleTo: p.visibleTo || [],
       categoryId: p.categoryId || "",
@@ -491,7 +634,6 @@ export default function AdminPage() {
       name: planForm.name,
       deadline: planForm.deadline ? fromTaipeiDatetimeLocal(planForm.deadline) : null,
       imageUrl: planForm.imageUrl || null,
-      codLimit: planForm.codLimit,
       allowCodOnRemitLink: planForm.allowCodOnRemitLink,
       visibleTo: planForm.visibleTo,
       categoryId: planForm.categoryId || null,
@@ -644,17 +786,17 @@ export default function AdminPage() {
   async function openProductManager(p: PlanAdmin) {
     setActivePlanForProducts(p);
     setProductForm(emptyProductForm);
-    setProductRows([{ style: "", price: "0", imageUrl: "" }]);
+    setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
     setActiveSection("products");
     await loadProducts(p.id);
   }
 
   function editProduct(p: ProductAdmin) {
-    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "" });
+    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false });
   }
 
   function addProductRow() {
-    setProductRows((rows) => [...rows, { style: "", price: rows[rows.length - 1]?.price || "0", imageUrl: "" }]);
+    setProductRows((rows) => [...rows, { style: "", price: rows[rows.length - 1]?.price || "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
   }
   function removeProductRow(idx: number) {
     setProductRows((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== idx)));
@@ -666,6 +808,9 @@ export default function AdminPage() {
   }
   function updateProductRow(idx: number, field: "style" | "price" | "imageUrl", value: string) {
     setProductRows((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+  function toggleProductRowFlag(idx: number, field: "hasDiscountFlag" | "codAllowed") {
+    setProductRows((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: !r[field] } : r)));
   }
 
   async function handleProductRowImageUpload(idx: number, e: React.ChangeEvent<HTMLInputElement>) {
@@ -703,6 +848,8 @@ export default function AdminPage() {
           style: productForm.style,
           price: productForm.price,
           imageUrl: productForm.imageUrl || null,
+          hasDiscountFlag: productForm.hasDiscountFlag,
+          codAllowed: productForm.codAllowed,
         });
         setProductForm(emptyProductForm);
         setProductMsg("已儲存");
@@ -716,11 +863,13 @@ export default function AdminPage() {
             style: row.style,
             price: row.price || "0",
             imageUrl: row.imageUrl || null,
+            hasDiscountFlag: row.hasDiscountFlag,
+            codAllowed: row.codAllowed,
           });
         }
         // 商品名稱保留，方便接著建下一批款式；款式列表清空回一列
         setProductForm((f) => ({ ...f, style: "", price: "0" }));
-        setProductRows([{ style: "", price: "0", imageUrl: "" }]);
+        setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
         setProductMsg(`已新增 ${rows.length} 筆`);
       }
       await loadProducts(activePlanForProducts.id);
@@ -1379,6 +1528,7 @@ export default function AdminPage() {
           <div className={`account-nav-item ${activeSection === "account" ? "active" : ""}`} onClick={() => setActiveSection("account")}>帳號設定</div>
           <div className={`account-nav-item ${activeSection === "categories" ? "active" : ""}`} onClick={() => setActiveSection("categories")}>分類管理</div>
           <div className={`account-nav-item ${activeSection === "plans" ? "active" : ""}`} onClick={() => setActiveSection("plans")}>企劃管理</div>
+          <div className={`account-nav-item ${activeSection === "campaigns" ? "active" : ""}`} onClick={() => setActiveSection("campaigns")}>檔期管理</div>
           {currentRole === "owner" && (
             <>
               <div className={`account-nav-item ${activeSection === "orders" ? "active" : ""}`} onClick={() => setActiveSection("orders")}>訂單管理</div>
@@ -1627,10 +1777,6 @@ export default function AdminPage() {
           </select>
         </div>
         <div className="id-row">
-          <span className="id-label">取付上限</span>
-          <input type="number" value={planForm.codLimit} onChange={(e) => setPlanForm((f) => ({ ...f, codLimit: e.target.value }))} placeholder="0＝不開放取付" />
-        </div>
-        <div className="id-row">
           <span className="id-label">限定連結取付</span>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#33415C" }}>
             <input
@@ -1737,6 +1883,91 @@ export default function AdminPage() {
             </>
           )}
 
+          {activeSection === "campaigns" && !activeCampaignForGifts && (
+            <div className="auth-card">
+              <h3>檔期管理</h3>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                檔期純粹是時間窗口，開放時間內可下單，時間外僅能瀏覽，跟商品／企劃完全無關
+              </p>
+
+              <div className="id-row"><span className="id-label">名稱</span><input type="text" value={campaignForm.name} onChange={(e) => setCampaignForm((f) => ({ ...f, name: e.target.value }))} placeholder="例如：XX訂購" /></div>
+              <div className="id-row"><span className="id-label">開放起始</span><input type="datetime-local" value={campaignForm.opensAt} onChange={(e) => setCampaignForm((f) => ({ ...f, opensAt: e.target.value }))} /></div>
+              <div className="id-row"><span className="id-label">開放結束</span><input type="datetime-local" value={campaignForm.closesAt} onChange={(e) => setCampaignForm((f) => ({ ...f, closesAt: e.target.value }))} /></div>
+              <div className="id-row"><span className="id-label">取付檔期總上限</span><input type="number" value={campaignForm.codCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, codCampaignCap: e.target.value }))} placeholder="留空＝不限" /></div>
+              <div className="id-row"><span className="id-label">滿贈基礎單位</span><input type="number" value={campaignForm.giftBaseUnit} onChange={(e) => setCampaignForm((f) => ({ ...f, giftBaseUnit: e.target.value }))} /></div>
+              <div className="id-row"><span className="id-label">廠商採購單贈品上限</span><input type="number" value={campaignForm.vendorOrderGiftCap} onChange={(e) => setCampaignForm((f) => ({ ...f, vendorOrderGiftCap: e.target.value }))} /></div>
+
+              <h4 style={{ margin: "16px 0 8px" }}>8種交易組合</h4>
+              {TXN_COMBOS.map((combo) => (
+                <div key={combo.key} className="id-row">
+                  <span className="id-label" style={{ minWidth: 160 }}>{combo.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={(campaignForm.rates as any)[`${combo.key}_enabled`]}
+                    onChange={(e) => setCampaignForm((f) => ({ ...f, rates: { ...f.rates, [`${combo.key}_enabled`]: e.target.checked } }))}
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    style={{ width: 90 }}
+                    value={(campaignForm.rates as any)[`${combo.key}_rate`]}
+                    onChange={(e) => setCampaignForm((f) => ({ ...f, rates: { ...f.rates, [`${combo.key}_rate`]: e.target.value } }))}
+                    placeholder="匯率"
+                  />
+                </div>
+              ))}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button className="btn" onClick={saveCampaign}>{campaignForm.id ? "儲存修改" : "新增檔期"}</button>
+                {campaignForm.id && <button className="btn secondary" onClick={() => setCampaignForm(emptyCampaignForm)}>取消編輯</button>}
+              </div>
+              <div className="auth-msg">{campaignMsg}</div>
+
+              <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                {campaigns.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有檔期</div>}
+                {campaigns.map((c) => (
+                  <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                    <span style={{ fontSize: 14 }}>
+                      {c.name}
+                      <span style={{ fontSize: 12, color: "#8A8779", marginLeft: 8 }}>
+                        {new Date(c.opens_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })} ~ {new Date(c.closes_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
+                      </span>
+                    </span>
+                    <span style={{ display: "flex", gap: 6 }}>
+                      <button className="btn small secondary" onClick={() => openGiftStyles(c)}>滿贈款式登記</button>
+                      <button className="btn small secondary" onClick={() => editCampaign(c)}>編輯</button>
+                      <button className="btn small danger" onClick={() => deleteCampaign(c.id)}>刪除</button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeSection === "campaigns" && activeCampaignForGifts && (
+            <div className="auth-card">
+              <h3>滿贈款式登記：{activeCampaignForGifts.name}</h3>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>每個款式只需登記一次：名稱＋門檻金額</p>
+
+              <div className="id-row"><span className="id-label">款式名稱</span><input type="text" value={giftStyleName} onChange={(e) => setGiftStyleName(e.target.value)} /></div>
+              <div className="id-row"><span className="id-label">門檻金額</span><input type="number" value={giftStyleThreshold} onChange={(e) => setGiftStyleThreshold(e.target.value)} /></div>
+              <button className="btn" onClick={saveGiftStyle}>新增款式</button>
+              <div className="auth-msg">{giftStyleMsg}</div>
+
+              <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                {giftStyles.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有登記任何款式</div>}
+                {giftStyles.map((s) => (
+                  <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                    <span style={{ fontSize: 14 }}>{s.style_name}<span style={{ fontSize: 12, color: "#8A8779", marginLeft: 8 }}>門檻 {s.threshold_amount}</span></span>
+                    <button className="btn small danger" onClick={() => deleteGiftStyle(s.id)}>刪除</button>
+                  </div>
+                ))}
+              </div>
+
+              <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveCampaignForGifts(null)}>關閉滿贈款式登記</button>
+            </div>
+          )}
+
           {activeSection === "products" && activePlanForProducts && (
         <div className="auth-card">
           <h3>商品管理：{activePlanForProducts.name}</h3>
@@ -1811,7 +2042,7 @@ export default function AdminPage() {
                     if (!sourceName) return;
                     const rows = products
                       .filter((p) => p.name === sourceName)
-                      .map((p) => ({ style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "" }));
+                      .map((p) => ({ style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false }));
                     if (rows.length > 0) setProductRows(rows);
                     e.target.value = "";
                   }}
@@ -1834,6 +2065,14 @@ export default function AdminPage() {
               <div className="id-row">
                 <span className="id-label">價格</span>
                 <input type="number" value={productForm.price} onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))} />
+              </div>
+              <div className="id-row">
+                <span className="id-label">是否滿減(v)</span>
+                <input type="checkbox" checked={productForm.hasDiscountFlag} onChange={(e) => setProductForm((f) => ({ ...f, hasDiscountFlag: e.target.checked }))} />
+              </div>
+              <div className="id-row">
+                <span className="id-label">是否開放取付</span>
+                <input type="checkbox" checked={productForm.codAllowed} onChange={(e) => setProductForm((f) => ({ ...f, codAllowed: e.target.checked }))} />
               </div>
               <div className="id-row">
                 <span className="id-label">商品圖片</span>
@@ -1883,6 +2122,16 @@ export default function AdminPage() {
                         <button className="btn small secondary" onClick={() => applyProductRowImageUrl(i)}>使用</button>
                         {uploadingRowImg === i && <span style={{ fontSize: 12, color: "#8A8779" }}>上傳中…</span>}
                       </div>
+                      <div style={{ display: "flex", gap: 14, alignItems: "center", fontSize: 13 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <input type="checkbox" checked={row.hasDiscountFlag} onChange={() => toggleProductRowFlag(i, "hasDiscountFlag")} />
+                          是否滿減(v)
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <input type="checkbox" checked={row.codAllowed} onChange={() => toggleProductRowFlag(i, "codAllowed")} />
+                          開放取付
+                        </label>
+                      </div>
                     </div>
                     {i === productRows.length - 1 ? (
                       <button className="btn small secondary" onClick={addProductRow} title="再新增一列款式" style={{ flexShrink: 0 }}>＋</button>
@@ -1898,7 +2147,7 @@ export default function AdminPage() {
 
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn" onClick={saveProduct}>{productForm.id ? "儲存修改" : "新增商品"}</button>
-            {productForm.id && <button className="btn secondary" onClick={() => { setProductForm(emptyProductForm); setProductRows([{ style: "", price: "0", imageUrl: "" }]); }}>取消編輯</button>}
+            {productForm.id && <button className="btn secondary" onClick={() => { setProductForm(emptyProductForm); setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]); }}>取消編輯</button>}
             <button className="btn secondary" onClick={() => { setActivePlanForProducts(null); setActiveSection("plans"); }}>關閉商品管理</button>
           </div>
           <div style={{ fontSize: 13, marginTop: 6 }}>{productMsg}</div>

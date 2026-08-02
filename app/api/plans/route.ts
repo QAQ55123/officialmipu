@@ -13,7 +13,7 @@ export async function GET(req: Request) {
 
   let query = supabase
     .from("plans")
-    .select("id, name, deadline, image_url, cod_limit, visible_to, sort_order, category_id, hide_after_days, categories(id, name, parent_id)")
+    .select("id, name, deadline, image_url, visible_to, sort_order, category_id, hide_after_days, categories(id, name, parent_id)")
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
 
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
     if (missingIds.length > 0) {
       const { data: extra } = await supabase
         .from("plans")
-        .select("id, name, deadline, image_url, cod_limit, visible_to, sort_order, category_id, hide_after_days, categories(id, name, parent_id)")
+        .select("id, name, deadline, image_url, visible_to, sort_order, category_id, hide_after_days, categories(id, name, parent_id)")
         .in("id", missingIds);
       rows = rows.concat(extra || []);
     }
@@ -69,7 +69,6 @@ export async function GET(req: Request) {
     id: p.id,
     name: p.name,
     imageUrl: p.image_url,
-    codLimit: p.cod_limit || 0,
     deadline: p.deadline,
     closed: p.deadline ? new Date(p.deadline).getTime() < now : false,
     categoryId: p.category_id,

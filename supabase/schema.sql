@@ -29,16 +29,6 @@ create table if not exists admins (
   created_at            timestamptz default now()
 );
 
--- 收藏清單（會員收藏的企劃）
-create table if not exists favorites (
-  id          uuid primary key default gen_random_uuid(),
-  member_id   uuid not null references members(id) on delete cascade,
-  plan_id     uuid not null references plans(id) on delete cascade,
-  created_at  timestamptz default now(),
-  unique (member_id, plan_id)
-);
-create index if not exists idx_favorites_member on favorites (member_id);
-
 -- 分類（兩層：分類 > 子分類。子分類的 parent_id 指向上層分類；頂層分類 parent_id 為 null）
 create table if not exists categories (
   id            uuid primary key default gen_random_uuid(),
@@ -55,7 +45,6 @@ create table if not exists plans (
   name          text not null,               -- 企劃名稱
   deadline      timestamptz,                 -- 截止時間（null = 不限期）
   image_url     text,                        -- 企劃圖片
-  cod_limit     numeric default 0,           -- 取付上限（0 或負數 = 不開放取付）
   visible_to    text[] default '{}',         -- 顯示對象，例如 {LINE,DC}；空陣列 = 全部看得到
   category_id   uuid references categories(id) on delete set null,  -- 歸屬的分類或子分類（可為任一層）
   promo_images  text[] default '{}',         -- 宣傳圖（可多張），顯示在商品頁最上方
@@ -103,6 +92,16 @@ create unique index if not exists idx_members_username on members (lower(usernam
 create unique index if not exists idx_members_email on members (lower(email));
 create unique index if not exists idx_members_profile_url_norm on members (profile_url_norm);
 create index if not exists idx_members_discord_user_id on members (discord_user_id);
+
+-- 收藏清單（會員收藏的企劃）
+create table if not exists favorites (
+  id          uuid primary key default gen_random_uuid(),
+  member_id   uuid not null references members(id) on delete cascade,
+  plan_id     uuid not null references plans(id) on delete cascade,
+  created_at  timestamptz default now(),
+  unique (member_id, plan_id)
+);
+create index if not exists idx_favorites_member on favorites (member_id);
 
 -- 訂單（一張訂單一筆，品項另外存 order_items）
 create table if not exists orders (
@@ -201,3 +200,81 @@ create table if not exists site_settings (
   value       text,
   updated_at  timestamptz not null default now()
 );
+
+-- ============================================================
+-- 檔期（Campaign）— 規格書 2.4~2.7 節，全新概念，跟企劃(plans)無關
+-- 純粹是時間窗口：開放時間內可下單，時間外僅能瀏覽，跟商品/系列完全沒有關聯
+-- ============================================================
+
+create table if not exists campaigns (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null,
+  opens_at      timestamptz not null,
+  closes_at     timestamptz not null,
+
+  -- 2.4節：取付檔期總上限（可留空=不限），已用金額由系統自動累計，不是店家手動輸入
+  cod_campaign_cap   numeric,
+  cod_campaign_used  numeric not null default 0,
+
+  -- 2.6節：8種交易組合，{匯款,取付} x {有滿減,無滿減} x {有滿贈,無滿贈}，各自可開關+各自匯率
+  txn_bank_discount_gift_enabled      boolean not null default true,
+  txn_bank_discount_gift_rate         numeric,
+  txn_bank_discount_nogift_enabled    boolean not null default true,
+  txn_bank_discount_nogift_rate       numeric,
+  txn_bank_nodiscount_gift_enabled    boolean not null default true,
+  txn_bank_nodiscount_gift_rate       numeric,
+  txn_bank_nodiscount_nogift_enabled  boolean not null default true,
+  txn_bank_nodiscount_nogift_rate     numeric,
+  txn_cod_discount_gift_enabled       boolean not null default true,
+  txn_cod_discount_gift_rate          numeric,
+  txn_cod_discount_nogift_enabled     boolean not null default true,
+  txn_cod_discount_nogift_rate        numeric,
+  txn_cod_nodiscount_gift_enabled     boolean not null default true,
+  txn_cod_nodiscount_gift_rate        numeric,
+  txn_cod_nodiscount_nogift_enabled   boolean not null default true,
+  txn_cod_nodiscount_nogift_rate      numeric,
+
+  -- 2.7節：滿贈基礎單位、廠商單張採購單贈品上限（跟第3節拆單工具共用同一份設定）
+  gift_base_unit         numeric not null default 100,
+  vendor_order_gift_cap  int,
+
+  sort_order    int default 0,
+  created_at    timestamptz default now(),
+  updated_at    timestamptz default now()
+);
+
+-- 滿贈款式登記（2.7節，綁在特定檔期底下，一對多關係，獨立成表）
+create table if not exists gift_styles (
+  id                uuid primary key default gen_random_uuid(),
+  campaign_id       uuid not null references campaigns(id) on delete cascade,
+  style_name        text not null,
+  threshold_amount  numeric not null,
+  created_at        timestamptz default now()
+);
+create index if not exists idx_gift_styles_campaign on gift_styles (campaign_id);
+
+-- 2.4節：商品要加「是否開放取付」勾選欄位，預設打勾（開放）
+alter table products add column if not exists cod_allowed boolean not null default true;
+-- 2.6節：是否標記v(滿減)，決定結帳時套用8種匯率組合裡的哪一軌，不是給顧客看的折扣
+alter table products add column if not exists has_discount_flag boolean not null default true;
+
+alter table campaigns disable row level security;
+alter table gift_styles disable row level security;
+
+-- 完全移除企劃層級的取付上限機制（改用檔期層級的 campaigns.cod_campaign_cap，見2.4節）
+alter table plans drop column if exists cod_limit;
+
+-- 2.5節：訂單記錄下單當下屬於哪個檔期；2.7節：是否選滿贈、選了哪些款式各幾個
+alter table orders add column if not exists campaign_id uuid references campaigns(id) on delete set null;
+alter table orders add column if not exists wants_gift boolean not null default true;
+
+create table if not exists order_gift_selections (
+  id            uuid primary key default gen_random_uuid(),
+  order_id      uuid not null references orders(id) on delete cascade,
+  gift_style_id uuid references gift_styles(id) on delete set null,
+  style_name_snapshot text, -- 款式被刪除後，訂單仍保留當初選的名稱
+  qty           int not null,
+  created_at    timestamptz default now()
+);
+create index if not exists idx_order_gift_selections_order on order_gift_selections (order_id);
+alter table order_gift_selections disable row level security;

@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { Menu, Search, UserCircle, ShoppingCart, X, ChevronDown, ChevronRight, Heart, Bell } from "lucide-react";
+import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 
 type Category = { id: string; name: string; parentId: string | null };
 type Plan = {
-  id: string; name: string; imageUrl?: string; codLimit: number; allowCodOnRemitLink?: boolean; deadline?: string; closed: boolean;
+  id: string; name: string; imageUrl?: string; allowCodOnRemitLink?: boolean; deadline?: string; closed: boolean;
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
@@ -38,6 +39,24 @@ export default function Home() {
   const identityRef = useRef<Identity>(null);
   useEffect(() => { identityRef.current = identity; }, [identity]);
   const [toast, setToast] = useState("");
+  // 2.5節：檔期是否開放中，只影響「能不能結帳」，不影響瀏覽／加入購物車
+  const [campaignOpen, setCampaignOpen] = useState(true); // 先預設true，抓到真實狀態前不擋顧客
+  // 2.4節：檔期層級的取付總上限（不是每個企劃各自的上限）
+  const [campaignCodAvailable, setCampaignCodAvailable] = useState(true);
+  const [campaignCodCap, setCampaignCodCap] = useState<number | null>(null);
+  const [campaignCodUsed, setCampaignCodUsed] = useState(0);
+  const [currentCampaign, setCurrentCampaign] = useState<any | null>(null); // 完整檔期資料，含8種匯率、滿贈基礎設定
+  useEffect(() => {
+    fetch("/api/campaigns/current").then((r) => r.json()).then((d) => {
+      setCampaignOpen(!!d.isOpen);
+      const cap = d.campaign?.cod_campaign_cap ?? null;
+      const used = Number(d.campaign?.cod_campaign_used) || 0;
+      setCampaignCodCap(cap);
+      setCampaignCodUsed(used);
+      setCampaignCodAvailable(cap == null || used < cap);
+      setCurrentCampaign(d.campaign || null);
+    }).catch(() => {});
+  }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [accountCurrentPw, setAccountCurrentPw] = useState("");
   const [accountPasswordSectionPw, setAccountPasswordSectionPw] = useState("");
@@ -161,11 +180,15 @@ export default function Home() {
     } catch {}
   }, [globalCart]);
 
-  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; deadline: string | null; closed: boolean; codLimit: number; priorCodTotal: number; allowCodOnRemitLink: boolean; found: boolean }>>({});
+  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; deadline: string | null; closed: boolean; allowCodOnRemitLink: boolean; found: boolean; products: { id: string; name: string; style: string; hasDiscountFlag: boolean; codAllowed: boolean }[] }>>({});
   const [cartPaymentByPlan, setCartPaymentByPlan] = useState<Record<string, string>>({});
   const [checkoutingPlanId, setCheckoutingPlanId] = useState<string | null>(null);
   const [selectedCartKeys, setSelectedCartKeys] = useState<Set<string>>(new Set());
   const [checkoutPaymentByPlan, setCheckoutPaymentByPlan] = useState<Record<string, string>>({});
+  // 2.7節：每個企劃分組各自決定要不要滿贈、選了哪些款式（範圍是這個企劃分組送出的這張訂單）
+  const [wantsGiftByPlan, setWantsGiftByPlan] = useState<Record<string, boolean>>({});
+  const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; max: number }[] }>>({});
+  const [giftPicksByPlan, setGiftPicksByPlan] = useState<Record<string, Record<string, number>>>({});
   const [submittingCheckout, setSubmittingCheckout] = useState(false);
   const [selectedProductName, setSelectedProductName] = useState<string | null>(null);
   const [selectedStyleByProduct, setSelectedStyleByProduct] = useState<Record<string, string>>({});
@@ -598,7 +621,7 @@ export default function Home() {
     setFavoritedPlanIds(new Set<string>(d.planIds || []));
     setFavoritePlans(
       (d.favorites || []).map((f: any) => ({
-        id: f.id, name: f.name, imageUrl: f.imageUrl, codLimit: 0, deadline: f.deadline,
+        id: f.id, name: f.name, imageUrl: f.imageUrl, deadline: f.deadline,
         closed: f.closed, categoryId: null, categoryName: f.categoryName, categoryParentId: null,
       }))
     );
@@ -732,21 +755,24 @@ export default function Home() {
         try {
           const qs = uname ? `?username=${encodeURIComponent(uname)}` : "";
           const r = await fetch(`/api/plans/${id}${qs}`, { cache: "no-store" });
-          if (!r.ok) return [id, null] as const;
+          if (!r.ok) return [id, null, null] as const;
           const d = await r.json();
-          return [id, d.plan] as const;
+          return [id, d.plan, d.products] as const;
         } catch {
-          return [id, null] as const;
+          return [id, null, null] as const;
         }
       })
     );
     setCartPlanStatus((prev) => {
       const next = { ...prev };
-      for (const [id, plan] of results) {
+      for (const [id, plan, products] of results) {
         if (plan) {
-          next[id] = { name: plan.name, deadline: plan.deadline, closed: plan.closed, codLimit: plan.codLimit || 0, priorCodTotal: plan.priorCodTotal || 0, allowCodOnRemitLink: !!plan.allowCodOnRemitLink, found: true };
+          next[id] = {
+            name: plan.name, deadline: plan.deadline, closed: plan.closed, allowCodOnRemitLink: !!plan.allowCodOnRemitLink, found: true,
+            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false })),
+          };
         } else {
-          next[id] = { name: "", deadline: null, closed: true, codLimit: 0, priorCodTotal: 0, allowCodOnRemitLink: false, found: false };
+          next[id] = { name: "", deadline: null, closed: true, allowCodOnRemitLink: false, found: false, products: [] };
         }
       }
       return next;
@@ -805,11 +831,44 @@ export default function Home() {
     setSelectedCartKeys(new Set());
   }
 
+  async function fetchGiftQuotaForPlan(planId: string, items: GlobalCartEntry[]) {
+    if (!currentCampaign) return;
+    const liveProducts = cartPlanStatus[planId]?.products || [];
+    const resolvedItems = items
+      .map((e) => {
+        const match = liveProducts.find((p) => p.name === e.productName && p.style === e.style);
+        return match ? { productId: match.id, qty: e.qty } : null;
+      })
+      .filter((x): x is { productId: string; qty: number } => !!x);
+    if (resolvedItems.length === 0) return;
+    try {
+      const r = await fetch("/api/cart/quote", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: currentCampaign.id, items: resolvedItems }),
+      });
+      const d = await r.json();
+      if (r.ok) setGiftQuotaByPlan((prev) => ({ ...prev, [planId]: { quota: d.quota, styleLimits: d.styleLimits } }));
+    } catch {
+      // 試算失敗不擋結帳流程，只是滿贈數量顯示不出來
+    }
+  }
+
   function goToCheckout() {
     const selectedActive = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isGroupActive(e.planId));
     if (selectedActive.length === 0) return showToast("請先勾選要結帳的商品（已失效的企劃無法結帳）");
     syncUrl({ view: "checkout" });
     setView("checkout");
+    const grouped = selectedActive.reduce<Record<string, GlobalCartEntry[]>>((acc, e) => {
+      acc[e.planId] = acc[e.planId] || [];
+      acc[e.planId].push(e);
+      return acc;
+    }, {});
+    setWantsGiftByPlan((prev) => {
+      const next = { ...prev };
+      for (const planId of Object.keys(grouped)) if (!(planId in next)) next[planId] = true;
+      return next;
+    });
+    for (const [planId, items] of Object.entries(grouped)) fetchGiftQuotaForPlan(planId, items);
   }
 
   async function submitCheckout() {
@@ -833,6 +892,9 @@ export default function Home() {
       const groupItems = selectedEntries.filter((e) => e.planId === planId);
       const planAllowsCod = !remitOnlyMode || !!cartPlanStatus[planId]?.allowCodOnRemitLink;
       const payment = planAllowsCod ? (checkoutPaymentByPlan[planId] || "匯款") : "匯款";
+      const wantsGift = wantsGiftByPlan[planId] ?? true;
+      const picks = giftPicksByPlan[planId] || {};
+      const giftSelections = Object.entries(picks).filter(([, qty]) => qty > 0).map(([giftStyleId, qty]) => ({ giftStyleId, qty }));
       try {
         const r = await fetch("/api/orders", {
           method: "POST",
@@ -842,6 +904,9 @@ export default function Home() {
             items: groupItems.map((e) => ({ name: e.productName, style: e.style, qty: e.qty })),
             username: identity.username,
             payment,
+            campaignId: currentCampaign?.id || null,
+            wantsGift,
+            giftSelections,
           }),
         });
         const d = await r.json();
@@ -1978,7 +2043,9 @@ export default function Home() {
                           .reduce((s, e) => s + e.qty * e.price, 0)
                       )}</strong>
                     </span>
-                    <button className="btn" disabled={selectedCartKeys.size === 0} onClick={goToCheckout}>前往結帳</button>
+                    <button className="btn" disabled={selectedCartKeys.size === 0 || !campaignOpen} onClick={goToCheckout}>
+                      {campaignOpen ? "前往結帳" : "目前非開放購買"}
+                    </button>
                   </div>
                 )}
               </div>
@@ -2002,21 +2069,47 @@ export default function Home() {
                     acc[e.planId].push(e);
                     return acc;
                   }, {});
-                  const grandTotal = selectedEntries.reduce((s, e) => s + e.qty * e.price, 0);
+
+                  // 2.6節：依「交易方式 × 商品是否標記v × 是否選滿贈」算每項的實際金額；沒有檔期匯率資料時退回原價
+                  function itemAmount(planId: string, e: GlobalCartEntry, payment: string, wantsGift: boolean): number {
+                    if (!currentCampaign) return e.qty * e.price;
+                    const liveProduct = cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style);
+                    const hasDiscountFlag = liveProduct?.hasDiscountFlag ?? true;
+                    const { enabled, rate } = resolveTxnRate(currentCampaign as CampaignRates, payment === "取付" ? "cod" : "bank", hasDiscountFlag, wantsGift);
+                    if (!enabled || rate == null) return e.qty * e.price; // 這個組合沒開放時，先顯示原價，送出時後端會再擋一次
+                    return ceilToTwd(e.price, rate) * e.qty;
+                  }
+
+                  const grandTotal = Object.entries(grouped).reduce((sum, [planId, entries]) => {
+                    const payment = checkoutPaymentByPlan[planId] || "匯款";
+                    const wantsGift = wantsGiftByPlan[planId] ?? true;
+                    return sum + entries.reduce((s, e) => s + itemAmount(planId, e, payment, wantsGift), 0);
+                  }, 0);
 
                   return (
                     <>
                       {Object.entries(grouped).map(([planId, entries]) => {
                         const live = cartPlanStatus[planId];
                         const planName = live?.name || entries[0].planName;
-                        const groupTotal = entries.reduce((s, e) => s + e.qty * e.price, 0);
-                        const codLimit = live?.codLimit || 0;
-                        const priorCodTotal = live?.priorCodTotal || 0;
-                        const codOffered = codLimit > 0 && (!remitOnlyMode || live?.allowCodOnRemitLink);
-                        const codOverLimit = codOffered && priorCodTotal + groupTotal > codLimit;
-                        const codDisabled = !codOffered || codOverLimit;
+                        const codOffered = campaignCodAvailable && (!remitOnlyMode || live?.allowCodOnRemitLink);
+                        const codDisabled = !codOffered;
                         const rawPayment = checkoutPaymentByPlan[planId] || "匯款";
                         const payment = (rawPayment === "取付" && codDisabled) ? "匯款" : rawPayment;
+                        const wantsGift = wantsGiftByPlan[planId] ?? true;
+                        const groupTotal = entries.reduce((s, e) => s + itemAmount(planId, e, payment, wantsGift), 0);
+                        const quota = giftQuotaByPlan[planId];
+                        const picks = giftPicksByPlan[planId] || {};
+                        const pickedTotal = Object.values(picks).reduce((s, n) => s + n, 0);
+
+                        function adjustGiftPick(styleId: string, delta: number, max: number) {
+                          setGiftPicksByPlan((prev) => {
+                            const cur = prev[planId] || {};
+                            const otherTotal = Object.entries(cur).filter(([k]) => k !== styleId).reduce((s, [, v]) => s + v, 0);
+                            const next = Math.max(0, Math.min(max, (cur[styleId] || 0) + delta, (quota?.quota ?? 0) - otherTotal));
+                            return { ...prev, [planId]: { ...cur, [styleId]: next } };
+                          });
+                        }
+
                         return (
                           <div key={planId} className="cart-group">
                             <div className="cart-group-header">
@@ -2028,7 +2121,7 @@ export default function Home() {
                                   {e.imageUrl ? <img src={e.imageUrl} alt={e.productName} className="cart-item-img" /> : <div className="cart-item-img cart-item-img-empty" />}
                                   <span>{e.productName}{e.style ? `（${e.style}）` : ""} x{e.qty}</span>
                                 </div>
-                                <span className="cart-item-price">NT$ {fmt(e.qty * e.price)}</span>
+                                <span className="cart-item-price">NT$ {fmt(itemAmount(planId, e, payment, wantsGift))}</span>
                               </div>
                             ))}
                             <div className="cart-checkout-footer">
@@ -2047,9 +2140,38 @@ export default function Home() {
                                     </button>
                                   ))}
                                 </div>
-                                {codOverLimit && (
+                                {!campaignCodAvailable && (
                                   <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
-                                    取付金額超過上限（NT$ {fmt(codLimit)}）{priorCodTotal > 0 ? `，含你之前已取付的 NT$ ${fmt(priorCodTotal)}` : ""}，請改用匯款或減少數量
+                                    取付金額已超過本檔期設定的數量，請改用匯款
+                                  </div>
+                                )}
+                              </div>
+
+                              <div style={{ marginTop: 12 }}>
+                                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={wantsGift}
+                                    onChange={(e2) => setWantsGiftByPlan((prev) => ({ ...prev, [planId]: e2.target.checked }))}
+                                  />
+                                  要選擇滿贈
+                                </label>
+                                {wantsGift && quota && (
+                                  <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginTop: 8 }}>
+                                    <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>可選 {pickedTotal} / {quota.quota} 個</div>
+                                    {quota.styleLimits.map((s) => {
+                                      const picked = picks[s.giftStyleId] || 0;
+                                      return (
+                                        <div key={s.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                          <span style={{ fontSize: 13 }}>{s.styleName}{s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（尚未解鎖）</span>}</span>
+                                          <div className="stepper">
+                                            <button className="step-btn" disabled={picked <= 0} onClick={() => adjustGiftPick(s.giftStyleId, -1, s.max)}>－</button>
+                                            <input className="qty" value={picked} readOnly />
+                                            <button className="step-btn" disabled={picked >= s.max} onClick={() => adjustGiftPick(s.giftStyleId, 1, s.max)}>＋</button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 )}
                               </div>

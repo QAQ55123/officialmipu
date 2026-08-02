@@ -33,13 +33,6 @@ export async function PUT(req: Request, { params }: { params: { orderNo: string 
     })
     .filter(Boolean);
 
-  if (order.payment === "取付" && Number(order.plans?.cod_limit) > 0) {
-    const total = newRows.reduce((s: number, r: any) => s + r.subtotal, 0);
-    if (total > Number(order.plans.cod_limit)) {
-      return NextResponse.json({ error: `取付金額超過上限 NT$ ${order.plans.cod_limit}` }, { status: 400 });
-    }
-  }
-
   await supabase.from("order_items").delete().eq("order_id", order.id);
   if (newRows.length > 0) {
     await supabase.from("order_items").insert(newRows);
