@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useMemo, useRef } from "react";
-import { ShoppingCart } from "lucide-react";
+import { Menu, Search, UserCircle, ShoppingCart, X, Bell } from "lucide-react";
 
 type Series = { id: string; name: string; is_gift_series: boolean };
 type Variant = { id: string; style_name: string | null; amount: number; image_url: string | null; cod_allowed: boolean; has_discount_flag: boolean };
@@ -28,9 +28,19 @@ export default function Home() {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [announcementPanelOpen, setAnnouncementPanelOpen] = useState(false);
   const [announcements, setAnnouncements] = useState<{ id: string; content: string; createdAt: string }[]>([]);
-  const [username, setUsername] = useState("");
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const announcementWrapRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     fetch("/api/announcements").then((r) => r.json()).then((d) => setAnnouncements(d.announcements || []));
+  }, []);
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (announcementWrapRef.current && !announcementWrapRef.current.contains(e.target as Node)) {
+        setAnnouncementPanelOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
   function showToast(msg: string) {
     setToast(msg);
@@ -179,6 +189,7 @@ export default function Home() {
     [products, selectedSeriesId]
   );
   const cartCount = cart.reduce((s, e) => s + e.qty, 0);
+  const cartTotal = cart.reduce((s, e) => s + e.qty * e.price, 0);
 
   // 商品詳情：每個款式各自暫存數量，全部調完一次「加入購物車」才一起送進去（比照原本邏輯）
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
@@ -331,13 +342,120 @@ export default function Home() {
 
   return (
     <div>
-      <div className="topbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--line)" }}>
-        <span style={{ fontWeight: 700, cursor: "pointer" }} onClick={() => setView("browse")}>訂購網站</span>
-        <button className="mibu-cart-wrap" onClick={() => setView("cart")} style={{ background: "none", border: "none", cursor: "pointer" }} aria-label="購物車">
-          <ShoppingCart size={19} color="var(--muted)" />
-          {cartCount > 0 && <span className="mibu-cart-badge">{cartCount}</span>}
-        </button>
-      </div>
+      {!bannerDismissed && announcements[0] && (
+        <div className="mibu-announcement-banner">
+          <span className="mibu-announcement-banner-spacer" aria-hidden="true" />
+          <span className="mibu-announcement-banner-text-wrap">
+            <span className="mibu-announcement-banner-text">{announcements[0].content}</span>
+          </span>
+          <button className="mibu-announcement-banner-close" aria-label="關閉公告" onClick={() => setBannerDismissed(true)}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      <header className="mibu-header">
+        <div className="mibu-header-inner">
+          {!searchOpen && (
+            <div className="mibu-header-row">
+              <div className="mibu-logo-group">
+                <button className="mibu-icon-btn" aria-label="展開分類目錄" onClick={() => setMobileDrawerOpen((v) => !v)}>
+                  <Menu size={20} />
+                </button>
+                <span className="mibu-logo" onClick={() => setView("browse")} style={{ cursor: "pointer" }}>訂購網站</span>
+              </div>
+              <div className="mibu-right-group">
+                <div className="mibu-search-desktop">
+                  <Search size={15} color="var(--muted)" />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") setView("browse"); }}
+                    placeholder="搜尋商品"
+                  />
+                </div>
+                <button className="mibu-icon-btn mibu-search-icon-mobile" aria-label="搜尋" onClick={() => setSearchOpen(true)}>
+                  <Search size={19} />
+                </button>
+
+                <div className="mibu-hover-wrap" ref={announcementWrapRef}>
+                  <button className="mibu-icon-btn" aria-label="公告" onClick={() => setAnnouncementPanelOpen((v) => !v)}>
+                    <Bell size={19} />
+                  </button>
+                  {announcementPanelOpen && (
+                    <div className="mibu-announcement-panel">
+                      <div className="mibu-hover-panel-title">最新公告</div>
+                      {announcements.length === 0 ? (
+                        <div className="mibu-hover-panel-empty">目前沒有公告</div>
+                      ) : (
+                        announcements.map((a) => (
+                          <div key={a.id} className="mibu-announcement-panel-item">
+                            <div className="mibu-announcement-panel-date">{new Date(a.createdAt).toLocaleString("zh-TW")}</div>
+                            <div className="mibu-announcement-panel-content-row">
+                              <span className="mibu-announcement-panel-content">{a.content}</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mibu-hover-wrap">
+                  <button className="mibu-icon-btn" aria-label="會員" onClick={() => (loggedIn ? null : requireLoginThen("checkout"))}>
+                    <UserCircle size={19} />
+                  </button>
+                  <div className="mibu-hover-panel">
+                    {loggedIn ? (
+                      <div className="mibu-hover-panel-title">已登入</div>
+                    ) : (
+                      <div className="mibu-hover-panel-empty">尚未登入</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mibu-hover-wrap">
+                  <button className="mibu-cart-wrap" onClick={() => setView("cart")} style={{ background: "none", border: "none", cursor: "pointer" }} aria-label="購物車">
+                    <ShoppingCart size={19} color="var(--muted)" />
+                    {cartCount > 0 && <span className="mibu-cart-badge">{cartCount}</span>}
+                  </button>
+                  <div className="mibu-hover-panel">
+                    <div className="mibu-hover-panel-title">購物車</div>
+                    {cart.length === 0 ? (
+                      <div className="mibu-hover-panel-empty">購物車是空的</div>
+                    ) : (
+                      <div className="mibu-hover-panel-row" style={{ fontWeight: 600, color: "var(--text)" }}>
+                        <span>合計</span><span>NT$ {fmt(cartTotal)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {loggedIn ? (
+                  <button className="mibu-auth-link" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); await checkSession(); }}>登出</button>
+                ) : (
+                  <button className="mibu-auth-link" onClick={() => requireLoginThen("checkout")}>登入 / 註冊</button>
+                )}
+              </div>
+            </div>
+          )}
+          {searchOpen && (
+            <div className="mibu-header-row mibu-search-mobile-bar">
+              <Search size={16} color="var(--muted)" />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { setView("browse"); setSearchOpen(false); } }}
+                placeholder="搜尋商品"
+              />
+              <button className="mibu-icon-btn" aria-label="關閉搜尋" onClick={() => setSearchOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
 
       {!isOpen && (
         <div style={{ background: "#FCEBEB", color: "#791F1F", fontSize: 13, textAlign: "center", padding: "8px 12px" }}>
