@@ -68,7 +68,7 @@ export default function AnnouncementsSection() {
         {list.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有發佈過任何公告</div>}
         {list.map((a) => (
           <div key={a.id} style={{ padding: "8px 0", borderBottom: "1px dashed #EDE9DC" }}>
-            <div style={{ fontSize: 12, color: "#8A8779" }}>{new Date(a.created_at).toLocaleString("zh-TW")}</div>
+            <div style={{ fontSize: 12, color: "#8A8779" }}>{new Date(a.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</div>
             <div style={{ fontSize: 14, whiteSpace: "pre-wrap", margin: "4px 0" }}>{a.content}</div>
             <button className="btn small danger" onClick={() => deleteItem(a.id)}>刪除</button>
           </div>

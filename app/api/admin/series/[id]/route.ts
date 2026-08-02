@@ -12,6 +12,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const updates: Record<string, any> = {};
   if ("name" in body) updates.name = String(body.name).trim();
   if ("sortOrder" in body) updates.sort_order = body.sortOrder;
+  if ("categoryId" in body) updates.category_id = body.categoryId || null;
 
   if (Object.keys(updates).length === 0) return NextResponse.json({ error: "沒有可更新的欄位" }, { status: 400 });
 

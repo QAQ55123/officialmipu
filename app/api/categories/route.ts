@@ -4,10 +4,10 @@ import { getSupabase } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// GET /api/series — 前台系列列表（不需要登入）
+// GET /api/categories — 前台分類列表（不需要登入）
 export async function GET() {
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("series").select("id, name, is_gift_series, category_id").order("sort_order", { ascending: true });
+  const { data, error } = await supabase.from("categories").select("id, name").order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ series: data });
+  return NextResponse.json({ categories: data });
 }

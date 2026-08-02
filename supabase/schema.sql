@@ -62,6 +62,17 @@ create unique index if not exists idx_members_profile_url_norm on members (profi
 -- 2.3 系列分類（商品的分類結構，商品直接歸屬系列）
 -- ============================================================
 
+-- ============================================================
+-- 2.3 分類／系列（兩層式：上層叫「分類」維持原名，下層才改叫「系列」，兩者是不同名稱的兩個層級）
+-- ============================================================
+
+create table if not exists categories (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null,
+  sort_order    int default 0,
+  created_at    timestamptz default now()
+);
+
 create table if not exists series (
   id            uuid primary key default gen_random_uuid(),
   name          text not null,
@@ -69,6 +80,9 @@ create table if not exists series (
   sort_order    int default 0,
   created_at    timestamptz default now()
 );
+-- 系列歸屬在哪個分類底下（選填，沒有指定分類的系列會顯示在「未分類」）
+alter table series add column if not exists category_id uuid references categories(id) on delete set null;
+create index if not exists idx_series_category on series (category_id);
 
 -- ============================================================
 -- 2.2 商品與款式（獨立商品庫，只歸屬系列，與檔期完全無關——規格書第5節明確沒有campaign關聯）
@@ -409,6 +423,7 @@ alter table admin_invite_codes disable row level security;
 alter table admins disable row level security;
 alter table members disable row level security;
 alter table series disable row level security;
+alter table categories disable row level security;
 alter table products disable row level security;
 alter table product_variants disable row level security;
 alter table campaigns disable row level security;

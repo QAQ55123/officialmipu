@@ -45,7 +45,7 @@ export default function MembersSection() {
         {result && (
           <div style={{ borderTop: "1px solid #EDE9DC", paddingTop: 10, marginTop: 4, fontSize: 13 }}>
             <div>Email：{result.email}（{result.email_verified ? "已驗證" : "尚未驗證"}）</div>
-            <div>註冊時間：{new Date(result.created_at).toLocaleString("zh-TW")}</div>
+            <div>註冊時間：{new Date(result.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</div>
           </div>
         )}
       </div>

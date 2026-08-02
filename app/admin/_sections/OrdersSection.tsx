@@ -35,7 +35,7 @@ export default function OrdersSection() {
         ) : (
           orders.map((o) => (
             <div key={o.id} style={{ padding: "8px 0", borderBottom: "1px dashed #EDE9DC", fontSize: 13 }}>
-              {o.customerName} · {o.txnMethod} · {o.itemCount} 項品項 · {new Date(o.createdAt).toLocaleString("zh-TW")}
+              {o.customerName} · {o.txnMethod} · {o.itemCount} 項品項 · {new Date(o.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
             </div>
           ))
         )

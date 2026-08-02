@@ -2,7 +2,8 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { Menu, Search, UserCircle, ShoppingCart, X, Bell } from "lucide-react";
 
-type Series = { id: string; name: string; is_gift_series: boolean };
+type Series = { id: string; name: string; is_gift_series: boolean; category_id: string | null };
+type CategoryItem = { id: string; name: string };
 type Variant = { id: string; style_name: string | null; amount: number; image_url: string | null; cod_allowed: boolean; has_discount_flag: boolean };
 type Product = { id: string; name: string; series_id: string | null; product_variants: Variant[] };
 type CartEntry = { productVariantId: string; productId: string; name: string; style: string | null; qty: number; price: number; imageUrl: string | null };
@@ -15,6 +16,9 @@ export default function Home() {
   const [view, setView] = useState<"browse" | "product" | "cart" | "checkout" | "identity">("browse");
   const [pendingAction, setPendingAction] = useState<"checkout" | null>(null);
   const [series, setSeries] = useState<Series[]>([]);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<string>>(new Set());
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,16 +150,18 @@ export default function Home() {
 
   useEffect(() => {
     Promise.all([
+      fetch("/api/categories").then((r) => r.json()),
       fetch("/api/series").then((r) => r.json()),
       fetch("/api/products").then((r) => r.json()),
       fetch("/api/campaigns/current").then((r) => r.json()),
     ])
-      .then(([sData, pData, cData]) => {
-        if (sData.error || pData.error || cData.error) {
-          setLoadError(sData.error || pData.error || cData.error);
+      .then(([catData, sData, pData, cData]) => {
+        if (catData.error || sData.error || pData.error || cData.error) {
+          setLoadError(catData.error || sData.error || pData.error || cData.error);
           setLoading(false);
           return;
         }
+        setCategories(catData.categories || []);
         setSeries(sData.series || []);
         setProducts((pData.products || []).filter((p: Product) => p.product_variants.length > 0));
         setCampaign(cData.campaign);
@@ -184,10 +190,14 @@ export default function Home() {
     }).then((r) => r.json()).then((d) => setCheckoutQuote(d));
   }, [view, cart, campaign, txnMethod, wantsGift]);
 
-  const filteredProducts = useMemo(
-    () => (selectedSeriesId ? products.filter((p) => p.series_id === selectedSeriesId) : products),
-    [products, selectedSeriesId]
-  );
+  const filteredProducts = useMemo(() => {
+    if (selectedSeriesId) return products.filter((p) => p.series_id === selectedSeriesId);
+    if (selectedCategoryId) {
+      const seriesIdsInCategory = new Set(series.filter((s) => s.category_id === selectedCategoryId).map((s) => s.id));
+      return products.filter((p) => p.series_id && seriesIdsInCategory.has(p.series_id));
+    }
+    return products;
+  }, [products, series, selectedSeriesId, selectedCategoryId]);
   const cartCount = cart.reduce((s, e) => s + e.qty, 0);
   const cartTotal = cart.reduce((s, e) => s + e.qty * e.price, 0);
 
@@ -390,7 +400,7 @@ export default function Home() {
                       ) : (
                         announcements.map((a) => (
                           <div key={a.id} className="mibu-announcement-panel-item">
-                            <div className="mibu-announcement-panel-date">{new Date(a.createdAt).toLocaleString("zh-TW")}</div>
+                            <div className="mibu-announcement-panel-date">{new Date(a.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</div>
                             <div className="mibu-announcement-panel-content-row">
                               <span className="mibu-announcement-panel-content">{a.content}</span>
                             </div>
@@ -468,9 +478,34 @@ export default function Home() {
       <div className="mibu-content-row" style={{ maxWidth: 1200, margin: "0 auto" }}>
         <aside className="category-sidebar-desktop" style={{ display: view === "browse" ? undefined : "none" }}>
           <p className="category-tree-title">系列</p>
-          <div className={`category-item root ${!selectedSeriesId ? "active" : ""}`} onClick={() => setSelectedSeriesId(null)}>全部</div>
-          {series.filter((s) => !s.is_gift_series).map((s) => (
-            <div key={s.id} className={`category-item ${selectedSeriesId === s.id ? "active" : ""}`} onClick={() => setSelectedSeriesId(s.id)}><span>{s.name}</span></div>
+          <div className={`category-item root ${!selectedCategoryId && !selectedSeriesId ? "active" : ""}`} onClick={() => { setSelectedCategoryId(null); setSelectedSeriesId(null); }}>全部</div>
+          {categories.map((c) => {
+            const children = series.filter((s) => s.category_id === c.id);
+            const hasChildren = children.length > 0;
+            const expanded = expandedCategoryIds.has(c.id);
+            return (
+              <div key={c.id}>
+                <div
+                  className={`category-item ${selectedCategoryId === c.id && !selectedSeriesId ? "active" : ""}`}
+                  onClick={() => { setSelectedCategoryId(c.id); setSelectedSeriesId(null); }}
+                >
+                  <span>{c.name}</span>
+                  {hasChildren && (
+                    <span onClick={(e) => { e.stopPropagation(); setExpandedCategoryIds((prev) => { const next = new Set(prev); if (next.has(c.id)) next.delete(c.id); else next.add(c.id); return next; }); }} style={{ padding: 6, margin: -6 }}>
+                      {expanded ? "▾" : "▸"}
+                    </span>
+                  )}
+                </div>
+                {hasChildren && expanded && children.map((s) => (
+                  <div key={s.id} className={`subcategory-item ${selectedSeriesId === s.id ? "active" : ""}`} onClick={() => { setSelectedSeriesId(s.id); setSelectedCategoryId(null); }}>
+                    {s.name}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {series.filter((s) => !s.category_id).map((s) => (
+            <div key={s.id} className={`category-item ${selectedSeriesId === s.id ? "active" : ""}`} onClick={() => { setSelectedSeriesId(s.id); setSelectedCategoryId(null); }}><span>{s.name}</span></div>
           ))}
         </aside>
 

@@ -18,6 +18,20 @@ function emptyRates() {
 }
 
 export default function CampaignsSection() {
+  /** 把資料庫存的 UTC 時間轉成台灣時間格式的 datetime-local 字串（給表單顯示用） */
+  function toTaipeiDatetimeLocal(iso: string): string {
+    const d = new Date(iso);
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value || "00";
+    return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+  }
+  /** 把表單填的 datetime-local 字串當成台灣時間解讀，轉成正確的 UTC ISO 字串存進資料庫
+   *  （不管管理者的瀏覽器本身設定在哪個時區，都固定用台灣時間解讀，避免跳時區） */
+  function fromTaipeiDatetimeLocal(value: string): string {
+    return new Date(`${value}:00+08:00`).toISOString();
+  }
   const [list, setList] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
@@ -45,7 +59,7 @@ export default function CampaignsSection() {
   }
   function openEdit(c: Campaign) {
     setEditingId(c.id); setName(c.name);
-    setOpensAt(c.opens_at?.slice(0, 16) || ""); setClosesAt(c.closes_at?.slice(0, 16) || "");
+    setOpensAt(c.opens_at ? toTaipeiDatetimeLocal(c.opens_at) : ""); setClosesAt(c.closes_at ? toTaipeiDatetimeLocal(c.closes_at) : "");
     setGiftBaseUnit(c.gift_base_unit || 100);
     setVendorOrderGiftCap(c.vendor_order_gift_cap ?? "");
     setCodCampaignCap(c.cod_campaign_cap ?? "");
@@ -65,8 +79,8 @@ export default function CampaignsSection() {
     }
     try {
       const res = editingId === "new"
-        ? await fetch("/api/admin/campaigns", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, opensAt, closesAt, giftBaseUnit, vendorOrderGiftCap: vendorOrderGiftCap || null, codCampaignCap: codCampaignCap || null, rates: rateFields }) })
-        : await fetch(`/api/admin/campaigns/${editingId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, opens_at: opensAt, closes_at: closesAt, gift_base_unit: giftBaseUnit, vendor_order_gift_cap: vendorOrderGiftCap || null, cod_campaign_cap: codCampaignCap || null, ...rateFields }) });
+        ? await fetch("/api/admin/campaigns", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, opensAt: fromTaipeiDatetimeLocal(opensAt), closesAt: fromTaipeiDatetimeLocal(closesAt), giftBaseUnit, vendorOrderGiftCap: vendorOrderGiftCap || null, codCampaignCap: codCampaignCap || null, rates: rateFields }) })
+        : await fetch(`/api/admin/campaigns/${editingId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, opens_at: fromTaipeiDatetimeLocal(opensAt), closes_at: fromTaipeiDatetimeLocal(closesAt), gift_base_unit: giftBaseUnit, vendor_order_gift_cap: vendorOrderGiftCap || null, cod_campaign_cap: codCampaignCap || null, ...rateFields }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "儲存失敗");
       setEditingId(null);
@@ -121,7 +135,7 @@ export default function CampaignsSection() {
         ) : (
           list.map((c) => (
             <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, marginBottom: 8 }}>
-              <span>{c.name}<span style={{ fontSize: 12, color: "#8A8779", marginLeft: 8 }}>{new Date(c.opens_at).toLocaleString("zh-TW")} ~ {new Date(c.closes_at).toLocaleString("zh-TW")}</span></span>
+              <span>{c.name}<span style={{ fontSize: 12, color: "#8A8779", marginLeft: 8 }}>{new Date(c.opens_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })} ~ {new Date(c.closes_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</span></span>
               <span>
                 <button className="btn small secondary" onClick={() => openEdit(c)} style={{ marginRight: 6 }}>編輯</button>
                 <button className="btn small danger" onClick={() => deleteItem(c.id)}>刪除</button>

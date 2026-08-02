@@ -36,7 +36,7 @@ export async function POST(req: Request) {
 
   const { data, error } = await supabase
     .from("series")
-    .insert({ name, is_gift_series: !!body.isGiftSeries, sort_order: body.sortOrder ?? 0 })
+    .insert({ name, is_gift_series: !!body.isGiftSeries, sort_order: body.sortOrder ?? 0, category_id: body.categoryId || null })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
