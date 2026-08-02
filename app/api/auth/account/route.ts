@@ -69,7 +69,6 @@ export async function POST(req: Request) {
   if (Object.keys(updates).length > 0) {
     const { error } = await supabase.from("members").update(updates).eq("id", member.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
   }
 
   if (sentVerifyEmail) {

@@ -5,33 +5,41 @@ import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
 import { signMemberSession, memberSessionCookieHeader } from "@/lib/memberAuth";
 
+/** 舊會員確認身份後，設定新帳密、正式建立帳號，並把該身份底下的舊訂單改指定成新帳號 */
 export async function POST(req: Request) {
   const body = await req.json();
+  const identityId = String(body.identityId || "").trim();
   const username = String(body.username || "").trim();
   const password = String(body.password || "");
   const confirmPassword = String(body.confirmPassword || "");
-  const profileUrlRaw = String(body.profileUrl || "").trim();
   const email = String(body.email || "").trim().toLowerCase();
 
+  if (!identityId) return NextResponse.json({ error: "缺少身份資訊，請重新操作一次" }, { status: 400 });
   if (username.length < 1) return NextResponse.json({ error: "請輸入帳號" }, { status: 400 });
   if (password.length < 6) return NextResponse.json({ error: "密碼至少要 6 個字" }, { status: 400 });
   if (password !== confirmPassword) return NextResponse.json({ error: "兩次輸入的密碼不一樣" }, { status: 400 });
-  if (!profileUrlRaw) return NextResponse.json({ error: "請填寫個人頁網址" }, { status: 400 });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: "請輸入有效的 Email" }, { status: 400 });
-
-  const profileUrl = /^https?:\/\//i.test(profileUrlRaw) ? profileUrlRaw : "https://" + profileUrlRaw;
-  const profileUrlNorm = normFb(profileUrl);
 
   const supabase = getSupabaseAdmin();
 
+  const { data: identity } = await supabase.from("legacy_identities").select("*").eq("id", identityId).maybeSingle();
+  if (!identity) return NextResponse.json({ error: "找不到這筆身份資料，請重新操作一次" }, { status: 404 });
+  if (identity.claimed_by_member_id) {
+    return NextResponse.json({ error: "這筆資料已經被認領過了，如果這是你本人的帳號，請直接登入或使用忘記密碼" }, { status: 409 });
+  }
+
   const { data: existingUsername } = await supabase.from("members").select("id").ilike("username", username).maybeSingle();
-  if (existingUsername) return NextResponse.json({ error: "這個帳號已經被註冊了" }, { status: 409 });
+  if (existingUsername) return NextResponse.json({ error: "這個帳號已經被註冊了，換一個試試看" }, { status: 409 });
 
   const { data: existingEmail } = await supabase.from("members").select("id").ilike("email", email).maybeSingle();
   if (existingEmail) return NextResponse.json({ error: "這個 Email 已經被註冊過了" }, { status: 409 });
 
+  const profileUrl = identity.fb_profile_url;
+  const profileUrlNorm = normFb(profileUrl);
   const { data: existingProfile } = await supabase.from("members").select("id").eq("profile_url_norm", profileUrlNorm).maybeSingle();
-  if (existingProfile) return NextResponse.json({ error: "這個個人頁網址已經被註冊過了" }, { status: 409 });
+  if (existingProfile) {
+    return NextResponse.json({ error: "這個個人頁網址已經被註冊過了，如果這是你本人的帳號，請直接登入或使用忘記密碼" }, { status: 409 });
+  }
 
   const passwordHash = await hashMemberPw(password);
   const verifyToken = genToken();
@@ -51,7 +59,20 @@ export async function POST(req: Request) {
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // 寄驗證信（就算寄信失敗也不擋註冊流程，只是要讓前端知道信有沒有真的寄出去）
+  // 標記身份已被認領
+  await supabase
+    .from("legacy_identities")
+    .update({ claimed_by_member_id: created.id, claimed_at: new Date().toISOString() })
+    .eq("id", identity.id);
+
+  // 把這個身份底下的舊訂單都改指定成新帳號，之後查歷史訂單就找得到
+  const { data: affectedOrders } = await supabase
+    .from("orders")
+    .update({ username, profile_url: profileUrl, legacy_unmatched: false })
+    .eq("legacy_identity_id", identity.id)
+    .select("id");
+
+  // 寄驗證信（失敗不擋流程）
   let verifyEmailSent = true;
   try {
     const link = `${getSiteUrl()}/api/auth/verify-email?token=${verifyToken}`;
@@ -70,6 +91,7 @@ export async function POST(req: Request) {
     email: created.email,
     emailVerified: false,
     verifyEmailSent,
+    claimedOrders: (affectedOrders || []).length,
   });
   res.headers.set("Set-Cookie", memberSessionCookieHeader(token));
   return res;
