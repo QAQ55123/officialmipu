@@ -18,8 +18,11 @@ export interface SplitGroup {
 }
 
 /**
- * 貪婪演算法：依金額由大到小排序，逐一嘗試放進「還沒滿的組」，滿了就開新組。
- * 這樣才能重現規格書範例裡「700獨立一組＋其餘350一組」這種效果。
+ * 貪婪演算法：依金額由大到小排序，對每一件商品，比較「併入某個現有組」跟「自己獨立成一組」
+ * 哪一種能拿到更多配額，只有合併確實比分開放拿到更多時才合併——不能只看合併後那一組本身
+ * 配額有沒有變差，因為兩個各自都能拿到上限的商品，分開放通常比合併在一起拿到更多（規格書範例：
+ * 700+350，cap=5、unit=100，分開算是 700→5 + 350→3 = 8，合併成1050卻只有 min(10,5)=5，
+ * 分開放才是正確答案）。
  */
 export function splitIntoGroups(
   items: GiftableItem[],
@@ -32,19 +35,27 @@ export function splitIntoGroups(
   const quotaFor = (amount: number) => Math.min(Math.floor(amount / baseUnit), vendorOrderGiftCap);
 
   for (const item of sorted) {
-    let placed = false;
-    for (const g of groups) {
-      const newAmount = g.groupAmount + item.amount;
-      if (quotaFor(newAmount) >= quotaFor(g.groupAmount)) {
-        g.itemIds.push(item.id);
-        g.groupAmount = newAmount;
-        g.quota = quotaFor(newAmount);
-        placed = true;
-        break;
+    const standaloneQuota = quotaFor(item.amount);
+
+    // 找出「併入這一組」邊際增加配額最多的組
+    let bestGroupIndex = -1;
+    let bestMarginalGain = -1;
+    groups.forEach((g, idx) => {
+      const marginalGain = quotaFor(g.groupAmount + item.amount) - g.quota;
+      if (marginalGain > bestMarginalGain) {
+        bestMarginalGain = marginalGain;
+        bestGroupIndex = idx;
       }
-    }
-    if (!placed) {
-      groups.push({ itemIds: [item.id], groupAmount: item.amount, quota: quotaFor(item.amount) });
+    });
+
+    // 只有「併入最佳組能拿到的邊際配額」嚴格大於「自己獨立成一組」時才合併
+    if (bestGroupIndex >= 0 && bestMarginalGain > standaloneQuota) {
+      const g = groups[bestGroupIndex];
+      g.itemIds.push(item.id);
+      g.groupAmount += item.amount;
+      g.quota = quotaFor(g.groupAmount);
+    } else {
+      groups.push({ itemIds: [item.id], groupAmount: item.amount, quota: standaloneQuota });
     }
   }
 

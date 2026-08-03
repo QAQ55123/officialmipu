@@ -323,6 +323,12 @@ export default function Home() {
     setProducts([]);
     setProductsLoading(true);
     const r = await fetch(`/api/series/${p.id}`, { cache: "no-store" });
+    if (!r.ok) {
+      showToast("這個系列目前無法瀏覽（可能已被隱藏或刪除）");
+      setProductsLoading(false);
+      goHome();
+      return;
+    }
     const d = await r.json();
     setActivePlan(d.plan);
     setProducts(d.products || []);
@@ -892,7 +898,7 @@ export default function Home() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            planId,
+            seriesId: planId,
             items: groupItems.map((e) => ({ name: e.productName, style: e.style, qty: e.qty })),
             username: identity.username,
             payment,
@@ -1462,7 +1468,7 @@ export default function Home() {
                             value={legacyNickname}
                             onChange={(e) => setLegacyNickname(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && onLegacyLookup()}
-                            placeholder="以前用的 FB／LINE／Discord 暱稱，任一個都可以試"
+                            placeholder="請填寫 FB 暱稱"
                           />
                         </div>
                         <div className="auth-msg">{legacyMsg}</div>
@@ -2232,7 +2238,7 @@ export default function Home() {
                           value={linkNickname}
                           onChange={(e) => setLinkNickname(e.target.value)}
                           onKeyDown={(e) => e.key === "Enter" && onLinkLookup()}
-                          placeholder="以前用的 FB／LINE／Discord 暱稱"
+                          placeholder="請填寫 FB 暱稱"
                         />
                         <button className="btn small" onClick={onLinkLookup} disabled={linkSubmitting}>{linkSubmitting ? "查詢中…" : "查詢"}</button>
                       </div>

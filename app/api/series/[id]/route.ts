@@ -14,6 +14,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     .eq("id", params.id)
     .single();
   if (seriesErr || !series) return NextResponse.json({ error: "找不到系列" }, { status: 404 });
+  // 系列被隱藏＝視同缺貨不能下單，購物車裡這個系列的商品要判定為失效（比照系列被刪除時的處理方式）
+  if (series.is_visible === false) return NextResponse.json({ error: "此系列目前未開放瀏覽" }, { status: 404 });
 
   const { data: products, error: prodErr } = await supabase
     .from("products")

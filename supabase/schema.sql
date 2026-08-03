@@ -207,7 +207,6 @@ create table if not exists campaigns (
   name          text not null,
   opens_at      timestamptz not null,
   closes_at     timestamptz not null,
-  fulfillment_status text, -- 已購買/運輸中/已到貨/已開賣場，店家手動選的顯示標記，顯示在該檔期底下每張訂單上，跟通知信無關
 
   -- 2.4節：取付檔期總上限（可留空=不限），已用金額由系統自動累計，不是店家手動輸入
   cod_campaign_cap   numeric,
@@ -246,9 +245,11 @@ create table if not exists gift_styles (
   campaign_id       uuid not null references campaigns(id) on delete cascade,
   style_name        text not null,
   threshold_amount  numeric not null,
-  image_url         text,
   created_at        timestamptz default now()
 );
+-- image_url 是後來才加的欄位，如果表在更早版本就已經建立過，
+-- create table if not exists 不會補上新欄位，這裡明確用 alter table 補齊
+alter table gift_styles add column if not exists image_url text;
 create index if not exists idx_gift_styles_campaign on gift_styles (campaign_id);
 
 -- 2.4節：商品要加「是否開放取付」勾選欄位，預設打勾（開放）
@@ -257,6 +258,10 @@ alter table products add column if not exists cod_allowed boolean not null defau
 alter table products add column if not exists has_discount_flag boolean not null default true;
 
 alter table campaigns disable row level security;
+-- fulfillment_status 是後來才加的欄位，如果 campaigns 表在更早版本就已經建立過，
+-- create table if not exists 不會補上新欄位，這裡明確用 alter table 補齊
+alter table campaigns add column if not exists fulfillment_status text; -- 已購買/運輸中/已到貨/已開賣場，店家手動選的顯示標記，顯示在該檔期底下每張訂單上，跟通知信無關
+
 alter table gift_styles disable row level security;
 
 -- 完全移除系列層級的取付上限機制（改用檔期層級的 campaigns.cod_campaign_cap，見2.4節）
