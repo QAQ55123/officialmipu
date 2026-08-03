@@ -988,10 +988,10 @@ export default function Home() {
       showToast(`已成功送出 ${succeededPlanIds.length} 筆訂單`);
       openCart();
     } else if (succeededPlanIds.length > 0) {
-      showToast(`部分成功：${succeededPlanIds.length} 筆送出、${errors.length} 筆失敗`);
-    } else {
-      showToast(errors.join("；"));
+      showToast(`已成功送出 ${succeededPlanIds.length} 筆訂單，其餘失敗原因請見下方`);
     }
+    // 失敗訊息不用toast顯示（會自動消失、來不及看清楚），完全依賴上面已經寫進
+    // checkoutErrorByPlan、常駐顯示在每個系列小計下方的紅字
     setSubmittingCheckout(false);
   }
 
@@ -2039,6 +2039,9 @@ export default function Home() {
                               )}
                               <div className="cart-item-info">
                                 <span className="cart-item-name">{e.productName}{e.style ? `（${e.style}）` : ""}</span>
+                                {cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag && (
+                                  <span style={{ fontSize: 12, color: "#853806" }}>滿減商品</span>
+                                )}
                                 <span className="cart-item-unit-price">￥ {fmt(e.price)} / 件</span>
                               </div>
                             </div>
@@ -2063,7 +2066,7 @@ export default function Home() {
                             </div>
                           </div>
                           {singleCap != null && (
-                            <div style={{ fontSize: 12, color: "#993C1D", padding: "0 8px 8px" }}>
+                            <div style={{ fontSize: 12, color: "#993C1D", padding: "0 8px 8px", marginLeft: 98 }}>
                               此商品已達單筆訂單滿贈上限，最多可選擇 {singleCap} 個滿贈
                             </div>
                           )}
@@ -2194,7 +2197,7 @@ export default function Home() {
                           <div key={planId} className="cart-group" style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
                             <div style={{ flex: "1.4 1 280px", minWidth: 0 }}>
                               <div className="cart-group-header">
-                                <span className="cart-group-plan-name" style={{ cursor: "default" }}>{planName}</span>
+                                <span className="cart-group-plan-name" style={{ cursor: "default", textDecoration: "none" }}>{planName}</span>
                               </div>
                               {entries.map((e) => {
                                 const singleCap = singleItemGiftCapLocal(e);
