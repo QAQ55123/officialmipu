@@ -33,7 +33,7 @@ export async function POST(req: Request) {
 
   const { data: giftStyles, error: giftStyleError } = await supabase
     .from("gift_styles")
-    .select("id, style_name, threshold_amount")
+    .select("id, style_name, threshold_amount, image_url")
     .eq("campaign_id", campaignId);
   if (giftStyleError) return NextResponse.json({ error: giftStyleError.message }, { status: 500 });
 
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
 
   const styleLimits = (giftStyles || []).map((s: any) => {
     const max = groups.reduce((sum, g) => sum + styleMaxForGroup(g.groupAmount, s.threshold_amount), 0);
-    return { giftStyleId: s.id, styleName: s.style_name, max };
+    return { giftStyleId: s.id, styleName: s.style_name, imageUrl: s.image_url, max };
   });
 
   const cartSubtotal = giftableItems.reduce((s, i) => s + i.amount, 0);

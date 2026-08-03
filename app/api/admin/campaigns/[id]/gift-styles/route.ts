@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { toDirectImageUrl } from "@/lib/imageUrl";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -36,7 +37,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("gift_styles")
-    .insert({ campaign_id: params.id, style_name: styleName, threshold_amount: thresholdAmount })
+    .insert({ campaign_id: params.id, style_name: styleName, threshold_amount: thresholdAmount, image_url: body.imageUrl ? toDirectImageUrl(String(body.imageUrl)) : null })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

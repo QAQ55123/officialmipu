@@ -74,6 +74,10 @@ export default function AdminPage() {
   const [giftStyles, setGiftStyles] = useState<any[]>([]);
   const [giftStyleName, setGiftStyleName] = useState("");
   const [giftStyleThreshold, setGiftStyleThreshold] = useState("");
+  const [giftStyleImageUrl, setGiftStyleImageUrl] = useState("");
+  const [giftStyleImageUrlInput, setGiftStyleImageUrlInput] = useState("");
+  const [uploadingGiftStyleImg, setUploadingGiftStyleImg] = useState(false);
+  const [editingGiftStyleId, setEditingGiftStyleId] = useState<string | null>(null);
   const [giftStyleMsg, setGiftStyleMsg] = useState("");
 
   const TXN_COMBOS: { key: string; label: string }[] = [
@@ -176,11 +180,45 @@ export default function AdminPage() {
 
   async function openGiftStyles(c: any) {
     setActiveCampaignForGifts(c);
-    setGiftStyleMsg("");
+    resetGiftStyleForm();
     const r = await fetch(`/api/admin/campaigns/${c.id}/gift-styles`);
     if (r.status === 401) { setUnlocked(false); setLoginMsg("登入已過期，請重新登入"); return; }
     const d = await r.json();
     setGiftStyles(d.giftStyles || []);
+  }
+
+  function resetGiftStyleForm() {
+    setGiftStyleName(""); setGiftStyleThreshold(""); setGiftStyleImageUrl(""); setGiftStyleImageUrlInput(""); setEditingGiftStyleId(null);
+  }
+
+  function editGiftStyle(s: any) {
+    setEditingGiftStyleId(s.id);
+    setGiftStyleName(s.style_name);
+    setGiftStyleThreshold(String(s.threshold_amount));
+    setGiftStyleImageUrl(s.image_url || "");
+    setGiftStyleImageUrlInput("");
+    setGiftStyleMsg("");
+  }
+
+  async function handleGiftStyleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingGiftStyleImg(true);
+    try {
+      const url = await uploadImage(file);
+      setGiftStyleImageUrl(url);
+    } catch (err: any) {
+      setGiftStyleMsg("圖片上傳失敗：" + err.message);
+    } finally {
+      setUploadingGiftStyleImg(false);
+    }
+  }
+
+  function applyGiftStyleImageUrl() {
+    const v = giftStyleImageUrlInput.trim();
+    if (!v) return;
+    setGiftStyleImageUrl(toDirectImageUrl(v));
+    setGiftStyleImageUrlInput("");
   }
 
   async function saveGiftStyle() {
@@ -190,8 +228,16 @@ export default function AdminPage() {
     const threshold = Number(giftStyleThreshold);
     if (!isFinite(threshold) || threshold <= 0) return setGiftStyleMsg("門檻金額格式不正確");
     try {
-      await callJson(`/api/admin/campaigns/${activeCampaignForGifts.id}/gift-styles`, "POST", { styleName: giftStyleName, thresholdAmount: threshold });
-      setGiftStyleName(""); setGiftStyleThreshold("");
+      if (editingGiftStyleId) {
+        await callJson(`/api/admin/campaigns/${activeCampaignForGifts.id}/gift-styles/${editingGiftStyleId}`, "PATCH", {
+          styleName: giftStyleName, thresholdAmount: threshold, imageUrl: giftStyleImageUrl || null,
+        });
+      } else {
+        await callJson(`/api/admin/campaigns/${activeCampaignForGifts.id}/gift-styles`, "POST", {
+          styleName: giftStyleName, thresholdAmount: threshold, imageUrl: giftStyleImageUrl || null,
+        });
+      }
+      resetGiftStyleForm();
       openGiftStyles(activeCampaignForGifts);
     } catch (e: any) {
       setGiftStyleMsg(e.message || "儲存失敗");
@@ -788,7 +834,7 @@ export default function AdminPage() {
         // 編輯既有商品：單筆更新
         await callJson("/api/admin/products", "PUT", {
           id: productForm.id,
-          planId: activePlanForProducts.id,
+          seriesId: activePlanForProducts.id,
           name: productForm.name,
           style: productForm.style,
           price: productForm.price,
@@ -803,7 +849,7 @@ export default function AdminPage() {
         const rows = productRows.filter((r) => r.style.trim() || productRows.length === 1);
         for (const row of rows) {
           await callJson("/api/admin/products", "POST", {
-            planId: activePlanForProducts.id,
+            seriesId: activePlanForProducts.id,
             name: productForm.name,
             style: row.style,
             price: row.price || "0",
@@ -1865,24 +1911,45 @@ export default function AdminPage() {
           {activeSection === "campaigns" && activeCampaignForGifts && (
             <div className="auth-card">
               <h3>滿贈款式登記：{activeCampaignForGifts.name}</h3>
-              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>每個款式只需登記一次：名稱＋門檻金額</p>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>每個款式只需登記一次：名稱＋門檻金額，圖片選填</p>
 
               <div className="id-row"><span className="id-label">款式名稱</span><input type="text" value={giftStyleName} onChange={(e) => setGiftStyleName(e.target.value)} /></div>
               <div className="id-row"><span className="id-label">門檻金額</span><input type="number" value={giftStyleThreshold} onChange={(e) => setGiftStyleThreshold(e.target.value)} /></div>
-              <button className="btn" onClick={saveGiftStyle}>新增款式</button>
+              <div className="id-row">
+                <span className="id-label">款式圖片</span>
+                <input type="file" accept="image/*" onChange={handleGiftStyleImageUpload} />
+              </div>
+              <div className="id-row">
+                <span className="id-label"></span>
+                <input type="text" value={giftStyleImageUrlInput} onChange={(e) => setGiftStyleImageUrlInput(e.target.value)} placeholder="或貼上圖片網址（支援 Google Drive 分享連結）" />
+                <button className="btn small secondary" onClick={applyGiftStyleImageUrl}>使用這個網址</button>
+              </div>
+              {uploadingGiftStyleImg && <div style={{ fontSize: 13, color: "#8A8779" }}>圖片上傳中…</div>}
+              {giftStyleImageUrl && <img src={giftStyleImageUrl} alt="預覽" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={saveGiftStyle}>{editingGiftStyleId ? "儲存修改" : "新增款式"}</button>
+                {editingGiftStyleId && <button className="btn secondary" onClick={resetGiftStyleForm}>取消編輯</button>}
+              </div>
               <div className="auth-msg">{giftStyleMsg}</div>
 
               <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
                 {giftStyles.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有登記任何款式</div>}
                 {giftStyles.map((s) => (
                   <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
-                    <span style={{ fontSize: 14 }}>{s.style_name}<span style={{ fontSize: 12, color: "#8A8779", marginLeft: 8 }}>門檻 {s.threshold_amount}</span></span>
-                    <button className="btn small danger" onClick={() => deleteGiftStyle(s.id)}>刪除</button>
+                    <span style={{ fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                      {s.image_url && <img src={s.image_url} alt="" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }} />}
+                      {s.style_name}<span style={{ fontSize: 12, color: "#8A8779" }}>門檻 {s.threshold_amount}</span>
+                    </span>
+                    <span style={{ display: "flex", gap: 6 }}>
+                      <button className="btn small secondary" onClick={() => editGiftStyle(s)}>編輯</button>
+                      <button className="btn small danger" onClick={() => deleteGiftStyle(s.id)}>刪除</button>
+                    </span>
                   </div>
                 ))}
               </div>
 
-              <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveCampaignForGifts(null)}>關閉滿贈款式登記</button>
+              <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => { setActiveCampaignForGifts(null); resetGiftStyleForm(); }}>關閉滿贈款式登記</button>
             </div>
           )}
 

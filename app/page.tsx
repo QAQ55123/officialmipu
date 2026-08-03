@@ -186,7 +186,7 @@ export default function Home() {
   const [checkoutPaymentByPlan, setCheckoutPaymentByPlan] = useState<Record<string, string>>({});
   // 2.7節：每個系列分組各自決定要不要滿贈、選了哪些款式（範圍是這個系列分組送出的這張訂單）
   const [wantsGiftByPlan, setWantsGiftByPlan] = useState<Record<string, boolean>>({});
-  const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; max: number }[] }>>({});
+  const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number }[] }>>({});
   const [giftPicksByPlan, setGiftPicksByPlan] = useState<Record<string, Record<string, number>>>({});
   const [submittingCheckout, setSubmittingCheckout] = useState(false);
   const [selectedProductName, setSelectedProductName] = useState<string | null>(null);
@@ -2119,7 +2119,10 @@ export default function Home() {
                                       const picked = picks[s.giftStyleId] || 0;
                                       return (
                                         <div key={s.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                                          <span style={{ fontSize: 13 }}>{s.styleName}{s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（尚未解鎖）</span>}</span>
+                                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                                            {s.imageUrl && <img src={s.imageUrl} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />}
+                                            {s.styleName}{s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（尚未解鎖）</span>}
+                                          </span>
                                           <div className="stepper">
                                             <button className="step-btn" disabled={picked <= 0} onClick={() => adjustGiftPick(s.giftStyleId, -1, s.max)}>－</button>
                                             <input className="qty" value={picked} readOnly />

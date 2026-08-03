@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { toDirectImageUrl } from "@/lib/imageUrl";
+import { deleteStorageFiles } from "@/lib/storage";
 
 export async function PATCH(req: Request, { params }: { params: { id: string; styleId: string } }) {
   try {
@@ -12,6 +14,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string; st
   const updates: Record<string, any> = {};
   if ("styleName" in body) updates.style_name = String(body.styleName).trim();
   if ("thresholdAmount" in body) updates.threshold_amount = Number(body.thresholdAmount);
+  if ("imageUrl" in body) updates.image_url = body.imageUrl ? toDirectImageUrl(String(body.imageUrl)) : null;
 
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase.from("gift_styles").update(updates).eq("id", params.styleId).select().single();
@@ -26,7 +29,9 @@ export async function DELETE(req: Request, { params }: { params: { id: string; s
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
   const supabase = getSupabaseAdmin();
+  const { data: existing } = await supabase.from("gift_styles").select("image_url").eq("id", params.styleId).maybeSingle();
   const { error } = await supabase.from("gift_styles").delete().eq("id", params.styleId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (existing?.image_url) deleteStorageFiles([existing.image_url]).catch(() => {});
   return NextResponse.json({ ok: true });
 }

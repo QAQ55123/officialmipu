@@ -246,6 +246,7 @@ create table if not exists gift_styles (
   campaign_id       uuid not null references campaigns(id) on delete cascade,
   style_name        text not null,
   threshold_amount  numeric not null,
+  image_url         text,
   created_at        timestamptz default now()
 );
 create index if not exists idx_gift_styles_campaign on gift_styles (campaign_id);

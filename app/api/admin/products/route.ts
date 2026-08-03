@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
-  if (!body.seriesId) return NextResponse.json({ error: "缺少企劃" }, { status: 400 });
+  if (!body.seriesId) return NextResponse.json({ error: "缺少系列" }, { status: 400 });
   const name = String(body.name || "").trim();
   if (!name) return NextResponse.json({ error: "請填寫商品名稱" }, { status: 400 });
 
