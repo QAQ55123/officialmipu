@@ -71,6 +71,100 @@ export default function AdminPage() {
   const [campaignForm, setCampaignForm] = useState(emptyCampaignForm);
   const [campaignMsg, setCampaignMsg] = useState("");
   const [activeCampaignForGifts, setActiveCampaignForGifts] = useState<any | null>(null);
+
+  // ---- 3.2節：廠商規則設定 ----
+  const [activeCampaignForVendorRules, setActiveCampaignForVendorRules] = useState<any | null>(null);
+  const [vendorRulesTab, setVendorRulesTab] = useState<"tiers" | "platforms">("tiers");
+  const [giftTiers, setGiftTiers] = useState<any[]>([]);
+  const [vendorPlatforms, setVendorPlatforms] = useState<any[]>([]);
+  const [tierThreshold, setTierThreshold] = useState("");
+  const [tierDiscount, setTierDiscount] = useState("");
+  const [vendorRulesMsg, setVendorRulesMsg] = useState("");
+  const [newPlatformName, setNewPlatformName] = useState("");
+  const [newPlatformCap, setNewPlatformCap] = useState("");
+  const [editingPlatformCaps, setEditingPlatformCaps] = useState<Record<string, Record<string, string>>>({});
+
+  async function openVendorRules(c: any) {
+    setActiveCampaignForVendorRules(c);
+    setVendorRulesTab("tiers");
+    setVendorRulesMsg("");
+    setTierThreshold(""); setTierDiscount("");
+    await loadVendorRules(c.id);
+  }
+
+  async function loadVendorRules(campaignId: string) {
+    const r1 = await fetch(`/api/admin/campaigns/${campaignId}/gift-tiers`);
+    const d1 = await r1.json();
+    setGiftTiers(d1.giftTiers || []);
+
+    const r2 = await fetch(`/api/admin/campaigns/${campaignId}/vendor-platforms`);
+    const d2 = await r2.json();
+    setVendorPlatforms(d2.platforms || []);
+    const caps: Record<string, Record<string, string>> = {};
+    (d2.platforms || []).forEach((p: any) => {
+      caps[p.id] = {};
+      Object.entries(p.tierCaps || {}).forEach(([tierId, v]) => { caps[p.id][tierId] = String(v); });
+    });
+    setEditingPlatformCaps(caps);
+  }
+
+  async function addGiftTier() {
+    if (!activeCampaignForVendorRules) return;
+    setVendorRulesMsg("");
+    const threshold = Number(tierThreshold);
+    const discount = Number(tierDiscount);
+    if (!isFinite(threshold) || threshold <= 0) return setVendorRulesMsg("門檻金額格式不正確");
+    if (!isFinite(discount) || discount < 0) return setVendorRulesMsg("折扣金額格式不正確");
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/gift-tiers`, "POST", { thresholdAmount: threshold, discountAmount: discount });
+      setTierThreshold(""); setTierDiscount("");
+      loadVendorRules(activeCampaignForVendorRules.id);
+    } catch (e: any) {
+      setVendorRulesMsg(e.message || "新增失敗");
+    }
+  }
+
+  async function deleteGiftTier(tierId: string) {
+    if (!activeCampaignForVendorRules) return;
+    if (!confirm("確定要刪除這個門檻嗎？")) return;
+    await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/gift-tiers/${tierId}`, "DELETE", {});
+    loadVendorRules(activeCampaignForVendorRules.id);
+  }
+
+  async function addVendorPlatform() {
+    if (!activeCampaignForVendorRules) return;
+    setVendorRulesMsg("");
+    if (!newPlatformName.trim()) return setVendorRulesMsg("請輸入平台名稱");
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/vendor-platforms`, "POST", {
+        name: newPlatformName, orderGiftCap: newPlatformCap || 0,
+      });
+      setNewPlatformName(""); setNewPlatformCap("");
+      loadVendorRules(activeCampaignForVendorRules.id);
+    } catch (e: any) {
+      setVendorRulesMsg(e.message || "新增失敗");
+    }
+  }
+
+  async function savePlatformCaps(platformId: string) {
+    if (!activeCampaignForVendorRules) return;
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/vendor-platforms/${platformId}`, "PATCH", {
+        tierCaps: editingPlatformCaps[platformId] || {},
+      });
+      setVendorRulesMsg("已儲存");
+      loadVendorRules(activeCampaignForVendorRules.id);
+    } catch (e: any) {
+      setVendorRulesMsg(e.message || "儲存失敗");
+    }
+  }
+
+  async function deleteVendorPlatform(platformId: string) {
+    if (!activeCampaignForVendorRules) return;
+    if (!confirm("確定要刪除這個平台嗎？")) return;
+    await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/vendor-platforms/${platformId}`, "DELETE", {});
+    loadVendorRules(activeCampaignForVendorRules.id);
+  }
   const [giftStyles, setGiftStyles] = useState<any[]>([]);
   const [giftStyleName, setGiftStyleName] = useState("");
   const [giftStyleThreshold, setGiftStyleThreshold] = useState("");
@@ -1927,7 +2021,7 @@ export default function AdminPage() {
             </div>
           )}
 
-          {activeSection === "campaigns" && !activeCampaignForGifts && (
+          {activeSection === "campaigns" && !activeCampaignForGifts && !activeCampaignForVendorRules && (
             <div className="auth-card">
               <h3>檔期管理</h3>
               <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
@@ -1979,6 +2073,7 @@ export default function AdminPage() {
                     </span>
                     <span style={{ display: "flex", gap: 6 }}>
                       <button className="btn small secondary" onClick={() => openGiftStyles(c)}>滿贈款式登記</button>
+                      <button className="btn small secondary" onClick={() => openVendorRules(c)}>廠商規則設定</button>
                       <button className="btn small secondary" onClick={() => editCampaign(c)}>編輯</button>
                       <button className="btn small danger" onClick={() => deleteCampaign(c.id)}>刪除</button>
                     </span>
@@ -2030,6 +2125,79 @@ export default function AdminPage() {
               </div>
 
               <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => { setActiveCampaignForGifts(null); resetGiftStyleForm(); }}>關閉滿贈款式登記</button>
+            </div>
+          )}
+
+          {activeSection === "campaigns" && activeCampaignForVendorRules && (
+            <div className="auth-card">
+              <h3>廠商規則設定：{activeCampaignForVendorRules.name}</h3>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                <button className={`btn small ${vendorRulesTab === "tiers" ? "" : "secondary"}`} onClick={() => setVendorRulesTab("tiers")}>贈品／折扣門檻</button>
+                <button className={`btn small ${vendorRulesTab === "platforms" ? "" : "secondary"}`} onClick={() => setVendorRulesTab("platforms")}>平台設定</button>
+              </div>
+
+              {vendorRulesTab === "tiers" && (
+                <div>
+                  <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                    三個平台共用同一份門檻表：訂單金額達到門檻，就對應多少廠商折扣金額。
+                  </p>
+                  <div className="id-row"><span className="id-label">門檻金額</span><input type="number" value={tierThreshold} onChange={(e) => setTierThreshold(e.target.value)} placeholder="例如 100" /></div>
+                  <div className="id-row"><span className="id-label">折扣金額</span><input type="number" value={tierDiscount} onChange={(e) => setTierDiscount(e.target.value)} placeholder="例如 15" /></div>
+                  <button className="btn" onClick={addGiftTier}>新增門檻</button>
+                  <div className="auth-msg">{vendorRulesMsg}</div>
+
+                  <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                    {giftTiers.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有設定任何門檻</div>}
+                    {giftTiers.map((t) => (
+                      <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                        <span style={{ fontSize: 14 }}>滿 {t.threshold_amount} → 折 {t.discount_amount}</span>
+                        <button className="btn small danger" onClick={() => deleteGiftTier(t.id)}>刪除</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {vendorRulesTab === "platforms" && (
+                <div>
+                  <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                    每個平台各自設定「單筆採購單贈品總量上限」，以及在每個門檻等級的「每款式上限」（同一平台每個門檻都填一樣的數字，就等於固定上限）。
+                  </p>
+                  <div className="id-row"><span className="id-label">平台名稱</span><input type="text" value={newPlatformName} onChange={(e) => setNewPlatformName(e.target.value)} placeholder="例如 A平台" /></div>
+                  <div className="id-row"><span className="id-label">單筆贈品總量上限</span><input type="number" value={newPlatformCap} onChange={(e) => setNewPlatformCap(e.target.value)} placeholder="例如 5" /></div>
+                  <button className="btn" onClick={addVendorPlatform}>新增平台</button>
+                  <div className="auth-msg">{vendorRulesMsg}</div>
+
+                  {giftTiers.length === 0 && (
+                    <div style={{ fontSize: 13, color: "#8A8779", marginTop: 12 }}>請先到「贈品／折扣門檻」分頁設定至少一個門檻，才能設定每款式上限。</div>
+                  )}
+
+                  <div style={{ marginTop: 16 }}>
+                    {vendorPlatforms.map((p) => (
+                      <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                          <span style={{ fontWeight: 600 }}>{p.name}（單筆贈品上限 {p.orderGiftCap}）</span>
+                          <button className="btn small danger" onClick={() => deleteVendorPlatform(p.id)}>刪除平台</button>
+                        </div>
+                        {giftTiers.map((t) => (
+                          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <span style={{ fontSize: 13, color: "#5F5E5A", minWidth: 90 }}>門檻 {t.threshold_amount} 每款上限</span>
+                            <input
+                              type="number"
+                              style={{ width: 80 }}
+                              value={editingPlatformCaps[p.id]?.[t.id] ?? ""}
+                              onChange={(e) => setEditingPlatformCaps((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [t.id]: e.target.value } }))}
+                            />
+                          </div>
+                        ))}
+                        {giftTiers.length > 0 && <button className="btn small secondary" onClick={() => savePlatformCaps(p.id)}>儲存這個平台的每款上限</button>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveCampaignForVendorRules(null)}>關閉廠商規則設定</button>
             </div>
           )}
 

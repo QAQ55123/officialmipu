@@ -293,6 +293,47 @@ create index if not exists idx_order_gift_selections_order on order_gift_selecti
 alter table order_gift_selections disable row level security;
 
 -- ============================================================
+-- 第3節：內部工具 — 廠商採購拆單最佳化
+-- 3.2節：廠商規則設定，每個檔期各自一份
+-- ============================================================
+
+-- 贈品門檻＋折扣門檻表：三個平台共用同一份，店家自行輸入設定
+create table if not exists vendor_gift_tiers (
+  id                uuid primary key default gen_random_uuid(),
+  campaign_id       uuid not null references campaigns(id) on delete cascade,
+  threshold_amount  numeric not null,  -- 例如 100/200/300/400
+  discount_amount   numeric not null,  -- 對應的廠商折扣金額，例如 15/30/50/65
+  sort_order        int default 0,
+  created_at        timestamptz default now()
+);
+create index if not exists idx_vendor_gift_tiers_campaign on vendor_gift_tiers (campaign_id);
+
+-- 廠商採購平台：同一個檔期可以有好幾個平台（如A/B/C），各自的單筆採購單贈品總量上限不同
+create table if not exists vendor_platforms (
+  id                    uuid primary key default gen_random_uuid(),
+  campaign_id           uuid not null references campaigns(id) on delete cascade,
+  name                  text not null,
+  order_gift_cap        int not null default 0, -- 這個平台每張採購單的贈品總量上限
+  sort_order            int default 0,
+  created_at            timestamptz default now()
+);
+create index if not exists idx_vendor_platforms_campaign on vendor_platforms (campaign_id);
+
+-- 各平台在各門檻等級的每款式上限（同一平台可以每個門檻等級都填一樣的數字，等於「固定上限」）
+create table if not exists vendor_platform_tier_caps (
+  id                uuid primary key default gen_random_uuid(),
+  platform_id       uuid not null references vendor_platforms(id) on delete cascade,
+  gift_tier_id      uuid not null references vendor_gift_tiers(id) on delete cascade,
+  per_style_cap     int not null default 0,
+  unique (platform_id, gift_tier_id)
+);
+create index if not exists idx_vendor_platform_tier_caps_platform on vendor_platform_tier_caps (platform_id);
+
+alter table vendor_gift_tiers disable row level security;
+alter table vendor_platforms disable row level security;
+alter table vendor_platform_tier_caps disable row level security;
+
+-- ============================================================
 -- 保險機制：不管上面個別關閉RLS的語句有沒有漏掉、或是被 Supabase 專案設定
 -- （Authentication → Policies → Enable RLS on new tables）自動重新打開，
 -- 這裡動態抓出 public schema 底下「現有的所有表格」統一關閉一次，
