@@ -201,6 +201,7 @@ export default function Home() {
   const [wantsGiftByPlan, setWantsGiftByPlan] = useState<Record<string, boolean>>({});
   const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number }[] }>>({});
   const [giftQuotaLoadingByPlan, setGiftQuotaLoadingByPlan] = useState<Record<string, boolean>>({});
+  const [checkoutErrorByPlan, setCheckoutErrorByPlan] = useState<Record<string, string>>({});
   const [giftPicksByPlan, setGiftPicksByPlan] = useState<Record<string, Record<string, number>>>({});
   const [submittingCheckout, setSubmittingCheckout] = useState(false);
   const [selectedProductName, setSelectedProductName] = useState<string | null>(null);
@@ -931,6 +932,7 @@ export default function Home() {
     if (planIds.length === 0) return;
 
     setSubmittingCheckout(true);
+    setCheckoutErrorByPlan({});
     const succeededPlanIds: string[] = [];
     const errors: string[] = [];
     for (const planId of planIds) {
@@ -957,6 +959,7 @@ export default function Home() {
         const d = await r.json();
         if (!r.ok) {
           errors.push(`${groupItems[0].planName}：${d.error || "送出失敗"}`);
+          setCheckoutErrorByPlan((prev) => ({ ...prev, [planId]: d.error || "送出失敗" }));
         } else {
           succeededPlanIds.push(planId);
         }
@@ -1896,7 +1899,6 @@ export default function Home() {
                               <span>NT$ {fmt(it.subtotal)}</span>
                             </div>
                           ))}
-                          <div className="hist-total">交易方式：{o.payment}　合計 NT$ {fmt(o.total)}</div>
                           {o.wantsGift && o.giftSelections && o.giftSelections.length > 0 && (
                             <div style={{ margin: "8px 0" }}>
                               <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600, marginBottom: 6 }}>滿贈</div>
@@ -1914,6 +1916,7 @@ export default function Home() {
                               </div>
                             </div>
                           )}
+                          <div className="hist-total">交易方式：{o.payment}　合計 NT$ {fmt(o.total)}</div>
                           {o.paidAmount > 0 && (
                             <div className="hist-paid-confirm">
                               ✓ 已確認收到您的款項 NT$ {fmt(o.paidAmount)}
@@ -2014,12 +2017,13 @@ export default function Home() {
                         {isInactive && <span className="cart-inactive-badge">已失效</span>}
                       </div>
 
-                      {entries.map((e) => {
+                      {entries.map((e, idx) => {
                         const key = cartItemKey(planId, e.productName, e.style);
                         const singleCap = singleItemGiftCap(e.price, currentCampaign);
+                        const isLast = idx === entries.length - 1;
                         return (
-                          <div key={key}>
-                          <div className="cart-item-row">
+                          <div key={key} style={{ borderBottom: isLast ? "none" : "1px dashed var(--line)" }}>
+                          <div className="cart-item-row" style={{ borderBottom: "none" }}>
                             <div className="cart-item-left">
                               <input
                                 type="checkbox"
@@ -2229,7 +2233,10 @@ export default function Home() {
                                     key={p}
                                     className={`src-btn ${payment === p ? "active" : ""}`}
                                     disabled={p === "取付" && codDisabled}
-                                    onClick={() => setCheckoutPaymentByPlan((prev) => ({ ...prev, [planId]: p }))}
+                                    onClick={() => {
+                                      setCheckoutPaymentByPlan((prev) => ({ ...prev, [planId]: p }));
+                                      setCheckoutErrorByPlan((prev) => { const next = { ...prev }; delete next[planId]; return next; });
+                                    }}
                                   >
                                     {p}
                                   </button>
@@ -2294,6 +2301,9 @@ export default function Home() {
                                   <span style={{ fontSize: 13, color: "var(--muted)" }}>小計</span>
                                   <span style={{ fontWeight: 700, fontSize: 16 }}>NT$ {fmt(groupTotal)}</span>
                                 </div>
+                                {checkoutErrorByPlan[planId] && (
+                                  <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>{checkoutErrorByPlan[planId]}</div>
+                                )}
                               </div>
                             </div>
                           </div>

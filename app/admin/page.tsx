@@ -34,7 +34,7 @@ export default function AdminPage() {
   const [savingAdminPw, setSavingAdminPw] = useState(false);
   const [savingAdminEmail, setSavingAdminEmail] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
-  const [activeSection, setActiveSection] = useState<"account" | "categories" | "series" | "campaigns" | "products" | "orders" | "members" | "codes" | "legacy" | "announcements">("account");
+  const [activeSection, setActiveSection] = useState<"account" | "categories" | "series" | "productImport" | "campaigns" | "products" | "orders" | "members" | "codes" | "legacy" | "announcements">("account");
   const categoryFormRef = useRef<HTMLDivElement>(null);
   const planFormRef = useRef<HTMLDivElement>(null);
   const [categoryFilterText, setCategoryFilterText] = useState("");
@@ -258,6 +258,37 @@ export default function AdminPage() {
   const [activePlanForProducts, setActivePlanForProducts] = useState<SeriesAdmin | null>(null);
   const [products, setProducts] = useState<ProductAdmin[]>([]);
   const [allProductsForCopy, setAllProductsForCopy] = useState<ProductAdmin[]>([]); // item 8：複製款式改成跨系列，這裡放全部系列的商品
+
+  // ---- 商品批次匯入 ----
+  const [importSeriesId, setImportSeriesId] = useState("");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ total: number; success: number; failed: string[] } | null>(null);
+  const [importMsg, setImportMsg] = useState("");
+
+  async function runProductImport() {
+    setImportMsg("");
+    setImportResult(null);
+    if (!importSeriesId) return setImportMsg("請選擇要匯入到哪個系列");
+    if (!importFile) return setImportMsg("請選擇要上傳的檔案");
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      fd.append("seriesId", importSeriesId);
+      const r = await fetch("/api/admin/products/import", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!r.ok) {
+        setImportMsg(d.error || "匯入失敗");
+      } else {
+        setImportResult(d);
+      }
+    } catch (e: any) {
+      setImportMsg(e.message || "匯入失敗");
+    } finally {
+      setImporting(false);
+    }
+  }
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [productRows, setProductRows] = useState<{ style: string; price: string; imageUrl: string; hasDiscountFlag: boolean; codAllowed: boolean; shippingFee: string }[]>([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" }]);
   const [uploadingRowImg, setUploadingRowImg] = useState<number | null>(null);
@@ -417,6 +448,12 @@ export default function AdminPage() {
   useEffect(() => {
     if (unlocked && activeSection === "campaigns") {
       loadCampaigns();
+    }
+  }, [unlocked, activeSection]);
+
+  useEffect(() => {
+    if (unlocked && activeSection === "productImport") {
+      loadPlans();
     }
   }, [unlocked, activeSection]);
 
@@ -1521,6 +1558,7 @@ export default function AdminPage() {
           <div className={`account-nav-item ${activeSection === "account" ? "active" : ""}`} onClick={() => setActiveSection("account")}>帳號設定</div>
           <div className={`account-nav-item ${activeSection === "categories" ? "active" : ""}`} onClick={() => setActiveSection("categories")}>分類管理</div>
           <div className={`account-nav-item ${activeSection === "series" ? "active" : ""}`} onClick={() => setActiveSection("series")}>系列管理</div>
+          <div className={`account-nav-item ${activeSection === "productImport" ? "active" : ""}`} onClick={() => setActiveSection("productImport")}>批次匯入商品</div>
           <div className={`account-nav-item ${activeSection === "campaigns" ? "active" : ""}`} onClick={() => setActiveSection("campaigns")}>檔期管理</div>
           {currentRole === "owner" && (
             <>
@@ -1847,6 +1885,46 @@ export default function AdminPage() {
         </div>
       </div>
             </>
+          )}
+
+          {activeSection === "productImport" && (
+            <div className="auth-card">
+              <h3>批次匯入商品</h3>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                欄位：商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址。一列＝一個具體款式，同名商品會自動歸到同一組。
+                圖片網址支援 Google 雲端硬碟分享連結。
+              </p>
+
+              <div className="id-row">
+                <span className="id-label">匯入到系列</span>
+                <select value={importSeriesId} onChange={(e) => setImportSeriesId(e.target.value)} style={{ flex: 1, padding: 8 }}>
+                  <option value="">請選擇系列</option>
+                  {plans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="id-row">
+                <span className="id-label">選擇檔案</span>
+                <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
+              </div>
+
+              <button className="btn" onClick={runProductImport} disabled={importing}>
+                {importing ? "匯入中…" : "開始匯入"}
+              </button>
+              <div className="auth-msg">{importMsg}</div>
+
+              {importResult && (
+                <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 14, color: "#2C2C2A", marginBottom: 8 }}>
+                    共 {importResult.total} 筆，成功 {importResult.success} 筆，失敗 {importResult.failed.length} 筆
+                  </div>
+                  {importResult.failed.map((msg, i) => (
+                    <div key={i} style={{ fontSize: 12, color: "#993C1D" }}>{msg}</div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {activeSection === "campaigns" && !activeCampaignForGifts && (

@@ -107,7 +107,7 @@ export async function POST(req: Request) {
       const used = Number(campaign.cod_campaign_used) || 0;
       if (used + orderTotal > cap) {
         return NextResponse.json(
-          { error: `取付金額已超過本檔期設定的數量，請改用匯款或減少數量。` },
+          { error: `取付金額已超過本檔期設定的金額 NT$${fmtMoney(cap)}，請改用匯款` },
           { status: 400 }
         );
       }
