@@ -279,5 +279,8 @@ create table if not exists order_gift_selections (
   qty           int not null,
   created_at    timestamptz default now()
 );
+-- image_url_snapshot 是後來才加的欄位，如果這張表在更早版本就已經建立過，
+-- create table if not exists 不會補上新欄位，這裡明確用 alter table 補齊
+alter table order_gift_selections add column if not exists image_url_snapshot text;
 create index if not exists idx_order_gift_selections_order on order_gift_selections (order_id);
 alter table order_gift_selections disable row level security;

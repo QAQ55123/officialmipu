@@ -53,8 +53,10 @@ export default function Home() {
   const [campaignCodCap, setCampaignCodCap] = useState<number | null>(null);
   const [campaignCodUsed, setCampaignCodUsed] = useState(0);
   const [currentCampaign, setCurrentCampaign] = useState<any | null>(null); // 完整檔期資料，含8種匯率、滿贈基礎設定
-  useEffect(() => {
-    fetch("/api/campaigns/current").then((r) => r.json()).then((d) => {
+  async function refreshCampaignStatus() {
+    try {
+      const r = await fetch("/api/campaigns/current");
+      const d = await r.json();
       setCampaignOpen(!!d.isOpen);
       const cap = d.campaign?.cod_campaign_cap ?? null;
       const used = Number(d.campaign?.cod_campaign_used) || 0;
@@ -62,7 +64,10 @@ export default function Home() {
       setCampaignCodUsed(used);
       setCampaignCodAvailable(cap == null || used < cap);
       setCurrentCampaign(d.campaign || null);
-    }).catch(() => {});
+    } catch {}
+  }
+  useEffect(() => {
+    refreshCampaignStatus();
   }, []);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [accountCurrentPw, setAccountCurrentPw] = useState("");
@@ -884,6 +889,7 @@ export default function Home() {
     if (selectedActive.length === 0) return showToast("請先勾選要結帳的商品（已失效的系列無法結帳）");
     syncUrl({ view: "checkout" });
     setView("checkout");
+    refreshCampaignStatus(); // 重新抓取付上限狀態，避免瀏覽過程中被別人的訂單打滿，畫面卻還顯示舊的可以按
     const grouped = selectedActive.reduce<Record<string, GlobalCartEntry[]>>((acc, e) => {
       acc[e.planId] = acc[e.planId] || [];
       acc[e.planId].push(e);
@@ -1886,9 +1892,16 @@ export default function Home() {
                           ))}
                           <div className="hist-total">交易方式：{o.payment}　合計 NT$ {fmt(o.total)}</div>
                           {o.wantsGift && o.giftSelections && o.giftSelections.length > 0 && (
-                            <div style={{ fontSize: 13, color: "var(--muted)", margin: "6px 0" }}>
-                              滿贈：{o.giftSelections.map((g: any, i: number) => (
-                                <span key={i}>{i > 0 && "、"}{g.styleName} x{g.qty}</span>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "8px 0" }}>
+                              {o.giftSelections.map((g: any, i: number) => (
+                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+                                  {g.imageUrl ? (
+                                    <img src={g.imageUrl} alt={g.styleName} style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />
+                                  ) : (
+                                    <div style={{ width: 28, height: 28, borderRadius: 5, background: "var(--line)" }} />
+                                  )}
+                                  <span>{g.styleName} x{g.qty}</span>
+                                </div>
                               ))}
                             </div>
                           )}
@@ -1994,8 +2007,10 @@ export default function Home() {
 
                       {entries.map((e) => {
                         const key = cartItemKey(planId, e.productName, e.style);
+                        const singleCap = singleItemGiftCap(e.price, currentCampaign);
                         return (
-                          <div className="cart-item-row" key={key}>
+                          <div key={key}>
+                          <div className="cart-item-row">
                             <div className="cart-item-left">
                               <input
                                 type="checkbox"
@@ -2034,14 +2049,11 @@ export default function Home() {
                               <span className="cart-item-remove" onClick={() => removeCartItem(planId, e.productName, e.style)} title="移除">×</span>
                             </div>
                           </div>
-                        );
-                      })}
-                      {entries.map((e) => {
-                        const cap = singleItemGiftCap(e.price, currentCampaign);
-                        if (cap == null) return null;
-                        return (
-                          <div key={`hint-${e.productName}||${e.style}`} style={{ fontSize: 12, color: "#993C1D", padding: "0 0 8px" }}>
-                            {e.productName}{e.style ? `（${e.style}）` : ""}：此商品已達單筆訂單滿贈上限，最多可選擇 {cap} 個滿贈
+                          {singleCap != null && (
+                            <div style={{ fontSize: 12, color: "#993C1D", padding: "0 8px 8px" }}>
+                              此商品已達單筆訂單滿贈上限，最多可選擇 {singleCap} 個滿贈
+                            </div>
+                          )}
                           </div>
                         );
                       })}

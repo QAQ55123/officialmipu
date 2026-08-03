@@ -155,14 +155,15 @@ export async function POST(req: Request) {
 
   if (finalWantsGift && Array.isArray(giftSelections) && giftSelections.length > 0) {
     const giftStyleIds = giftSelections.map((g: any) => g.giftStyleId).filter(Boolean);
-    const { data: giftStylesData } = await supabase.from("gift_styles").select("id, style_name").in("id", giftStyleIds);
-    const nameById = new Map((giftStylesData || []).map((g: any) => [g.id, g.style_name]));
+    const { data: giftStylesData } = await supabase.from("gift_styles").select("id, style_name, image_url").in("id", giftStyleIds);
+    const infoById = new Map((giftStylesData || []).map((g: any) => [g.id, { name: g.style_name, imageUrl: g.image_url }]));
     const giftRows = giftSelections
       .filter((g: any) => Number(g.qty) > 0)
       .map((g: any) => ({
         order_id: order.id,
         gift_style_id: g.giftStyleId,
-        style_name_snapshot: nameById.get(g.giftStyleId) || "",
+        style_name_snapshot: infoById.get(g.giftStyleId)?.name || "",
+        image_url_snapshot: infoById.get(g.giftStyleId)?.imageUrl || null,
         qty: Number(g.qty),
       }));
     if (giftRows.length > 0) {
@@ -245,6 +246,7 @@ export async function GET(req: Request) {
       wantsGift: o.wants_gift !== false,
       giftSelections: (o.order_gift_selections || []).map((g: any) => ({
         styleName: g.style_name_snapshot || "（款式已刪除）",
+        imageUrl: g.image_url_snapshot || null,
         qty: g.qty,
       })),
       total: (o.order_items || []).reduce((s: number, it: any) => s + Number(it.subtotal), 0),
