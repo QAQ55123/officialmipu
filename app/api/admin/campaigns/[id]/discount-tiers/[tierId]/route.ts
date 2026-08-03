@@ -14,9 +14,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string; ti
   if ("discountAmount" in body) updates.discount_amount = Number(body.discountAmount);
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.from("vendor_gift_tiers").update(updates).eq("id", params.tierId).select().single();
+  const { data, error } = await supabase.from("vendor_discount_tiers").update(updates).eq("id", params.tierId).select().single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ giftTier: data });
+  return NextResponse.json({ discountTier: data });
 }
 
 export async function DELETE(req: Request, { params }: { params: { id: string; tierId: string } }) {
@@ -26,7 +26,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string; t
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
   const supabase = getSupabaseAdmin();
-  const { error } = await supabase.from("vendor_gift_tiers").delete().eq("id", params.tierId);
+  const { error } = await supabase.from("vendor_discount_tiers").delete().eq("id", params.tierId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

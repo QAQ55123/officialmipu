@@ -5,7 +5,7 @@ import { requireAdminSession } from "@/lib/adminAuth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/** 3.2節：廠商採購平台，同一檔期可以有好幾個（如A/B/C），各自單筆採購單贈品總量上限不同 */
+/** 3.2節：廠商採購平台，每款上限直接對應「滿贈款式登記」(gift_styles)裡已存在的每個款式 */
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     requireAdminSession(req);
@@ -21,8 +21,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const platformIds = (platforms || []).map((p) => p.id);
-  const { data: tierCaps } = platformIds.length
-    ? await supabase.from("vendor_platform_tier_caps").select("*").in("platform_id", platformIds)
+  const { data: styleCaps } = platformIds.length
+    ? await supabase.from("vendor_platform_style_caps").select("*").in("platform_id", platformIds)
     : { data: [] };
 
   return NextResponse.json({
@@ -30,8 +30,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       id: p.id,
       name: p.name,
       orderGiftCap: p.order_gift_cap,
-      tierCaps: (tierCaps || []).filter((c: any) => c.platform_id === p.id).reduce((acc: any, c: any) => {
-        acc[c.gift_tier_id] = c.per_style_cap;
+      sortOrder: p.sort_order,
+      styleCaps: (styleCaps || []).filter((c: any) => c.platform_id === p.id).reduce((acc: any, c: any) => {
+        acc[c.gift_style_id] = c.per_style_cap;
         return acc;
       }, {}),
     })),

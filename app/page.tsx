@@ -1750,7 +1750,7 @@ export default function Home() {
 
                         {productNames.length === 1 && <h4>{activeProductName}</h4>}
 
-                        {current.hasDiscountFlag && <div style={{ fontSize: 13, color: "#853806", marginBottom: 8 }}>滿減商品</div>}
+                        {current.hasDiscountFlag && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginBottom: 8 }}>滿減商品</span>}
 
                         <div className="product-info-v3-label">款式</div>
                         <div className="style-pills">
@@ -1890,7 +1890,7 @@ export default function Home() {
                                 )}
                                 <div>
                                   <div>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</div>
-                                  {it.hasDiscountFlagSnapshot && <div style={{ fontSize: 12, color: "#853806", marginTop: 2 }}>滿減商品</div>}
+                                  {it.hasDiscountFlagSnapshot && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>}
                                   {it.unitPriceOriginal != null && it.fxRate != null && (
                                     <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmt(it.unitPriceOriginal)} × 匯率 {it.fxRate}</div>
                                   )}
@@ -2040,7 +2040,7 @@ export default function Home() {
                               <div className="cart-item-info">
                                 <span className="cart-item-name">{e.productName}{e.style ? `（${e.style}）` : ""}</span>
                                 {cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag && (
-                                  <span style={{ fontSize: 12, color: "#853806" }}>滿減商品</span>
+                                  <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999 }}>滿減商品</span>
                                 )}
                                 <span className="cart-item-unit-price">￥ {fmt(e.price)} / 件</span>
                               </div>
@@ -2209,7 +2209,7 @@ export default function Home() {
                                         <div>
                                           <div>{e.productName}{e.style ? `（${e.style}）` : ""} x{e.qty}</div>
                                           {(cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
-                                            <div style={{ fontSize: 12, color: "#853806", marginTop: 2 }}>滿減商品</div>
+                                            <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>
                                           )}
                                           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmt(e.price)} ／件</div>
                                         </div>

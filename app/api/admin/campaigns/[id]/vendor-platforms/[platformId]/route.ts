@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 
-/** PATCH body: { name?, orderGiftCap?, tierCaps?: { [giftTierId]: number } }
- *  tierCaps 是這個平台在各門檻等級的每款式上限，一次整包覆蓋式更新（upsert） */
+/** PATCH body: { name?, orderGiftCap?, styleCaps?: { [giftStyleId]: number } }
+ *  styleCaps 是這個平台對每個滿贈款式的上限，一次整包覆蓋式更新（upsert） */
 export async function PATCH(req: Request, { params }: { params: { id: string; platformId: string } }) {
   try {
     requireAdminSession(req);
@@ -21,14 +21,14 @@ export async function PATCH(req: Request, { params }: { params: { id: string; pl
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  if (body.tierCaps && typeof body.tierCaps === "object") {
-    const rows = Object.entries(body.tierCaps).map(([giftTierId, cap]) => ({
+  if (body.styleCaps && typeof body.styleCaps === "object") {
+    const rows = Object.entries(body.styleCaps).map(([giftStyleId, cap]) => ({
       platform_id: params.platformId,
-      gift_tier_id: giftTierId,
+      gift_style_id: giftStyleId,
       per_style_cap: Number(cap) || 0,
     }));
     if (rows.length > 0) {
-      const { error } = await supabase.from("vendor_platform_tier_caps").upsert(rows, { onConflict: "platform_id,gift_tier_id" });
+      const { error } = await supabase.from("vendor_platform_style_caps").upsert(rows, { onConflict: "platform_id,gift_style_id" });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
   }

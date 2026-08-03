@@ -20,7 +20,7 @@ export async function POST(req: Request) {
 
   const { data, error } = await supabase
     .from("categories")
-    .insert({ name, parent_id: body.parentId || null, sort_order: nextSortOrder })
+    .insert({ name, parent_id: body.parentId || null, sort_order: nextSortOrder, is_gift_category: !!body.isGiftCategory })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -42,7 +42,7 @@ export async function PUT(req: Request) {
   const supabase = getSupabaseAdmin();
   const { error } = await supabase
     .from("categories")
-    .update({ name: body.name, parent_id: body.parentId || null })
+    .update({ name: body.name, parent_id: body.parentId || null, is_gift_category: !!body.isGiftCategory })
     .eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

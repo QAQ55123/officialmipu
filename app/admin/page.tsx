@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { toDirectImageUrl } from "@/lib/imageUrl";
 
-type Category = { id: string; name: string; parent_id: string | null; created_at?: string; sort_order?: number };
+type Category = { id: string; name: string; parent_id: string | null; created_at?: string; sort_order?: number; isGiftCategory?: boolean };
 type SeriesAdmin = {
   id: string; name: string; imageUrl: string | null;
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
@@ -10,7 +10,7 @@ type SeriesAdmin = {
 };
 type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number };
 
-const emptyCategoryForm = { id: "", name: "", parentId: "" };
+const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
 const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" };
 
@@ -74,8 +74,12 @@ export default function AdminPage() {
 
   // ---- 3.2節：廠商規則設定 ----
   const [activeCampaignForVendorRules, setActiveCampaignForVendorRules] = useState<any | null>(null);
-  const [vendorRulesTab, setVendorRulesTab] = useState<"tiers" | "platforms">("tiers");
-  const [giftTiers, setGiftTiers] = useState<any[]>([]);
+  const [giftSeriesCampaignId, setGiftSeriesCampaignId] = useState("");
+  const [autoCreatingGiftSeries, setAutoCreatingGiftSeries] = useState(false);
+  const [autoCreateGiftMsg, setAutoCreateGiftMsg] = useState("");
+  const [vendorRulesTab, setVendorRulesTab] = useState<"discount" | "platforms">("discount");
+  const [discountTiers, setDiscountTiers] = useState<any[]>([]);
+  const [campaignGiftStyles, setCampaignGiftStyles] = useState<any[]>([]); // 這個檔期已登記的滿贈款式（來自2.7節），平台每款上限直接對應這份清單
   const [vendorPlatforms, setVendorPlatforms] = useState<any[]>([]);
   const [tierThreshold, setTierThreshold] = useState("");
   const [tierDiscount, setTierDiscount] = useState("");
@@ -83,19 +87,24 @@ export default function AdminPage() {
   const [newPlatformName, setNewPlatformName] = useState("");
   const [newPlatformCap, setNewPlatformCap] = useState("");
   const [editingPlatformCaps, setEditingPlatformCaps] = useState<Record<string, Record<string, string>>>({});
+  const [draggedPlatformId, setDraggedPlatformId] = useState<string | null>(null);
 
   async function openVendorRules(c: any) {
     setActiveCampaignForVendorRules(c);
-    setVendorRulesTab("tiers");
+    setVendorRulesTab("discount");
     setVendorRulesMsg("");
     setTierThreshold(""); setTierDiscount("");
     await loadVendorRules(c.id);
   }
 
   async function loadVendorRules(campaignId: string) {
-    const r1 = await fetch(`/api/admin/campaigns/${campaignId}/gift-tiers`);
+    const r1 = await fetch(`/api/admin/campaigns/${campaignId}/discount-tiers`);
     const d1 = await r1.json();
-    setGiftTiers(d1.giftTiers || []);
+    setDiscountTiers(d1.discountTiers || []);
+
+    const r3 = await fetch(`/api/admin/campaigns/${campaignId}/gift-styles`);
+    const d3 = await r3.json();
+    setCampaignGiftStyles(d3.giftStyles || []);
 
     const r2 = await fetch(`/api/admin/campaigns/${campaignId}/vendor-platforms`);
     const d2 = await r2.json();
@@ -103,12 +112,12 @@ export default function AdminPage() {
     const caps: Record<string, Record<string, string>> = {};
     (d2.platforms || []).forEach((p: any) => {
       caps[p.id] = {};
-      Object.entries(p.tierCaps || {}).forEach(([tierId, v]) => { caps[p.id][tierId] = String(v); });
+      Object.entries(p.styleCaps || {}).forEach(([styleId, v]) => { caps[p.id][styleId] = String(v); });
     });
     setEditingPlatformCaps(caps);
   }
 
-  async function addGiftTier() {
+  async function addDiscountTier() {
     if (!activeCampaignForVendorRules) return;
     setVendorRulesMsg("");
     const threshold = Number(tierThreshold);
@@ -116,7 +125,7 @@ export default function AdminPage() {
     if (!isFinite(threshold) || threshold <= 0) return setVendorRulesMsg("門檻金額格式不正確");
     if (!isFinite(discount) || discount < 0) return setVendorRulesMsg("折扣金額格式不正確");
     try {
-      await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/gift-tiers`, "POST", { thresholdAmount: threshold, discountAmount: discount });
+      await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/discount-tiers`, "POST", { thresholdAmount: threshold, discountAmount: discount });
       setTierThreshold(""); setTierDiscount("");
       loadVendorRules(activeCampaignForVendorRules.id);
     } catch (e: any) {
@@ -124,10 +133,10 @@ export default function AdminPage() {
     }
   }
 
-  async function deleteGiftTier(tierId: string) {
+  async function deleteDiscountTier(tierId: string) {
     if (!activeCampaignForVendorRules) return;
     if (!confirm("確定要刪除這個門檻嗎？")) return;
-    await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/gift-tiers/${tierId}`, "DELETE", {});
+    await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/discount-tiers/${tierId}`, "DELETE", {});
     loadVendorRules(activeCampaignForVendorRules.id);
   }
 
@@ -150,13 +159,30 @@ export default function AdminPage() {
     if (!activeCampaignForVendorRules) return;
     try {
       await callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/vendor-platforms/${platformId}`, "PATCH", {
-        tierCaps: editingPlatformCaps[platformId] || {},
+        styleCaps: editingPlatformCaps[platformId] || {},
       });
       setVendorRulesMsg("已儲存");
       loadVendorRules(activeCampaignForVendorRules.id);
     } catch (e: any) {
       setVendorRulesMsg(e.message || "儲存失敗");
     }
+  }
+
+  function handlePlatformDrop(targetId: string) {
+    if (!draggedPlatformId || draggedPlatformId === targetId || !activeCampaignForVendorRules) return;
+    setVendorPlatforms((prev) => {
+      const next = [...prev];
+      const fromIdx = next.findIndex((p) => p.id === draggedPlatformId);
+      const toIdx = next.findIndex((p) => p.id === targetId);
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      const ids = next.map((p) => p.id);
+      callJson(`/api/admin/campaigns/${activeCampaignForVendorRules.id}/vendor-platforms/reorder`, "POST", { ids }).catch((e: any) => {
+        setVendorRulesMsg("排序儲存失敗：" + e.message);
+      });
+      return next;
+    });
+    setDraggedPlatformId(null);
   }
 
   async function deleteVendorPlatform(platformId: string) {
@@ -313,6 +339,26 @@ export default function AdminPage() {
     if (!v) return;
     setGiftStyleImageUrl(toDirectImageUrl(v));
     setGiftStyleImageUrlInput("");
+  }
+
+  async function autoCreateGiftSeries() {
+    if (!planForm.categoryId) return setAutoCreateGiftMsg("請先選擇分類");
+    if (!giftSeriesCampaignId) return setAutoCreateGiftMsg("請選擇檔期");
+    setAutoCreateGiftMsg("");
+    setAutoCreatingGiftSeries(true);
+    try {
+      const d = await callJson("/api/admin/series/auto-create-gift", "POST", {
+        categoryId: planForm.categoryId,
+        campaignId: giftSeriesCampaignId,
+      });
+      setAutoCreateGiftMsg(`已建立系列「${d.series.name}」，共 ${d.productCount} 個商品，記得回商品管理填上金額`);
+      setGiftSeriesCampaignId("");
+      loadPlans();
+    } catch (e: any) {
+      setAutoCreateGiftMsg(e.message || "建立失敗");
+    } finally {
+      setAutoCreatingGiftSeries(false);
+    }
   }
 
   async function saveGiftStyle() {
@@ -536,6 +582,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (unlocked && activeSection === "series") {
       loadPlans();
+      loadCampaigns(); // 滿贈分類的「選擇檔期」下拉選單需要用到
     }
   }, [unlocked, activeSection]);
 
@@ -676,11 +723,11 @@ export default function AdminPage() {
   async function loadCategories() {
     const r = await fetch("/api/categories", { cache: "no-store" });
     const d = await r.json();
-    setCategories((d.categories || []).map((c: any) => ({ id: c.id, name: c.name, parent_id: c.parentId, created_at: c.createdAt, sort_order: c.sortOrder })));
+    setCategories((d.categories || []).map((c: any) => ({ id: c.id, name: c.name, parent_id: c.parentId, created_at: c.createdAt, sort_order: c.sortOrder, isGiftCategory: !!c.isGiftCategory })));
   }
 
   function editCategory(c: Category) {
-    setCategoryForm({ id: c.id, name: c.name, parentId: c.parent_id || "" });
+    setCategoryForm({ id: c.id, name: c.name, parentId: c.parent_id || "", isGiftCategory: !!c.isGiftCategory });
     categoryFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -689,9 +736,9 @@ export default function AdminPage() {
     setCategoryMsg("處理中…");
     try {
       if (categoryForm.id) {
-        await callJson("/api/admin/categories", "PUT", { id: categoryForm.id, name: categoryForm.name, parentId: categoryForm.parentId || null });
+        await callJson("/api/admin/categories", "PUT", { id: categoryForm.id, name: categoryForm.name, parentId: categoryForm.parentId || null, isGiftCategory: categoryForm.isGiftCategory });
       } else {
-        await callJson("/api/admin/categories", "POST", { name: categoryForm.name, parentId: categoryForm.parentId || null });
+        await callJson("/api/admin/categories", "POST", { name: categoryForm.name, parentId: categoryForm.parentId || null, isGiftCategory: categoryForm.isGiftCategory });
       }
       setCategoryForm(emptyCategoryForm);
       setCategoryMsg("已儲存");
@@ -1796,6 +1843,13 @@ export default function AdminPage() {
             ))}
           </select>
         </div>
+        <div className="id-row">
+          <span className="id-label">是否為滿贈分類</span>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#33415C" }}>
+            <input type="checkbox" checked={categoryForm.isGiftCategory} onChange={(e) => setCategoryForm((f) => ({ ...f, isGiftCategory: e.target.checked }))} />
+            這個分類底下的系列，新增時可以選檔期自動建立滿贈系列與商品
+          </label>
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={saveCategory}>{categoryForm.id ? "儲存修改" : "新增分類"}</button>
           {categoryForm.id && <button className="btn secondary" onClick={() => setCategoryForm(emptyCategoryForm)}>取消編輯</button>}
@@ -1881,6 +1935,27 @@ export default function AdminPage() {
             ))}
           </select>
         </div>
+
+        {!planForm.id && categories.find((c) => c.id === planForm.categoryId)?.isGiftCategory && (
+          <div style={{ border: "1px solid #6B4E8E", background: "#ECE6F2", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+            <p style={{ fontSize: 13, color: "#4A3560", margin: "0 0 10px" }}>
+              這是滿贈分類：選擇檔期後，會自動用檔期名稱建立系列，並依「滿贈款式登記」的資料自動建立對應商品（門檻金額當商品名稱、款式名稱當款式、圖片自動帶入），金額需要你自己手動填。
+            </p>
+            <div className="id-row">
+              <span className="id-label">選擇檔期</span>
+              <select value={giftSeriesCampaignId} onChange={(e) => setGiftSeriesCampaignId(e.target.value)} style={{ flex: 1, padding: 8 }}>
+                <option value="">請選擇檔期</option>
+                {campaigns.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <button className="btn small" onClick={autoCreateGiftSeries} disabled={autoCreatingGiftSeries}>
+              {autoCreatingGiftSeries ? "建立中…" : "自動建立滿贈系列與商品"}
+            </button>
+            <div style={{ fontSize: 13, marginTop: 6, color: "#4A3560" }}>{autoCreateGiftMsg}</div>
+          </div>
+        )}
         <div className="id-row">
           <span className="id-label">顯示狀態</span>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#33415C" }}>
@@ -2132,26 +2207,26 @@ export default function AdminPage() {
             <div className="auth-card">
               <h3>廠商規則設定：{activeCampaignForVendorRules.name}</h3>
               <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                <button className={`btn small ${vendorRulesTab === "tiers" ? "" : "secondary"}`} onClick={() => setVendorRulesTab("tiers")}>贈品／折扣門檻</button>
+                <button className={`btn small ${vendorRulesTab === "discount" ? "" : "secondary"}`} onClick={() => setVendorRulesTab("discount")}>折扣門檻</button>
                 <button className={`btn small ${vendorRulesTab === "platforms" ? "" : "secondary"}`} onClick={() => setVendorRulesTab("platforms")}>平台設定</button>
               </div>
 
-              {vendorRulesTab === "tiers" && (
+              {vendorRulesTab === "discount" && (
                 <div>
                   <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
-                    三個平台共用同一份門檻表：訂單金額達到門檻，就對應多少廠商折扣金額。
+                    純粹「採購單金額(人民幣)達到門檻，廠商退多少折扣金額(人民幣)」，三個平台共用同一份，跟滿贈完全無關。
                   </p>
-                  <div className="id-row"><span className="id-label">門檻金額</span><input type="number" value={tierThreshold} onChange={(e) => setTierThreshold(e.target.value)} placeholder="例如 100" /></div>
-                  <div className="id-row"><span className="id-label">折扣金額</span><input type="number" value={tierDiscount} onChange={(e) => setTierDiscount(e.target.value)} placeholder="例如 15" /></div>
-                  <button className="btn" onClick={addGiftTier}>新增門檻</button>
+                  <div className="id-row"><span className="id-label">門檻金額(￥)</span><input type="number" value={tierThreshold} onChange={(e) => setTierThreshold(e.target.value)} placeholder="例如 100" /></div>
+                  <div className="id-row"><span className="id-label">折扣金額(￥)</span><input type="number" value={tierDiscount} onChange={(e) => setTierDiscount(e.target.value)} placeholder="例如 15" /></div>
+                  <button className="btn" onClick={addDiscountTier}>新增門檻</button>
                   <div className="auth-msg">{vendorRulesMsg}</div>
 
                   <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
-                    {giftTiers.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有設定任何門檻</div>}
-                    {giftTiers.map((t) => (
+                    {discountTiers.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有設定任何門檻</div>}
+                    {discountTiers.map((t) => (
                       <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
-                        <span style={{ fontSize: 14 }}>滿 {t.threshold_amount} → 折 {t.discount_amount}</span>
-                        <button className="btn small danger" onClick={() => deleteGiftTier(t.id)}>刪除</button>
+                        <span style={{ fontSize: 14 }}>滿 ￥{t.threshold_amount} → 折 ￥{t.discount_amount}</span>
+                        <button className="btn small danger" onClick={() => deleteDiscountTier(t.id)}>刪除</button>
                       </div>
                     ))}
                   </div>
@@ -2161,36 +2236,43 @@ export default function AdminPage() {
               {vendorRulesTab === "platforms" && (
                 <div>
                   <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
-                    每個平台各自設定「單筆採購單贈品總量上限」，以及在每個門檻等級的「每款式上限」（同一平台每個門檻都填一樣的數字，就等於固定上限）。
+                    每個平台各自設定「單筆採購單贈品總量上限」，以及對「滿贈款式登記」裡每個款式各自的上限（同一平台每個款式都填一樣的數字，就等於固定上限）。平台清單可拖曳調整優先順序，拆單時依此順序嘗試分配。
                   </p>
                   <div className="id-row"><span className="id-label">平台名稱</span><input type="text" value={newPlatformName} onChange={(e) => setNewPlatformName(e.target.value)} placeholder="例如 A平台" /></div>
                   <div className="id-row"><span className="id-label">單筆贈品總量上限</span><input type="number" value={newPlatformCap} onChange={(e) => setNewPlatformCap(e.target.value)} placeholder="例如 5" /></div>
                   <button className="btn" onClick={addVendorPlatform}>新增平台</button>
                   <div className="auth-msg">{vendorRulesMsg}</div>
 
-                  {giftTiers.length === 0 && (
-                    <div style={{ fontSize: 13, color: "#8A8779", marginTop: 12 }}>請先到「贈品／折扣門檻」分頁設定至少一個門檻，才能設定每款式上限。</div>
+                  {campaignGiftStyles.length === 0 && (
+                    <div style={{ fontSize: 13, color: "#8A8779", marginTop: 12 }}>這個檔期還沒有登記任何滿贈款式（到「滿贈款式登記」新增），新增後才能設定每款式上限。</div>
                   )}
 
                   <div style={{ marginTop: 16 }}>
                     {vendorPlatforms.map((p) => (
-                      <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+                      <div
+                        key={p.id}
+                        draggable
+                        onDragStart={() => setDraggedPlatformId(p.id)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => handlePlatformDrop(p.id)}
+                        style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 12, cursor: "grab", opacity: draggedPlatformId === p.id ? 0.4 : 1 }}
+                      >
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                          <span style={{ fontWeight: 600 }}>{p.name}（單筆贈品上限 {p.orderGiftCap}）</span>
+                          <span style={{ fontWeight: 600 }}><span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>{p.name}（單筆贈品上限 {p.orderGiftCap}）</span>
                           <button className="btn small danger" onClick={() => deleteVendorPlatform(p.id)}>刪除平台</button>
                         </div>
-                        {giftTiers.map((t) => (
-                          <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                            <span style={{ fontSize: 13, color: "#5F5E5A", minWidth: 90 }}>門檻 {t.threshold_amount} 每款上限</span>
+                        {campaignGiftStyles.map((s) => (
+                          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                            <span style={{ fontSize: 13, color: "#5F5E5A", minWidth: 130 }}>{s.style_name}（門檻{s.threshold_amount}）每款上限</span>
                             <input
                               type="number"
                               style={{ width: 80 }}
-                              value={editingPlatformCaps[p.id]?.[t.id] ?? ""}
-                              onChange={(e) => setEditingPlatformCaps((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [t.id]: e.target.value } }))}
+                              value={editingPlatformCaps[p.id]?.[s.id] ?? ""}
+                              onChange={(e) => setEditingPlatformCaps((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [s.id]: e.target.value } }))}
                             />
                           </div>
                         ))}
-                        {giftTiers.length > 0 && <button className="btn small secondary" onClick={() => savePlatformCaps(p.id)}>儲存這個平台的每款上限</button>}
+                        {campaignGiftStyles.length > 0 && <button className="btn small secondary" onClick={() => savePlatformCaps(p.id)}>儲存這個平台的每款上限</button>}
                       </div>
                     ))}
                   </div>

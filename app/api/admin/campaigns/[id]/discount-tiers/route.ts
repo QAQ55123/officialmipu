@@ -5,7 +5,7 @@ import { requireAdminSession } from "@/lib/adminAuth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/** 3.2節：贈品門檻＋折扣門檻表，三平台共用，店家自行輸入 */
+/** 3.2節：折扣門檻表，純粹「採購單金額(人民幣) → 折扣多少錢」，跟滿贈完全無關 */
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     requireAdminSession(req);
@@ -14,13 +14,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
-    .from("vendor_gift_tiers")
+    .from("vendor_discount_tiers")
     .select("*")
     .eq("campaign_id", params.id)
     .order("sort_order", { ascending: true })
     .order("threshold_amount", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ giftTiers: data });
+  return NextResponse.json({ discountTiers: data });
 }
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
@@ -37,10 +37,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
-    .from("vendor_gift_tiers")
+    .from("vendor_discount_tiers")
     .insert({ campaign_id: params.id, threshold_amount: threshold, discount_amount: discount })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ giftTier: data });
+  return NextResponse.json({ discountTier: data });
 }
