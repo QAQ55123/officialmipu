@@ -33,6 +33,7 @@ export async function GET(req: Request) {
       price: Number(p.price),
       imageUrl: p.image_url,
       codAllowed: p.cod_allowed,
+      shippingFee: Number(p.shipping_fee) || 0,
       hasDiscountFlag: p.has_discount_flag,
     })),
   });
@@ -67,6 +68,7 @@ export async function POST(req: Request) {
       price: Number(body.price) || 0,
       image_url: body.imageUrl || null,
       cod_allowed: body.codAllowed === false ? false : true,
+      shipping_fee: Number(body.shippingFee) || 0,
       has_discount_flag: !!body.hasDiscountFlag,
       sort_order: nextSortOrder,
     })
@@ -97,6 +99,7 @@ export async function PUT(req: Request) {
       price: Number(body.price) || 0,
       image_url: body.imageUrl || null,
       cod_allowed: body.codAllowed === false ? false : true,
+      shipping_fee: Number(body.shippingFee) || 0,
       has_discount_flag: !!body.hasDiscountFlag,
     })
     .eq("id", body.id);

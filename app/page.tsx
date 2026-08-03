@@ -1885,24 +1885,33 @@ export default function Home() {
                                 ) : (
                                   <div className="hist-item-img hist-item-img-empty" />
                                 )}
-                                <span>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</span>
+                                <div>
+                                  <div>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</div>
+                                  {it.hasDiscountFlagSnapshot && <div style={{ fontSize: 12, color: "#853806", marginTop: 2 }}>滿減商品</div>}
+                                  {it.unitPriceOriginal != null && it.fxRate != null && (
+                                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmt(it.unitPriceOriginal)} × 匯率 {it.fxRate}</div>
+                                  )}
+                                </div>
                               </div>
                               <span>NT$ {fmt(it.subtotal)}</span>
                             </div>
                           ))}
                           <div className="hist-total">交易方式：{o.payment}　合計 NT$ {fmt(o.total)}</div>
                           {o.wantsGift && o.giftSelections && o.giftSelections.length > 0 && (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, margin: "8px 0" }}>
-                              {o.giftSelections.map((g: any, i: number) => (
-                                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)" }}>
-                                  {g.imageUrl ? (
-                                    <img src={g.imageUrl} alt={g.styleName} style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />
-                                  ) : (
-                                    <div style={{ width: 28, height: 28, borderRadius: 5, background: "var(--line)" }} />
-                                  )}
-                                  <span>{g.styleName} x{g.qty}</span>
-                                </div>
-                              ))}
+                            <div style={{ margin: "8px 0" }}>
+                              <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600, marginBottom: 6 }}>滿贈</div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                                {o.giftSelections.map((g: any, i: number) => (
+                                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+                                    {g.imageUrl ? (
+                                      <img src={g.imageUrl} alt={g.styleName} style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />
+                                    ) : (
+                                      <div style={{ width: 28, height: 28, borderRadius: 5, background: "var(--line)" }} />
+                                    )}
+                                    <span>{g.styleName} x{g.qty}</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
                           {o.paidAmount > 0 && (

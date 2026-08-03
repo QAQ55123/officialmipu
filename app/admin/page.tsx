@@ -8,11 +8,11 @@ type SeriesAdmin = {
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
 };
-type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean };
+type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "" };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
-const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true };
+const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" };
 
 export default function AdminPage() {
   const [username, setUsername] = useState("");
@@ -259,7 +259,7 @@ export default function AdminPage() {
   const [products, setProducts] = useState<ProductAdmin[]>([]);
   const [allProductsForCopy, setAllProductsForCopy] = useState<ProductAdmin[]>([]); // item 8：複製款式改成跨系列，這裡放全部系列的商品
   const [productForm, setProductForm] = useState(emptyProductForm);
-  const [productRows, setProductRows] = useState<{ style: string; price: string; imageUrl: string; hasDiscountFlag: boolean; codAllowed: boolean }[]>([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
+  const [productRows, setProductRows] = useState<{ style: string; price: string; imageUrl: string; hasDiscountFlag: boolean; codAllowed: boolean; shippingFee: string }[]>([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" }]);
   const [uploadingRowImg, setUploadingRowImg] = useState<number | null>(null);
   const [productRowImageUrlInputs, setProductRowImageUrlInputs] = useState<Record<number, string>>({});
   const [draggedProductId, setDraggedProductId] = useState<string | null>(null);
@@ -777,17 +777,17 @@ export default function AdminPage() {
   async function openProductManager(p: SeriesAdmin) {
     setActivePlanForProducts(p);
     setProductForm(emptyProductForm);
-    setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
+    setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" }]);
     setActiveSection("products");
     await Promise.all([loadProducts(p.id), loadAllProductsForCopy()]);
   }
 
   function editProduct(p: ProductAdmin) {
-    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false });
+    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0) });
   }
 
   function addProductRow() {
-    setProductRows((rows) => [...rows, { style: "", price: rows[rows.length - 1]?.price || "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
+    setProductRows((rows) => [...rows, { style: "", price: rows[rows.length - 1]?.price || "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: rows[rows.length - 1]?.shippingFee || "0" }]);
   }
   function removeProductRow(idx: number) {
     setProductRows((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== idx)));
@@ -797,7 +797,7 @@ export default function AdminPage() {
       return next;
     });
   }
-  function updateProductRow(idx: number, field: "style" | "price" | "imageUrl", value: string) {
+  function updateProductRow(idx: number, field: "style" | "price" | "imageUrl" | "shippingFee", value: string) {
     setProductRows((rows) => rows.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
   }
   function toggleProductRowFlag(idx: number, field: "hasDiscountFlag" | "codAllowed") {
@@ -841,6 +841,7 @@ export default function AdminPage() {
           imageUrl: productForm.imageUrl || null,
           hasDiscountFlag: productForm.hasDiscountFlag,
           codAllowed: productForm.codAllowed,
+          shippingFee: productForm.shippingFee,
         });
         setProductForm(emptyProductForm);
         setProductMsg("已儲存");
@@ -856,11 +857,12 @@ export default function AdminPage() {
             imageUrl: row.imageUrl || null,
             hasDiscountFlag: row.hasDiscountFlag,
             codAllowed: row.codAllowed,
+            shippingFee: row.shippingFee || "0",
           });
         }
         // 商品名稱保留，方便接著建下一批款式；款式列表清空回一列
         setProductForm((f) => ({ ...f, style: "", price: "0" }));
-        setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
+        setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" }]);
         setProductMsg(`已新增 ${rows.length} 筆`);
       }
       await loadProducts(activePlanForProducts.id);
@@ -1998,50 +2000,54 @@ export default function AdminPage() {
             <span className="id-label">商品名稱</span>
             <input type="text" value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="例如：原味米菓" />
           </div>
-          {!productForm.id && Array.from(new Set(products.map((p) => p.name))).length > 0 && (
+          {!productForm.id && (
             <>
-              <div className="id-row">
-                <span className="id-label">快速選擇</span>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {Array.from(new Set(products.map((p) => p.name))).map((name) => (
-                    <span
-                      key={name}
-                      onClick={() => setProductForm((f) => ({ ...f, name }))}
-                      style={{
-                        fontSize: 12, padding: "4px 10px", borderRadius: 999, cursor: "pointer",
-                        background: productForm.name === name ? "#33415C" : "#F1EFE8",
-                        color: productForm.name === name ? "#fff" : "#5F5E5A",
-                      }}
-                    >
-                      {name}
-                    </span>
-                  ))}
+              {Array.from(new Set(products.map((p) => p.name))).length > 0 && (
+                <div className="id-row">
+                  <span className="id-label">快速選擇</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {Array.from(new Set(products.map((p) => p.name))).map((name) => (
+                      <span
+                        key={name}
+                        onClick={() => setProductForm((f) => ({ ...f, name }))}
+                        style={{
+                          fontSize: 12, padding: "4px 10px", borderRadius: 999, cursor: "pointer",
+                          background: productForm.name === name ? "#33415C" : "#F1EFE8",
+                          color: productForm.name === name ? "#fff" : "#5F5E5A",
+                        }}
+                      >
+                        {name}
+                      </span>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="id-row">
-                <span className="id-label">複製款式</span>
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const sourceKey = e.target.value;
-                    if (!sourceKey) return;
-                    const [sourceSeriesId, sourceName] = sourceKey.split("||");
-                    const rows = allProductsForCopy
-                      .filter((p) => p.seriesId === sourceSeriesId && p.name === sourceName)
-                      .map((p) => ({ style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false }));
-                    if (rows.length > 0) setProductRows(rows);
-                    e.target.value = "";
-                  }}
-                >
-                  <option value="">選一個商品複製款式（可跨系列選，記得修改金額）</option>
-                  {Array.from(new Map(allProductsForCopy.map((p) => [`${p.seriesId}||${p.name}`, p])).entries()).map(([key, p]) => {
-                    const seriesName = plans.find((s) => s.id === p.seriesId)?.name || "未知系列";
-                    return (
-                      <option key={key} value={key}>{p.name}（{seriesName}）</option>
+              )}
+              {allProductsForCopy.length > 0 && (
+                <div className="id-row">
+                  <span className="id-label">複製款式</span>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const sourceKey = e.target.value;
+                      if (!sourceKey) return;
+                      const [sourceSeriesId, sourceName] = sourceKey.split("||");
+                      const rows = allProductsForCopy
+                        .filter((p) => p.seriesId === sourceSeriesId && p.name === sourceName)
+                        .map((p) => ({ style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0) }));
+                      if (rows.length > 0) setProductRows(rows);
+                      e.target.value = "";
+                    }}
+                  >
+                    <option value="">選一個商品複製款式（可跨系列選，記得修改金額）</option>
+                    {Array.from(new Map(allProductsForCopy.map((p) => [`${p.seriesId}||${p.name}`, p])).entries()).map(([key, p]) => {
+                      const seriesName = plans.find((s) => s.id === p.seriesId)?.name || "未知系列";
+                      return (
+                        <option key={key} value={key}>{p.name}（{seriesName}）</option>
                     );
                   })}
                 </select>
               </div>
+              )}
             </>
           )}
 
@@ -2054,6 +2060,10 @@ export default function AdminPage() {
               <div className="id-row">
                 <span className="id-label">價格</span>
                 <input type="number" value={productForm.price} onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))} />
+              </div>
+              <div className="id-row">
+                <span className="id-label">運費金額</span>
+                <input type="number" value={productForm.shippingFee} onChange={(e) => setProductForm((f) => ({ ...f, shippingFee: e.target.value }))} />
               </div>
               <div className="id-row">
                 <span className="id-label">是否滿減(v)</span>
@@ -2098,6 +2108,13 @@ export default function AdminPage() {
                           placeholder="價格"
                           style={{ width: 90 }}
                         />
+                        <input
+                          type="number"
+                          value={row.shippingFee}
+                          onChange={(e) => updateProductRow(i, "shippingFee", e.target.value)}
+                          placeholder="運費"
+                          style={{ width: 80 }}
+                        />
                       </div>
                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                         <input type="file" accept="image/*" onChange={(e) => handleProductRowImageUpload(i, e)} style={{ fontSize: 12 }} />
@@ -2136,7 +2153,7 @@ export default function AdminPage() {
 
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn" onClick={saveProduct}>{productForm.id ? "儲存修改" : "新增商品"}</button>
-            {productForm.id && <button className="btn secondary" onClick={() => { setProductForm(emptyProductForm); setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]); }}>取消編輯</button>}
+            {productForm.id && <button className="btn secondary" onClick={() => { setProductForm(emptyProductForm); setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" }]); }}>取消編輯</button>}
             <button className="btn secondary" onClick={() => { setActivePlanForProducts(null); setActiveSection("series"); }}>關閉商品管理</button>
           </div>
           <div style={{ fontSize: 13, marginTop: 6 }}>{productMsg}</div>

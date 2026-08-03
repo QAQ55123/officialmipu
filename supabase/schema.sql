@@ -131,6 +131,11 @@ create table if not exists order_items (
   image_url     text
 );
 create index if not exists idx_order_items_order on order_items (order_id);
+-- 這三個欄位是後來才加的，如果表在更早版本就已經建立過，
+-- create table if not exists 不會補上新欄位，這裡明確用 alter table 補齊
+alter table order_items add column if not exists unit_price_original numeric; -- 原幣（人民幣）單價快照
+alter table order_items add column if not exists fx_rate numeric; -- 下單當下套用的匯率快照
+alter table order_items add column if not exists has_discount_flag_snapshot boolean; -- 下單當下這個商品是否標記滿減(v)
 
 -- updated_at 自動更新
 create or replace function set_updated_at() returns trigger as $$
@@ -256,6 +261,8 @@ create index if not exists idx_gift_styles_campaign on gift_styles (campaign_id)
 alter table products add column if not exists cod_allowed boolean not null default true;
 -- 2.6節：是否標記v(滿減)，決定結帳時套用8種匯率組合裡的哪一軌，不是給顧客看的折扣
 alter table products add column if not exists has_discount_flag boolean not null default true;
+-- 2.2/2.8節：每個款式各自的固定運費金額，CSV匯入時一併寫入，後台手動新增款式則需個別填寫
+alter table products add column if not exists shipping_fee numeric not null default 0;
 
 alter table campaigns disable row level security;
 -- fulfillment_status 是後來才加的欄位，如果 campaigns 表在更早版本就已經建立過，
@@ -284,3 +291,20 @@ create table if not exists order_gift_selections (
 alter table order_gift_selections add column if not exists image_url_snapshot text;
 create index if not exists idx_order_gift_selections_order on order_gift_selections (order_id);
 alter table order_gift_selections disable row level security;
+
+-- ============================================================
+-- 保險機制：不管上面個別關閉RLS的語句有沒有漏掉、或是被 Supabase 專案設定
+-- （Authentication → Policies → Enable RLS on new tables）自動重新打開，
+-- 這裡動態抓出 public schema 底下「現有的所有表格」統一關閉一次，
+-- 每次貼這份 schema.sql 都會自動執行，不用再額外手動關一次。
+-- ============================================================
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY;', r.tablename);
+  END LOOP;
+END $$;

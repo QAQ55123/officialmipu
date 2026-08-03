@@ -79,7 +79,7 @@ export async function POST(req: Request) {
 
   let orderTotal = 0;
   let anyDisabledCombo = false;
-  const rows: { name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null }[] = [];
+  const rows: { name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null; unitOriginal: number; fxRate: number; hasDiscountFlagSnapshot: boolean }[] = [];
   for (const it of items) {
     const qty = Number(it.qty) || 0;
     if (qty <= 0) continue;
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     const unit = ceilToTwd(p.price, rate);
     const subtotal = qty * unit;
     orderTotal += subtotal;
-    rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl });
+    rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: p.price, fxRate: rate, hasDiscountFlagSnapshot: p.hasDiscountFlag });
   }
   if (anyDisabledCombo) return NextResponse.json({ error: "這個交易方式與滿贈組合目前未開放，請重新選擇" }, { status: 400 });
   if (rows.length === 0) return NextResponse.json({ error: "請至少選擇一項商品的數量" }, { status: 400 });
@@ -149,6 +149,9 @@ export async function POST(req: Request) {
     unit_price: r.unit,
     subtotal: r.subtotal,
     image_url: r.imageUrl,
+    unit_price_original: r.unitOriginal,
+    fx_rate: r.fxRate,
+    has_discount_flag_snapshot: r.hasDiscountFlagSnapshot,
   }));
   const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
   if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 });
@@ -242,6 +245,9 @@ export async function GET(req: Request) {
         unitPrice: Number(it.unit_price),
         subtotal: Number(it.subtotal),
         imageUrl: it.image_url,
+        unitPriceOriginal: it.unit_price_original != null ? Number(it.unit_price_original) : null,
+        fxRate: it.fx_rate != null ? Number(it.fx_rate) : null,
+        hasDiscountFlagSnapshot: !!it.has_discount_flag_snapshot,
       })),
       wantsGift: o.wants_gift !== false,
       giftSelections: (o.order_gift_selections || []).map((g: any) => ({
