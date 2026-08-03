@@ -9,7 +9,7 @@ type Plan = {
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
-type Product = { id: string; name: string; style: string; price: number; imageUrl?: string };
+type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean };
 type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
@@ -28,9 +28,17 @@ const FULFILLMENT_STATUS_MAP: Record<string, { label: string; color: string }> =
   distributing: { label: "已開賣場", color: "#16a34a" },
 };
 type Identity = { username: string; profileUrl: string; email: string; emailVerified: boolean; pendingProfileUrl?: string | null } | null;
-type PendingAction = null | "order" | "history" | "favorites";
+type PendingAction = null | "order" | "history" | "favorites" | "checkout";
 
 const fmt = (n: number) => new Intl.NumberFormat("zh-TW").format(Math.round(n));
+// 這件商品單獨算，會不會自己就已經達到廠商滿贈上限（2.7節拆單邏輯的簡化版，只看單一商品）
+function singleItemGiftCap(unitPrice: number, campaign: any): number | null {
+  if (!campaign?.gift_base_unit || !campaign?.vendor_order_gift_cap) return null;
+  const baseUnit = campaign.gift_base_unit;
+  const cap = campaign.vendor_order_gift_cap;
+  const perUnitQuota = Math.min(Math.floor(unitPrice / baseUnit), cap);
+  return perUnitQuota >= cap ? cap : null;
+}
 
 export default function Home() {
   const [view, setView] = useState<"identity" | "plans" | "order" | "history" | "account" | "favorites" | "cart" | "checkout">("plans");
@@ -179,7 +187,7 @@ export default function Home() {
     } catch {}
   }, [globalCart]);
 
-  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; hasDiscountFlag: boolean; codAllowed: boolean }[] }>>({});
+  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; price: number; hasDiscountFlag: boolean; codAllowed: boolean }[] }>>({});
   const [cartPaymentByPlan, setCartPaymentByPlan] = useState<Record<string, string>>({});
   const [checkoutingPlanId, setCheckoutingPlanId] = useState<string | null>(null);
   const [selectedCartKeys, setSelectedCartKeys] = useState<Set<string>>(new Set());
@@ -187,6 +195,7 @@ export default function Home() {
   // 2.7節：每個系列分組各自決定要不要滿贈、選了哪些款式（範圍是這個系列分組送出的這張訂單）
   const [wantsGiftByPlan, setWantsGiftByPlan] = useState<Record<string, boolean>>({});
   const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number }[] }>>({});
+  const [giftQuotaLoadingByPlan, setGiftQuotaLoadingByPlan] = useState<Record<string, boolean>>({});
   const [giftPicksByPlan, setGiftPicksByPlan] = useState<Record<string, Record<string, number>>>({});
   const [submittingCheckout, setSubmittingCheckout] = useState(false);
   const [selectedProductName, setSelectedProductName] = useState<string | null>(null);
@@ -603,6 +612,11 @@ export default function Home() {
     if (action === "order") {
       setView("order");
       showToast("身分驗證成功，請按「新增訂單」送出");
+    } else if (action === "checkout") {
+      // 登入前是在結帳頁按送出訂單，登入完成後要回到結帳頁，而不是被丟到空白的商品詳情頁，
+      // 還要重新整理購物車狀態跟滿贈試算，不然畫面會停留在登入前那次抓到的舊資料
+      refreshCartPlanStatuses();
+      goToCheckout();
     } else if (action === "history") {
       openHistoryNow(id);
     } else if (action === "favorites") {
@@ -767,7 +781,7 @@ export default function Home() {
         if (plan) {
           next[id] = {
             name: plan.name, found: true,
-            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false })),
+            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", price: Number(p.price), hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false })),
           };
         } else {
           next[id] = { name: "", found: false, products: [] };
@@ -775,6 +789,17 @@ export default function Home() {
       }
       return next;
     });
+
+    // 用剛查到的最新價格，同步更新購物車裡已經存在的項目，不要讓顧客看到加入當下的舊快照
+    setGlobalCart((prev) =>
+      prev.map((e) => {
+        const [, plan, products] = results.find(([id]) => id === e.planId) || [null, null, null];
+        if (!plan) return e;
+        const live = (products || []).find((p: any) => p.name === e.productName && p.style === e.style);
+        if (!live) return e;
+        return { ...e, price: Number(live.price), imageUrl: live.imageUrl || e.imageUrl };
+      })
+    );
   }
 
   function removeCartItem(planId: string, productName: string, style: string) {
@@ -839,6 +864,7 @@ export default function Home() {
       })
       .filter((x): x is { productId: string; qty: number } => !!x);
     if (resolvedItems.length === 0) return;
+    setGiftQuotaLoadingByPlan((prev) => ({ ...prev, [planId]: true }));
     try {
       const r = await fetch("/api/cart/quote", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -848,6 +874,8 @@ export default function Home() {
       if (r.ok) setGiftQuotaByPlan((prev) => ({ ...prev, [planId]: { quota: d.quota, styleLimits: d.styleLimits } }));
     } catch {
       // 試算失敗不擋結帳流程，只是滿贈數量顯示不出來
+    } finally {
+      setGiftQuotaLoadingByPlan((prev) => ({ ...prev, [planId]: false }));
     }
   }
 
@@ -866,13 +894,26 @@ export default function Home() {
       for (const planId of Object.keys(grouped)) if (!(planId in next)) next[planId] = true;
       return next;
     });
+    // 進結帳頁當下就先清掉舊的滿贈試算結果、同步鎖住畫面，避免在重新查詢完成前，
+    // 顧客還看得到、還能操作上一次進結帳頁時留下的舊資料
+    const planIds = Object.keys(grouped);
+    setGiftQuotaByPlan((prev) => {
+      const next = { ...prev };
+      for (const id of planIds) delete next[id];
+      return next;
+    });
+    setGiftQuotaLoadingByPlan((prev) => {
+      const next = { ...prev };
+      for (const id of planIds) next[id] = true;
+      return next;
+    });
     for (const [planId, items] of Object.entries(grouped)) fetchGiftQuotaForPlan(planId, items);
   }
 
   async function submitCheckout() {
     if (submittingCheckout) return;
     if (!identity) {
-      requireIdentity("order");
+      requireIdentity("checkout");
       return;
     }
     if (!identity.emailVerified) {
@@ -1342,11 +1383,11 @@ export default function Home() {
                         ).map(([planName, subtotal]) => (
                           <div className="mibu-hover-panel-row" key={planName}>
                             <span>{planName}</span>
-                            <span>NT$ {fmt(subtotal)}</span>
+                            <span>￥ {fmt(subtotal)}</span>
                           </div>
                         ))}
                         <div className="mibu-hover-panel-row" style={{ borderTop: "1px dashed var(--line)", marginTop: 6, paddingTop: 6, fontWeight: 600, color: "var(--text)" }}>
-                          <span>合計</span><span>NT$ {fmt(globalCartTotal)}</span>
+                          <span>合計</span><span>￥ {fmt(globalCartTotal)}</span>
                         </div>
                       </>
                     )}
@@ -1670,7 +1711,7 @@ export default function Home() {
                       <div className="product-info-v3">
 
                         <div className="product-price-row">
-                          <span className="product-price-v3">NT$ {fmt(current.price)}</span>
+                          <span className="product-price-v3"><span style={{ fontSize: "0.7em" }}>￥</span>{fmt(current.price)}</span>
                           <button
                             className={`favorite-icon-btn ${favoritedPlanIds.has(activePlan.id) ? "active" : ""}`}
                             onClick={() => toggleFavorite(activePlan.id)}
@@ -1699,6 +1740,8 @@ export default function Home() {
                         )}
 
                         {productNames.length === 1 && <h4>{activeProductName}</h4>}
+
+                        {current.hasDiscountFlag && <div style={{ fontSize: 13, color: "#853806", marginBottom: 8 }}>滿減商品</div>}
 
                         <div className="product-info-v3-label">款式</div>
                         <div className="style-pills">
@@ -1730,7 +1773,7 @@ export default function Home() {
                         </div>
 
                         <div className="product-checkout-row">
-                          <span className="product-checkout-total">合計 NT$ {fmt(cartTotal)}</span>
+                          <span className="product-checkout-total">合計 ￥ {fmt(cartTotal)}</span>
                           <button
                             className="btn"
                             disabled={cartCount === 0}
@@ -1842,6 +1885,13 @@ export default function Home() {
                             </div>
                           ))}
                           <div className="hist-total">交易方式：{o.payment}　合計 NT$ {fmt(o.total)}</div>
+                          {o.wantsGift && o.giftSelections && o.giftSelections.length > 0 && (
+                            <div style={{ fontSize: 13, color: "var(--muted)", margin: "6px 0" }}>
+                              滿贈：{o.giftSelections.map((g: any, i: number) => (
+                                <span key={i}>{i > 0 && "、"}{g.styleName} x{g.qty}</span>
+                              ))}
+                            </div>
+                          )}
                           {o.paidAmount > 0 && (
                             <div className="hist-paid-confirm">
                               ✓ 已確認收到您的款項 NT$ {fmt(o.paidAmount)}
@@ -1961,7 +2011,7 @@ export default function Home() {
                               )}
                               <div className="cart-item-info">
                                 <span className="cart-item-name">{e.productName}{e.style ? `（${e.style}）` : ""}</span>
-                                <span className="cart-item-unit-price">NT$ {fmt(e.price)} / 件</span>
+                                <span className="cart-item-unit-price">￥ {fmt(e.price)} / 件</span>
                               </div>
                             </div>
                             <div className="cart-item-right">
@@ -1980,15 +2030,24 @@ export default function Home() {
                               ) : (
                                 <span style={{ fontSize: 13, color: "var(--muted)" }}>x{e.qty}</span>
                               )}
-                              <span className="cart-item-price">NT$ {fmt(e.qty * e.price)}</span>
+                              <span className="cart-item-price">￥ {fmt(e.qty * e.price)}</span>
                               <span className="cart-item-remove" onClick={() => removeCartItem(planId, e.productName, e.style)} title="移除">×</span>
                             </div>
                           </div>
                         );
                       })}
+                      {entries.map((e) => {
+                        const cap = singleItemGiftCap(e.price, currentCampaign);
+                        if (cap == null) return null;
+                        return (
+                          <div key={`hint-${e.productName}||${e.style}`} style={{ fontSize: 12, color: "#993C1D", padding: "0 0 8px" }}>
+                            {e.productName}{e.style ? `（${e.style}）` : ""}：此商品已達單筆訂單滿贈上限，最多可選擇 {cap} 個滿贈
+                          </div>
+                        );
+                      })}
 
                       <div className="cart-group-footer">
-                        <span style={{ fontWeight: 600 }}>小計 NT$ {fmt(groupTotal)}</span>
+                        <span style={{ fontWeight: 600 }}>小計 ￥ {fmt(groupTotal)}</span>
                         <button className="btn small secondary" onClick={() => removeCartGroup(planId)}>清除這組</button>
                       </div>
                     </div>
@@ -1999,7 +2058,7 @@ export default function Home() {
                   <div className="cart-checkout-bar">
                     <span>
                       已選 <strong>{selectedCartKeys.size}</strong> 項商品　
-                      合計 <strong>NT$ {fmt(
+                      合計 <strong>￥ {fmt(
                         globalCart
                           .filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)))
                           .reduce((s, e) => s + e.qty * e.price, 0)
@@ -2032,14 +2091,22 @@ export default function Home() {
                     return acc;
                   }, {});
 
-                  // 2.6節：依「交易方式 × 商品是否標記v × 是否選滿贈」算每項的實際金額；沒有檔期匯率資料時退回原價
-                  function itemAmount(planId: string, e: GlobalCartEntry, payment: string, wantsGift: boolean): number {
-                    if (!currentCampaign) return e.qty * e.price;
+                  // 2.6節：依「交易方式 × 商品是否標記v × 是否選滿贈」找出這一項適用的匯率（換算後的NT$金額、匯率數字都回傳，畫面上要分開顯示原幣跟換算後金額）
+                  function itemRateInfo(planId: string, e: GlobalCartEntry, payment: string, wantsGift: boolean): { rate: number | null; enabled: boolean; hasDiscountFlag: boolean } {
                     const liveProduct = cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style);
                     const hasDiscountFlag = liveProduct?.hasDiscountFlag ?? true;
+                    if (!currentCampaign) return { rate: null, enabled: false, hasDiscountFlag };
                     const { enabled, rate } = resolveTxnRate(currentCampaign as CampaignRates, payment === "取付" ? "cod" : "bank", hasDiscountFlag, wantsGift);
-                    if (!enabled || rate == null) return e.qty * e.price; // 這個組合沒開放時，先顯示原價，送出時後端會再擋一次
+                    return { rate: enabled ? rate : null, enabled, hasDiscountFlag };
+                  }
+                  function itemAmount(planId: string, e: GlobalCartEntry, payment: string, wantsGift: boolean): number {
+                    const { rate } = itemRateInfo(planId, e, payment, wantsGift);
+                    if (rate == null) return e.qty * e.price; // 這個組合沒開放時，先顯示原價，送出時後端會再擋一次
                     return ceilToTwd(e.price, rate) * e.qty;
+                  }
+                  // 這件商品單獨算，會不會自己就已經達到廠商滿贈上限（跟2.7節拆單邏輯共用同一個判斷）
+                  function singleItemGiftCapLocal(e: GlobalCartEntry): number | null {
+                    return singleItemGiftCap(e.price, currentCampaign);
                   }
 
                   const grandTotal = Object.entries(grouped).reduce((sum, [planId, entries]) => {
@@ -2047,6 +2114,18 @@ export default function Home() {
                     const wantsGift = wantsGiftByPlan[planId] ?? true;
                     return sum + entries.reduce((s, e) => s + itemAmount(planId, e, payment, wantsGift), 0);
                   }, 0);
+
+                  // 滿贈要選滿才能送出：每個有勾選「要選擇滿贈」的分組，可選數量都要剛好選滿
+                  let giftNotFull = false;
+                  for (const planId of Object.keys(grouped)) {
+                    const wantsGift = wantsGiftByPlan[planId] ?? true;
+                    if (!wantsGift) continue;
+                    const quota = giftQuotaByPlan[planId];
+                    if (!quota || quota.quota <= 0) continue;
+                    const picks = giftPicksByPlan[planId] || {};
+                    const pickedTotal = Object.values(picks).reduce((s, n) => s + n, 0);
+                    if (pickedTotal < quota.quota) giftNotFull = true;
+                  }
 
                   return (
                     <>
@@ -2060,8 +2139,22 @@ export default function Home() {
                         const wantsGift = wantsGiftByPlan[planId] ?? true;
                         const groupTotal = entries.reduce((s, e) => s + itemAmount(planId, e, payment, wantsGift), 0);
                         const quota = giftQuotaByPlan[planId];
+                        const giftLoading = giftQuotaLoadingByPlan[planId];
                         const picks = giftPicksByPlan[planId] || {};
                         const pickedTotal = Object.values(picks).reduce((s, n) => s + n, 0);
+
+                        // 依匯率分組：同一個分組裡，可能有商品用不同匯率（滿減v / 一般），分開顯示原幣小計+換算後小計
+                        const rateGroups = new Map<string, { rate: number; original: number; twd: number; hasDiscountFlag: boolean }>();
+                        entries.forEach((e) => {
+                          const info = itemRateInfo(planId, e, payment, wantsGift);
+                          const key = info.rate == null ? "unavailable" : `${info.rate}|${info.hasDiscountFlag}`;
+                          const original = e.qty * e.price;
+                          const twd = itemAmount(planId, e, payment, wantsGift);
+                          if (!rateGroups.has(key)) rateGroups.set(key, { rate: info.rate ?? 0, original: 0, twd: 0, hasDiscountFlag: info.hasDiscountFlag });
+                          const g = rateGroups.get(key)!;
+                          g.original += original;
+                          g.twd += twd;
+                        });
 
                         function adjustGiftPick(styleId: string, delta: number, max: number) {
                           setGiftPicksByPlan((prev) => {
@@ -2073,41 +2166,59 @@ export default function Home() {
                         }
 
                         return (
-                          <div key={planId} className="cart-group">
-                            <div className="cart-group-header">
-                              <span className="cart-group-plan-name" style={{ cursor: "default" }}>{planName}</span>
-                            </div>
-                            {entries.map((e) => (
-                              <div className="cart-item-row" key={`${e.productName}||${e.style}`}>
-                                <div className="cart-item-left">
-                                  {e.imageUrl ? <img src={e.imageUrl} alt={e.productName} className="cart-item-img" /> : <div className="cart-item-img cart-item-img-empty" />}
-                                  <span>{e.productName}{e.style ? `（${e.style}）` : ""} x{e.qty}</span>
-                                </div>
-                                <span className="cart-item-price">NT$ {fmt(itemAmount(planId, e, payment, wantsGift))}</span>
+                          <div key={planId} className="cart-group" style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+                            <div style={{ flex: "1.4 1 280px", minWidth: 0 }}>
+                              <div className="cart-group-header">
+                                <span className="cart-group-plan-name" style={{ cursor: "default" }}>{planName}</span>
                               </div>
-                            ))}
-                            <div className="cart-checkout-footer">
-                              <span style={{ fontWeight: 600 }}>小計 NT$ {fmt(groupTotal)}</span>
-                              <div className="cart-checkout-payment">
-                                <div className="id-label" style={{ marginBottom: 6 }}>這個系列的交易方式</div>
-                                <div className="source-btns">
-                                  {(!codOffered ? ["匯款"] : ["匯款", "取付"]).map((p) => (
-                                    <button
-                                      key={p}
-                                      className={`src-btn ${payment === p ? "active" : ""}`}
-                                      disabled={p === "取付" && codDisabled}
-                                      onClick={() => setCheckoutPaymentByPlan((prev) => ({ ...prev, [planId]: p }))}
-                                    >
-                                      {p}
-                                    </button>
-                                  ))}
-                                </div>
-                                {!campaignCodAvailable && (
-                                  <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
-                                    取付金額已超過本檔期設定的數量，請改用匯款
+                              {entries.map((e) => {
+                                const singleCap = singleItemGiftCapLocal(e);
+                                return (
+                                  <div key={`${e.productName}||${e.style}`} style={{ padding: "10px 0", borderBottom: "1px dashed var(--line)" }}>
+                                    <div className="cart-item-row" style={{ padding: 0, border: "none" }}>
+                                      <div className="cart-item-left">
+                                        {e.imageUrl ? <img src={e.imageUrl} alt={e.productName} className="cart-item-img" /> : <div className="cart-item-img cart-item-img-empty" />}
+                                        <div>
+                                          <div>{e.productName}{e.style ? `（${e.style}）` : ""} x{e.qty}</div>
+                                          {(cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
+                                            <div style={{ fontSize: 12, color: "#853806", marginTop: 2 }}>滿減商品</div>
+                                          )}
+                                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmt(e.price)} ／件</div>
+                                        </div>
+                                      </div>
+                                      <span className="cart-item-price">￥{fmt(e.qty * e.price)}</span>
+                                    </div>
+                                    {singleCap != null && (
+                                      <div style={{ fontSize: 12, color: "#993C1D", marginTop: 4 }}>
+                                        此商品已達單筆訂單滿贈上限，最多可選擇 {singleCap} 個滿贈
+                                      </div>
+                                    )}
                                   </div>
-                                )}
+                                );
+                              })}
+                            </div>
+
+                            <div style={{ flex: "1 1 260px", minWidth: 0, background: "var(--card-bg, #fff)", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 10 }}>結帳明細</div>
+
+                              <div className="id-label" style={{ marginBottom: 6 }}>這個系列的交易方式</div>
+                              <div className="source-btns">
+                                {(!codOffered ? ["匯款"] : ["匯款", "取付"]).map((p) => (
+                                  <button
+                                    key={p}
+                                    className={`src-btn ${payment === p ? "active" : ""}`}
+                                    disabled={p === "取付" && codDisabled}
+                                    onClick={() => setCheckoutPaymentByPlan((prev) => ({ ...prev, [planId]: p }))}
+                                  >
+                                    {p}
+                                  </button>
+                                ))}
                               </div>
+                              {!campaignCodAvailable && (
+                                <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
+                                  取付金額已超過本檔期設定的數量，請改用匯款
+                                </div>
+                              )}
 
                               <div style={{ marginTop: 12 }}>
                                 <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
@@ -2118,9 +2229,14 @@ export default function Home() {
                                   />
                                   要選擇滿贈
                                 </label>
-                                {wantsGift && quota && (
+                                {wantsGift && giftLoading && (
+                                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>正在重新計算可選數量…</div>
+                                )}
+                                {wantsGift && !giftLoading && quota && (
                                   <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginTop: 8 }}>
-                                    <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>可選 {pickedTotal} / {quota.quota} 個</div>
+                                    <div style={{ fontSize: 13, color: pickedTotal < quota.quota ? "#B3261E" : "var(--muted)", marginBottom: 8 }}>
+                                      可選 {pickedTotal} / {quota.quota} 個{pickedTotal < quota.quota && "（要選滿才能送出）"}
+                                    </div>
                                     {quota.styleLimits.map((s) => {
                                       const picked = picks[s.giftStyleId] || 0;
                                       return (
@@ -2140,6 +2256,24 @@ export default function Home() {
                                   </div>
                                 )}
                               </div>
+
+                              <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+                                {Array.from(rateGroups.entries()).map(([key, g]) => (
+                                  <div key={key} style={{ marginBottom: 10 }}>
+                                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                                      {key === "unavailable" ? "此組合目前未開放" : `${g.hasDiscountFlag ? "滿減商品" : "一般商品"} × 匯率 ${g.rate}`}
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                                      <span>￥{fmt(g.original)}</span>
+                                      <span style={{ fontWeight: 600 }}>NT$ {fmt(g.twd)}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
+                                  <span style={{ fontSize: 13, color: "var(--muted)" }}>小計</span>
+                                  <span style={{ fontWeight: 700, fontSize: 16 }}>NT$ {fmt(groupTotal)}</span>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         );
@@ -2147,8 +2281,8 @@ export default function Home() {
 
                       <div className="cart-checkout-bar">
                         <span style={{ fontWeight: 600 }}>總計 NT$ {fmt(grandTotal)}</span>
-                        <button className="btn" disabled={submittingCheckout} onClick={submitCheckout}>
-                          {submittingCheckout ? "送出中…" : "確認送出訂單"}
+                        <button className="btn" disabled={submittingCheckout || giftNotFull} onClick={submitCheckout} title={giftNotFull ? "滿贈可選數量還沒選滿" : undefined}>
+                          {submittingCheckout ? "送出中…" : giftNotFull ? "滿贈還沒選滿" : "確認送出訂單"}
                         </button>
                       </div>
                     </>

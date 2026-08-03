@@ -48,8 +48,10 @@ export function splitIntoGroups(
       }
     });
 
-    // 只有「併入最佳組能拿到的邊際配額」嚴格大於「自己獨立成一組」時才合併
-    if (bestGroupIndex >= 0 && bestMarginalGain > standaloneQuota) {
+    // 併入最佳組能拿到的邊際配額「大於等於」自己獨立成一組時就合併——打平的話優先合併，
+    // 因為合併不會讓總配額變少，還能避免特定門檻的滿贈款式因為拆組打散而算不到（規格書沒有
+    //明講打平時要選哪邊，但合併對總量無害、對個別款式門檻更有利，所以優先合併）
+    if (bestGroupIndex >= 0 && bestMarginalGain >= standaloneQuota) {
       const g = groups[bestGroupIndex];
       g.itemIds.push(item.id);
       g.groupAmount += item.amount;

@@ -216,7 +216,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("*, series(name, image_url, is_legacy_archive), campaigns(fulfillment_status), order_items(*)")
+    .select("*, series(name, image_url, is_legacy_archive), campaigns(fulfillment_status), order_items(*), order_gift_selections(*)")
     .ilike("username", username)
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -241,6 +241,11 @@ export async function GET(req: Request) {
         unitPrice: Number(it.unit_price),
         subtotal: Number(it.subtotal),
         imageUrl: it.image_url,
+      })),
+      wantsGift: o.wants_gift !== false,
+      giftSelections: (o.order_gift_selections || []).map((g: any) => ({
+        styleName: g.style_name_snapshot || "（款式已刪除）",
+        qty: g.qty,
       })),
       total: (o.order_items || []).reduce((s: number, it: any) => s + Number(it.subtotal), 0),
     })),
