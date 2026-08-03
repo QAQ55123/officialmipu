@@ -17,14 +17,11 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: e.message }, { status: 401 });
   }
   const seriesId = searchParams.get("seriesId");
-  if (!seriesId) return NextResponse.json({ error: "缺少 seriesId" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .eq("series_id", seriesId)
-    .order("sort_order", { ascending: true });
+  let query = supabase.from("products").select("*").order("sort_order", { ascending: true });
+  if (seriesId) query = query.eq("series_id", seriesId);
+  const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({

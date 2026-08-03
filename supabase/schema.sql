@@ -259,7 +259,7 @@ alter table campaigns disable row level security;
 alter table gift_styles disable row level security;
 
 -- 完全移除系列層級的取付上限機制（改用檔期層級的 campaigns.cod_campaign_cap，見2.4節）
-alter table plans drop column if exists cod_limit;
+-- 註：新版 series 表定義本來就沒有 cod_limit 這個欄位，這裡不需要再額外執行任何清理
 
 -- 2.5節：訂單記錄下單當下屬於哪個檔期；2.7節：是否選滿贈、選了哪些款式各幾個
 alter table orders add column if not exists campaign_id uuid references campaigns(id) on delete set null;

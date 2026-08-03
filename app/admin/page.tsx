@@ -8,7 +8,7 @@ type SeriesAdmin = {
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
 };
-type ProductAdmin = { id: string; planId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean };
+type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "" };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
@@ -211,6 +211,7 @@ export default function AdminPage() {
   // ---- 商品 ----
   const [activePlanForProducts, setActivePlanForProducts] = useState<SeriesAdmin | null>(null);
   const [products, setProducts] = useState<ProductAdmin[]>([]);
+  const [allProductsForCopy, setAllProductsForCopy] = useState<ProductAdmin[]>([]); // item 8：複製款式改成跨系列，這裡放全部系列的商品
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [productRows, setProductRows] = useState<{ style: string; price: string; imageUrl: string; hasDiscountFlag: boolean; codAllowed: boolean }[]>([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
   const [uploadingRowImg, setUploadingRowImg] = useState<number | null>(null);
@@ -714,10 +715,17 @@ export default function AdminPage() {
 
   // ================= 商品 =================
   async function loadProducts(planId: string) {
-    const r = await fetch(`/api/admin/products?planId=${planId}`);
+    const r = await fetch(`/api/admin/products?seriesId=${planId}`);
     if (r.status === 401) { setUnlocked(false); setLoginMsg("登入已過期，請重新登入"); return; }
     const d = await r.json();
     setProducts(d.products || []);
+  }
+
+  async function loadAllProductsForCopy() {
+    const r = await fetch(`/api/admin/products`);
+    if (r.status === 401) { setUnlocked(false); setLoginMsg("登入已過期，請重新登入"); return; }
+    const d = await r.json();
+    setAllProductsForCopy(d.products || []);
   }
 
   async function openProductManager(p: SeriesAdmin) {
@@ -725,7 +733,7 @@ export default function AdminPage() {
     setProductForm(emptyProductForm);
     setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true }]);
     setActiveSection("products");
-    await loadProducts(p.id);
+    await Promise.all([loadProducts(p.id), loadAllProductsForCopy()]);
   }
 
   function editProduct(p: ProductAdmin) {
@@ -959,9 +967,9 @@ export default function AdminPage() {
       setOrderLookupResult(d.order);
       setOrderPaidAmountInput(String(d.order.paidAmount || 0));
       setEditItemRows((d.order.items || []).map((it: any) => ({ name: it.name, style: it.style || "", qty: String(it.qty) })));
-      if (d.order.planId) {
+      if (d.order.seriesId) {
         try {
-          const pr = await fetch(`/api/admin/products?planId=${d.order.planId}`, { cache: "no-store" });
+          const pr = await fetch(`/api/admin/products?seriesId=${d.order.seriesId}`, { cache: "no-store" });
           const pd = await pr.json();
           if (pr.ok) setOrderPlanProducts(pd.products || []);
         } catch {}
@@ -1948,19 +1956,23 @@ export default function AdminPage() {
                 <select
                   defaultValue=""
                   onChange={(e) => {
-                    const sourceName = e.target.value;
-                    if (!sourceName) return;
-                    const rows = products
-                      .filter((p) => p.name === sourceName)
+                    const sourceKey = e.target.value;
+                    if (!sourceKey) return;
+                    const [sourceSeriesId, sourceName] = sourceKey.split("||");
+                    const rows = allProductsForCopy
+                      .filter((p) => p.seriesId === sourceSeriesId && p.name === sourceName)
                       .map((p) => ({ style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false }));
                     if (rows.length > 0) setProductRows(rows);
                     e.target.value = "";
                   }}
                 >
-                  <option value="">選一個商品複製款式（記得修改金額）</option>
-                  {Array.from(new Set(products.map((p) => p.name))).map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
+                  <option value="">選一個商品複製款式（可跨系列選，記得修改金額）</option>
+                  {Array.from(new Map(allProductsForCopy.map((p) => [`${p.seriesId}||${p.name}`, p])).entries()).map(([key, p]) => {
+                    const seriesName = plans.find((s) => s.id === p.seriesId)?.name || "未知系列";
+                    return (
+                      <option key={key} value={key}>{p.name}（{seriesName}）</option>
+                    );
+                  })}
                 </select>
               </div>
             </>
@@ -2154,10 +2166,10 @@ export default function AdminPage() {
                         </div>
                       ))}
                       <div style={{ textAlign: "right", fontWeight: 600, marginTop: 8 }}>合計 NT$ {orderLookupResult.total}</div>
-                      {currentRole === "owner" && orderLookupResult.planId && (
+                      {currentRole === "owner" && orderLookupResult.seriesId && (
                         <button className="btn small secondary" onClick={() => setEditingOrderItems(true)} style={{ marginTop: 8 }}>編輯商品／款式</button>
                       )}
-                      {currentRole === "owner" && !orderLookupResult.planId && (
+                      {currentRole === "owner" && !orderLookupResult.seriesId && (
                         <div style={{ fontSize: 12, color: "#8A8779", marginTop: 8 }}>這張訂單沒有對應的系列了，沒辦法編輯商品內容（系列可能已被刪除）。</div>
                       )}
                     </>
