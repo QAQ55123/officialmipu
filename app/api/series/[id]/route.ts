@@ -19,7 +19,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const { data: products, error: prodErr } = await supabase
     .from("products")
-    .select("id, name, style, price, image_url, has_discount_flag, cod_allowed")
+    .select("id, name, style, price, image_url, has_discount_flag, cod_allowed, linked_gift_style_id")
     .eq("series_id", params.id)
     .order("sort_order", { ascending: true });
   if (prodErr) return NextResponse.json({ error: prodErr.message }, { status: 500 });
@@ -43,6 +43,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         imageUrl: p.image_url,
         hasDiscountFlag: !!p.has_discount_flag,
         codAllowed: p.cod_allowed !== false,
+        linkedGiftStyleId: p.linked_gift_style_id || null,
       })),
     },
     { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } }

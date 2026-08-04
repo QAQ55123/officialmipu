@@ -8,11 +8,11 @@ type SeriesAdmin = {
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
 };
-type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number };
+type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
-const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" };
+const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null };
 
 export default function AdminPage() {
   const [username, setUsername] = useState("");
@@ -1084,7 +1084,7 @@ export default function AdminPage() {
   }
 
   function editProduct(p: ProductAdmin) {
-    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0) });
+    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0), linkedGiftStyleId: p.linkedGiftStyleId ?? null });
   }
 
   function addProductRow() {
@@ -2428,7 +2428,7 @@ export default function AdminPage() {
                         <input
                           type="number"
                           placeholder="數量"
-                          style={{ width: 60 }}
+                          style={{ width: 60, minWidth: 60 }}
                           value={assignQtyByItem[it.orderItemId] || ""}
                           onChange={(e) => setAssignQtyByItem((prev) => ({ ...prev, [it.orderItemId]: e.target.value }))}
                         />
@@ -2504,7 +2504,7 @@ export default function AdminPage() {
                           <input
                             type="number"
                             placeholder="數量"
-                            style={{ width: 60 }}
+                            style={{ width: 60, minWidth: 60 }}
                             value={giftQtyByBatch[b.id] || ""}
                             onChange={(e) => setGiftQtyByBatch((prev) => ({ ...prev, [b.id]: e.target.value }))}
                           />
@@ -2594,7 +2594,7 @@ export default function AdminPage() {
                       {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }} />}
                       <div>
                         <div style={{ fontSize: 14 }}>{p.style || "單一款式"}</div>
-                        <div style={{ fontSize: 12, color: "#8A8779" }}>NT$ {p.price}</div>
+                        <div style={{ fontSize: 12, color: "#8A8779" }}>{p.linkedGiftStyleId ? "NT$" : "￥"} {p.price}</div>
                       </div>
                     </div>
                     <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -2670,11 +2670,11 @@ export default function AdminPage() {
                 <input type="text" value={productForm.style} onChange={(e) => setProductForm((f) => ({ ...f, style: e.target.value }))} placeholder="例如：6入（沒有分款式可留空）" />
               </div>
               <div className="id-row">
-                <span className="id-label">價格</span>
+                <span className="id-label">價格（{productForm.linkedGiftStyleId ? "NT$" : "￥"}）</span>
                 <input type="number" value={productForm.price} onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))} />
               </div>
               <div className="id-row">
-                <span className="id-label">運費金額</span>
+                <span className="id-label">運費金額（{productForm.linkedGiftStyleId ? "NT$" : "￥"}）</span>
                 <input type="number" value={productForm.shippingFee} onChange={(e) => setProductForm((f) => ({ ...f, shippingFee: e.target.value }))} />
               </div>
               <div className="id-row">
@@ -2714,21 +2714,21 @@ export default function AdminPage() {
                           style={{ flex: 1 }}
                         />
                         <div>
-                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>金額</div>
+                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>金額(￥)</div>
                           <input
                             type="number"
                             value={row.price}
                             onChange={(e) => updateProductRow(i, "price", e.target.value)}
-                            style={{ width: 60 }}
+                            style={{ width: 60, minWidth: 60 }}
                           />
                         </div>
                         <div>
-                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>運費</div>
+                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>運費(￥)</div>
                           <input
                             type="number"
                             value={row.shippingFee}
                             onChange={(e) => updateProductRow(i, "shippingFee", e.target.value)}
-                            style={{ width: 50 }}
+                            style={{ width: 50, minWidth: 50 }}
                           />
                         </div>
                       </div>

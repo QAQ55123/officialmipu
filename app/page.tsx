@@ -192,7 +192,7 @@ export default function Home() {
     } catch {}
   }, [globalCart]);
 
-  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; price: number; hasDiscountFlag: boolean; codAllowed: boolean }[] }>>({});
+  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; price: number; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null }[] }>>({});
   const [cartPaymentByPlan, setCartPaymentByPlan] = useState<Record<string, string>>({});
   const [checkoutingPlanId, setCheckoutingPlanId] = useState<string | null>(null);
   const [selectedCartKeys, setSelectedCartKeys] = useState<Set<string>>(new Set());
@@ -787,7 +787,7 @@ export default function Home() {
         if (plan) {
           next[id] = {
             name: plan.name, found: true,
-            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", price: Number(p.price), hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false })),
+            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", price: Number(p.price), hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, linkedGiftStyleId: p.linkedGiftStyleId || null })),
           };
         } else {
           next[id] = { name: "", found: false, products: [] };
@@ -2120,6 +2120,10 @@ export default function Home() {
                   }, {});
 
                   // 2.6節：依「交易方式 × 商品是否標記v × 是否選滿贈」找出這一項適用的匯率（換算後的NT$金額、匯率數字都回傳，畫面上要分開顯示原幣跟換算後金額）
+                  function isGiftConversionItem(planId: string, e: GlobalCartEntry): boolean {
+                    const liveProduct = cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style);
+                    return !!liveProduct?.linkedGiftStyleId;
+                  }
                   function itemRateInfo(planId: string, e: GlobalCartEntry, payment: string, wantsGift: boolean): { rate: number | null; enabled: boolean; hasDiscountFlag: boolean } {
                     const liveProduct = cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style);
                     const hasDiscountFlag = liveProduct?.hasDiscountFlag ?? true;
@@ -2128,6 +2132,8 @@ export default function Home() {
                     return { rate: enabled ? rate : null, enabled, hasDiscountFlag };
                   }
                   function itemAmount(planId: string, e: GlobalCartEntry, payment: string, wantsGift: boolean): number {
+                    // 「贈品/滿贈」系列賣出的商品，價格直接就是台幣，不套匯率
+                    if (isGiftConversionItem(planId, e)) return e.qty * e.price;
                     const { rate } = itemRateInfo(planId, e, payment, wantsGift);
                     if (rate == null) return e.qty * e.price; // 這個組合沒開放時，先顯示原價，送出時後端會再擋一次
                     return ceilToTwd(e.price, rate) * e.qty;
@@ -2171,9 +2177,15 @@ export default function Home() {
                         const picks = giftPicksByPlan[planId] || {};
                         const pickedTotal = Object.values(picks).reduce((s, n) => s + n, 0);
 
-                        // 依匯率分組：同一個分組裡，可能有商品用不同匯率（滿減v / 一般），分開顯示原幣小計+換算後小計
+                        // 依匯率分組：同一個分組裡，可能有商品用不同匯率（滿減v / 一般），分開顯示原幣小計+換算後小計。
+                        // 「贈品/滿贈」系列賣出的商品不套匯率，另外累加成一筆直接台幣小計，不歸進任何匯率分組。
                         const rateGroups = new Map<string, { rate: number; original: number; twd: number; hasDiscountFlag: boolean }>();
+                        let giftConversionTotal = 0;
                         entries.forEach((e) => {
+                          if (isGiftConversionItem(planId, e)) {
+                            giftConversionTotal += itemAmount(planId, e, payment, wantsGift);
+                            return;
+                          }
                           const info = itemRateInfo(planId, e, payment, wantsGift);
                           const key = info.rate == null ? "unavailable" : `${info.rate}|${info.hasDiscountFlag}`;
                           const original = e.qty * e.price;
@@ -2201,6 +2213,8 @@ export default function Home() {
                               </div>
                               {entries.map((e) => {
                                 const singleCap = singleItemGiftCapLocal(e);
+                                const isGiftConv = isGiftConversionItem(planId, e);
+                                const currencySymbol = isGiftConv ? "NT$" : "￥";
                                 return (
                                   <div key={`${e.productName}||${e.style}`} style={{ padding: "10px 0", borderBottom: "1px dashed var(--line)" }}>
                                     <div className="cart-item-row" style={{ padding: 0, border: "none" }}>
@@ -2211,10 +2225,10 @@ export default function Home() {
                                           {(cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
                                             <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>
                                           )}
-                                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmt(e.price)} ／件</div>
+                                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{currencySymbol}{fmt(e.price)} ／件</div>
                                         </div>
                                       </div>
-                                      <span className="cart-item-price">￥{fmt(e.qty * e.price)}</span>
+                                      <span className="cart-item-price">{currencySymbol}{fmt(e.qty * e.price)}</span>
                                     </div>
                                     {singleCap != null && (
                                       <div style={{ fontSize: 12, color: "#993C1D", marginTop: 4 }}>
@@ -2300,6 +2314,14 @@ export default function Home() {
                                     </div>
                                   </div>
                                 ))}
+                                {giftConversionTotal > 0 && (
+                                  <div style={{ marginBottom: 10 }}>
+                                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>贈品／滿贈系列商品</div>
+                                    <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 13 }}>
+                                      <span style={{ fontWeight: 600 }}>NT$ {fmt(giftConversionTotal)}</span>
+                                    </div>
+                                  </div>
+                                )}
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
                                   <span style={{ fontSize: 13, color: "var(--muted)" }}>小計</span>
                                   <span style={{ fontWeight: 700, fontSize: 16 }}>NT$ {fmt(groupTotal)}</span>

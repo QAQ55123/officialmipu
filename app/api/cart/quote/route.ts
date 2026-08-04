@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   if (!campaign) return NextResponse.json({ error: "找不到這個檔期" }, { status: 404 });
 
   const productIds = items.map((i) => i.productId);
-  const { data: products, error: productError } = await supabase.from("products").select("id, price").in("id", productIds);
+  const { data: products, error: productError } = await supabase.from("products").select("id, price, linked_gift_style_id").in("id", productIds);
   if (productError) return NextResponse.json({ error: productError.message }, { status: 500 });
 
   const { data: giftStyles, error: giftStyleError } = await supabase
@@ -41,6 +41,7 @@ export async function POST(req: Request) {
   for (const cartItem of items) {
     const product = (products || []).find((p: any) => p.id === cartItem.productId);
     if (!product) continue;
+    if ((product as any).linked_gift_style_id) continue; // 「贈品/滿贈」系列賣出的商品，不計入滿贈配額計算
     const unitAmount = Number((product as any).price) || 0;
     for (let i = 0; i < cartItem.qty; i++) {
       giftableItems.push({ id: `${cartItem.productId}-${i}`, amount: unitAmount });

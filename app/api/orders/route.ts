@@ -52,13 +52,14 @@ export async function POST(req: Request) {
 
   // 價目表對照（避免前端竄改價格），順便記錄圖片快照跟2.6/2.4節需要的滿減標記／取付開關
   const { data: products } = await supabase.from("products").select("*").eq("series_id", seriesId);
-  const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean }> = {};
+  const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null }> = {};
   (products || []).forEach((p) => {
     productMap[`${p.name}||${p.style || ""}`] = {
       price: Number(p.price),
       imageUrl: p.image_url || null,
       hasDiscountFlag: !!p.has_discount_flag,
       codAllowed: p.cod_allowed !== false,
+      linkedGiftStyleId: p.linked_gift_style_id || null,
     };
   });
 
@@ -79,13 +80,22 @@ export async function POST(req: Request) {
 
   let orderTotal = 0;
   let anyDisabledCombo = false;
-  const rows: { name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null; unitOriginal: number; fxRate: number; hasDiscountFlagSnapshot: boolean }[] = [];
+  const rows: { name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null; unitOriginal: number | null; fxRate: number | null; hasDiscountFlagSnapshot: boolean }[] = [];
   for (const it of items) {
     const qty = Number(it.qty) || 0;
     if (qty <= 0) continue;
     const style = it.style || "";
     const p = productMap[`${it.name}||${style}`];
     if (!p) continue;
+
+    // 「贈品/滿贈」系列賣出的商品，價格直接就是台幣，不套8種匯率換算（那些是店家已經買好的實體庫存，不是跟廠商用人民幣採購的商品）
+    if (p.linkedGiftStyleId) {
+      const unit = p.price;
+      const subtotal = qty * unit;
+      orderTotal += subtotal;
+      rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: null, fxRate: null, hasDiscountFlagSnapshot: p.hasDiscountFlag });
+      continue;
+    }
 
     const { enabled, rate } = resolveTxnRate(campaign as CampaignRates, payment === "取付" ? "cod" : "bank", p.hasDiscountFlag, finalWantsGift);
     if (!enabled || rate == null) {

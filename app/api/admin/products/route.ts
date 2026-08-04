@@ -34,6 +34,7 @@ export async function GET(req: Request) {
       imageUrl: p.image_url,
       codAllowed: p.cod_allowed,
       shippingFee: Number(p.shipping_fee) || 0,
+      linkedGiftStyleId: p.linked_gift_style_id || null,
       hasDiscountFlag: p.has_discount_flag,
     })),
   });
