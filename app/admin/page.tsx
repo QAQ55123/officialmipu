@@ -95,6 +95,94 @@ export default function AdminPage() {
   const [extraQty, setExtraQty] = useState("");
   const [extraNote, setExtraNote] = useState("");
 
+  // ---- 3.5節：到貨追蹤 ----
+  const [activeBatchForArrival, setActiveBatchForArrival] = useState<any | null>(null);
+  const [arrivalTree, setArrivalTree] = useState<any[]>([]);
+  const [arrivalUnshippedPool, setArrivalUnshippedPool] = useState<any[]>([]);
+  const [newOrderNumber, setNewOrderNumber] = useState("");
+  const [newTrackingByOrderNumber, setNewTrackingByOrderNumber] = useState<Record<string, string>>({});
+  const [assignShipQtyByPoolItem, setAssignShipQtyByPoolItem] = useState<Record<string, string>>({});
+  const [assignShipTargetByPoolItem, setAssignShipTargetByPoolItem] = useState<Record<string, string>>({});
+  const [arrivalMsg, setArrivalMsg] = useState("");
+
+  async function openArrivalTracking(batch: any) {
+    setActiveBatchForArrival(batch);
+    setArrivalMsg("");
+    await loadArrivalTree(batch.id);
+  }
+
+  async function loadArrivalTree(batchId: string) {
+    const r = await fetch(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}/arrival`);
+    const d = await r.json();
+    setArrivalTree(d.tree || []);
+    setArrivalUnshippedPool(d.unshippedPool || []);
+  }
+
+  async function addOrderNumber() {
+    if (!activeBatchForArrival || !activeCampaignForBatches) return;
+    if (!newOrderNumber.trim()) return setArrivalMsg("請輸入廠商訂單編號");
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${activeBatchForArrival.id}/arrival`, "POST", { orderNumber: newOrderNumber });
+      setNewOrderNumber("");
+      loadArrivalTree(activeBatchForArrival.id);
+    } catch (e: any) {
+      setArrivalMsg(e.message || "新增失敗");
+    }
+  }
+
+  async function deleteOrderNumber(orderNumberId: string) {
+    if (!activeBatchForArrival) return;
+    if (!confirm("確定要刪除這個廠商訂單編號嗎？底下的物流單號也會一起刪除。")) return;
+    await callJson(`/api/admin/order-numbers/${orderNumberId}`, "DELETE", {});
+    loadArrivalTree(activeBatchForArrival.id);
+  }
+
+  async function addShipment(orderNumberId: string) {
+    if (!activeBatchForArrival) return;
+    try {
+      await callJson(`/api/admin/order-numbers/${orderNumberId}`, "POST", { trackingNumber: newTrackingByOrderNumber[orderNumberId] || "" });
+      setNewTrackingByOrderNumber((prev) => ({ ...prev, [orderNumberId]: "" }));
+      loadArrivalTree(activeBatchForArrival.id);
+    } catch (e: any) {
+      setArrivalMsg(e.message || "新增失敗");
+    }
+  }
+
+  async function deleteShipment(shipmentId: string) {
+    if (!activeBatchForArrival) return;
+    if (!confirm("確定要刪除這個物流單號嗎？")) return;
+    await callJson(`/api/admin/shipments/${shipmentId}`, "DELETE", {});
+    loadArrivalTree(activeBatchForArrival.id);
+  }
+
+  async function assignPoolItemToShipment(poolItem: any) {
+    if (!activeBatchForArrival) return;
+    const key = `${poolItem.type}-${poolItem.id}`;
+    const shipmentId = assignShipTargetByPoolItem[key];
+    const qty = Number(assignShipQtyByPoolItem[key]);
+    if (!shipmentId) return setArrivalMsg("請選擇要分配進哪個物流單號");
+    if (!isFinite(qty) || qty <= 0) return setArrivalMsg("請輸入數量");
+    try {
+      await callJson(`/api/admin/shipments/${shipmentId}/items`, "POST", { type: poolItem.type, id: poolItem.id, qty });
+      setAssignShipQtyByPoolItem((prev) => ({ ...prev, [key]: "" }));
+      loadArrivalTree(activeBatchForArrival.id);
+    } catch (e: any) {
+      setArrivalMsg(e.message || "分配失敗");
+    }
+  }
+
+  async function toggleArrived(itemId: string, arrived: boolean) {
+    if (!activeBatchForArrival) return;
+    await callJson(`/api/admin/shipment-items/${itemId}`, "PATCH", { arrived });
+    loadArrivalTree(activeBatchForArrival.id);
+  }
+
+  async function removeShipmentItem(itemId: string) {
+    if (!activeBatchForArrival) return;
+    await callJson(`/api/admin/shipment-items/${itemId}`, "DELETE", {});
+    loadArrivalTree(activeBatchForArrival.id);
+  }
+
   async function openPurchaseBatches(c: any) {
     setActiveCampaignForBatches(c);
     setBatchesTab("batches");
@@ -2407,7 +2495,7 @@ export default function AdminPage() {
             </div>
           )}
 
-          {activeSection === "campaigns" && activeCampaignForBatches && (
+          {activeSection === "campaigns" && activeCampaignForBatches && !activeBatchForArrival && (
             <div className="auth-card">
               <h3>拆單：{activeCampaignForBatches.name}</h3>
               <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -2468,6 +2556,17 @@ export default function AdminPage() {
                               <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
                           </select>
+                          <button
+                            className="btn small secondary"
+                            style={
+                              b.arrivalTotalQty > 0
+                                ? { background: b.arrivalArrivedQty >= b.arrivalTotalQty ? "#639922" : "#D9A441", color: "#fff", borderColor: "transparent" }
+                                : undefined
+                            }
+                            onClick={() => openArrivalTracking(b)}
+                          >
+                            {b.arrivalTotalQty > 0 ? `到貨中 ${b.arrivalArrivedQty}/${b.arrivalTotalQty}` : "到貨追蹤"}
+                          </button>
                           <button className="btn small danger" onClick={() => deleteBatch(b.id)}>刪除採購單</button>
                         </div>
                       </div>
@@ -2564,6 +2663,107 @@ export default function AdminPage() {
               )}
 
               <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveCampaignForBatches(null)}>關閉拆單</button>
+            </div>
+          )}
+
+          {activeSection === "campaigns" && activeBatchForArrival && (
+            <div className="auth-card">
+              <h3>到貨追蹤</h3>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                三層結構：廠商訂單編號 → 物流單號 → 品項。滿贈品項比照一般商品，同樣可以被分配進物流單號、同樣要追蹤到貨狀態，只記到貨/未到貨兩態。
+              </p>
+              <div className="auth-msg">{arrivalMsg}</div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>還沒分配到物流單號的品項</div>
+                {arrivalUnshippedPool.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>沒有未分配的品項</div>}
+                {arrivalUnshippedPool.map((it: any) => {
+                  const key = `${it.type}-${it.id}`;
+                  const allShipmentOptions = arrivalTree.flatMap((on: any) => on.shipments.map((s: any) => ({ id: s.id, label: `${on.orderNumber} / ${s.trackingNumber || "（未填物流單號）"}` })));
+                  return (
+                    <div key={key} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                      <span style={{ fontSize: 13, minWidth: 220 }}>{it.label}　剩 {it.remaining} 件</span>
+                      <input
+                        type="number"
+                        placeholder="數量"
+                        style={{ width: 60, minWidth: 60 }}
+                        value={assignShipQtyByPoolItem[key] || ""}
+                        onChange={(e) => setAssignShipQtyByPoolItem((prev) => ({ ...prev, [key]: e.target.value }))}
+                      />
+                      <select
+                        style={{ padding: 6 }}
+                        value={assignShipTargetByPoolItem[key] || ""}
+                        onChange={(e) => setAssignShipTargetByPoolItem((prev) => ({ ...prev, [key]: e.target.value }))}
+                      >
+                        <option value="">選物流單號</option>
+                        {allShipmentOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>{opt.label}</option>
+                        ))}
+                      </select>
+                      <button className="btn small secondary" onClick={() => assignPoolItemToShipment(it)}>分配</button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                <input type="text" value={newOrderNumber} onChange={(e) => setNewOrderNumber(e.target.value)} placeholder="廠商訂單編號" style={{ padding: 8 }} />
+                <button className="btn small" onClick={addOrderNumber}>新增廠商訂單編號</button>
+              </div>
+
+              {arrivalTree.map((on: any) => (
+                <div key={on.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600 }}>廠商訂單編號：{on.orderNumber}</span>
+                    <button className="btn small danger" onClick={() => deleteOrderNumber(on.id)}>刪除</button>
+                  </div>
+
+                  {on.shipments.map((s: any) => {
+                    const shipmentArrived = s.items.length > 0 && s.items.every((it: any) => it.arrived);
+                    const shipmentSomeArrived = s.items.some((it: any) => it.arrived);
+                    return (
+                      <div key={s.id} style={{ marginLeft: 14, borderLeft: "2px solid var(--line)", paddingLeft: 12, marginBottom: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                          <span style={{ fontSize: 14 }}>
+                            物流單號：{s.trackingNumber || "（未填）"}
+                            {s.items.length > 0 && (
+                              <span style={{ marginLeft: 8, fontSize: 12, color: shipmentArrived ? "#639922" : shipmentSomeArrived ? "#D9A441" : "#8A8779" }}>
+                                {shipmentArrived ? "已到貨" : shipmentSomeArrived ? "部分到貨" : "未到貨"}
+                              </span>
+                            )}
+                          </span>
+                          <button className="btn small danger" onClick={() => deleteShipment(s.id)}>刪除</button>
+                        </div>
+                        {s.items.map((it: any) => (
+                          <div key={it.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "3px 0" }}>
+                            <span>{it.label} x{it.qty}</span>
+                            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <input type="checkbox" checked={it.arrived} onChange={(e) => toggleArrived(it.id, e.target.checked)} />
+                                到貨
+                              </label>
+                              <button className="btn small secondary" onClick={() => removeShipmentItem(it.id)}>移除</button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+
+                  <div style={{ display: "flex", gap: 8, marginLeft: 14, marginTop: 8 }}>
+                    <input
+                      type="text"
+                      placeholder="物流單號（選填）"
+                      style={{ padding: 6 }}
+                      value={newTrackingByOrderNumber[on.id] || ""}
+                      onChange={(e) => setNewTrackingByOrderNumber((prev) => ({ ...prev, [on.id]: e.target.value }))}
+                    />
+                    <button className="btn small secondary" onClick={() => addShipment(on.id)}>新增物流單號</button>
+                  </div>
+                </div>
+              ))}
+
+              <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveBatchForArrival(null)}>關閉到貨追蹤</button>
             </div>
           )}
 
@@ -2698,9 +2898,9 @@ export default function AdminPage() {
               {productForm.imageUrl && <img src={productForm.imageUrl} alt="預覽" style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8, marginBottom: 8 }} />}
             </>
           ) : (
-            <div className="id-row" style={{ alignItems: "flex-start" }}>
-              <span className="id-label" style={{ paddingTop: 8 }}>款式／價格／圖片</span>
-              <div style={{ flex: 1 }}>
+            <div>
+              <div className="id-label" style={{ marginBottom: 8 }}>款式／價格／圖片</div>
+              <div>
                 {productRows.map((row, i) => (
                   <div key={i} style={{ display: "flex", gap: 8, marginBottom: 10, padding: 10, background: "#FAF8F2", borderRadius: 8, alignItems: "flex-start" }}>
                     {row.imageUrl && <img src={row.imageUrl} alt="預覽" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />}

@@ -397,6 +397,55 @@ alter table vendor_extra_purchases disable row level security;
 -- 這裡動態抓出 public schema 底下「現有的所有表格」統一關閉一次，
 -- 每次貼這份 schema.sql 都會自動執行，不用再額外手動關一次。
 -- ============================================================
+-- ============================================================
+-- 3.5節：到貨追蹤（三層結構：我方採購單 → 廠商訂單編號 → 物流單號）
+-- 顆粒度精確到「這筆商品/滿贈品項屬於哪一個物流單號」，只記到貨/未到貨兩態
+-- ============================================================
+
+-- 廠商訂單編號：一張我方採購單，可能被廠商拆成多筆廠商自己的訂單編號
+create table if not exists vendor_order_numbers (
+  id              uuid primary key default gen_random_uuid(),
+  batch_id        uuid not null references vendor_purchase_batches(id) on delete cascade,
+  order_number    text not null,
+  created_at      timestamptz default now()
+);
+create index if not exists idx_vendor_order_numbers_batch on vendor_order_numbers (batch_id);
+
+-- 物流單號：一個廠商訂單編號，可能又被拆成多個物流/運送單號分開寄出
+create table if not exists vendor_shipments (
+  id                      uuid primary key default gen_random_uuid(),
+  vendor_order_number_id  uuid not null references vendor_order_numbers(id) on delete cascade,
+  tracking_number         text,
+  created_at              timestamptz default now()
+);
+create index if not exists idx_vendor_shipments_order_number on vendor_shipments (vendor_order_number_id);
+
+-- 物流單號底下裝了哪些品項：可能是一般商品品項(batch_item_id)、也可能是滿贈品項(batch_gift_id)，
+-- 兩者擇一，滿贈品項比照一般商品一樣要能被分配進物流單號、一樣追蹤到貨狀態
+create table if not exists vendor_shipment_items (
+  id              uuid primary key default gen_random_uuid(),
+  shipment_id     uuid not null references vendor_shipments(id) on delete cascade,
+  batch_item_id   uuid references vendor_purchase_batch_items(id) on delete cascade,
+  batch_gift_id   uuid references vendor_purchase_batch_gifts(id) on delete cascade,
+  qty             int not null,
+  arrived         boolean not null default false,
+  created_at      timestamptz default now(),
+  check ((batch_item_id is not null and batch_gift_id is null) or (batch_item_id is null and batch_gift_id is not null))
+);
+create index if not exists idx_vendor_shipment_items_shipment on vendor_shipment_items (shipment_id);
+create index if not exists idx_vendor_shipment_items_batch_item on vendor_shipment_items (batch_item_id);
+create index if not exists idx_vendor_shipment_items_batch_gift on vendor_shipment_items (batch_gift_id);
+
+alter table vendor_order_numbers disable row level security;
+alter table vendor_shipments disable row level security;
+alter table vendor_shipment_items disable row level security;
+
+-- ============================================================
+-- 保險機制：不管上面個別關閉RLS的語句有沒有漏掉、或是被 Supabase 專案設定
+-- （Authentication → Policies → Enable RLS on new tables）自動重新打開，
+-- 這裡動態抓出 public schema 底下「現有的所有表格」統一關閉一次，
+-- 每次貼這份 schema.sql 都會自動執行，不用再額外手動關一次。
+-- ============================================================
 DO $$
 DECLARE
   r RECORD;

@@ -32,6 +32,30 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const { data: discountTiers } = await supabase.from("vendor_discount_tiers").select("*").eq("campaign_id", params.id).order("threshold_amount", { ascending: false });
 
+  // 到貨狀態統計：這張採購單全部品項(商品+滿贈)的總數量，跟已標記到貨的數量比較
+  const { data: orderNumbers } = batchIds.length
+    ? await supabase.from("vendor_order_numbers").select("id, batch_id").in("batch_id", batchIds)
+    : { data: [] };
+  const orderNumberIds = (orderNumbers || []).map((o) => o.id);
+  const { data: shipments } = orderNumberIds.length
+    ? await supabase.from("vendor_shipments").select("id, vendor_order_number_id").in("vendor_order_number_id", orderNumberIds)
+    : { data: [] };
+  const shipmentIds = (shipments || []).map((s) => s.id);
+  const { data: shipmentItems } = shipmentIds.length
+    ? await supabase.from("vendor_shipment_items").select("shipment_id, batch_item_id, batch_gift_id, qty, arrived").in("shipment_id", shipmentIds)
+    : { data: [] };
+
+  function arrivalStatusForBatch(batchId: string, batchItems: any[], batchGifts: any[]) {
+    const totalQty = batchItems.reduce((s, it) => s + it.qty, 0) + batchGifts.reduce((s, g) => s + g.qty, 0);
+    if (totalQty === 0) return { totalQty: 0, arrivedQty: 0 };
+    const batchOrderNumberIds = new Set((orderNumbers || []).filter((o: any) => o.batch_id === batchId).map((o: any) => o.id));
+    const batchShipmentIds = new Set((shipments || []).filter((s: any) => batchOrderNumberIds.has(s.vendor_order_number_id)).map((s: any) => s.id));
+    const arrivedQty = (shipmentItems || [])
+      .filter((si: any) => batchShipmentIds.has(si.shipment_id) && si.arrived)
+      .reduce((s: number, si: any) => s + si.qty, 0);
+    return { totalQty, arrivedQty };
+  }
+
   const result = (batches || []).map((b: any) => {
     const batchItems = (items || []).filter((it: any) => it.batch_id === b.id);
     const batchGifts = (gifts || []).filter((g: any) => g.batch_id === b.id);
@@ -39,6 +63,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     // 依採購單原幣小計，找出符合的折扣門檻（取最高符合的門檻）
     const matchedTier = (discountTiers || []).find((t: any) => subtotalOriginal >= Number(t.threshold_amount));
+    const arrival = arrivalStatusForBatch(b.id, batchItems, batchGifts);
 
     return {
       id: b.id,
@@ -63,6 +88,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       subtotalOriginal,
       matchedDiscountAmount: matchedTier ? Number(matchedTier.discount_amount) : 0,
       matchedThresholdAmount: matchedTier ? Number(matchedTier.threshold_amount) : null,
+      arrivalTotalQty: arrival.totalQty,
+      arrivalArrivedQty: arrival.arrivedQty,
     };
   });
 
