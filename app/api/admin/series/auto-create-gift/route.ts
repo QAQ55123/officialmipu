@@ -28,7 +28,7 @@ export async function POST(req: Request) {
 
   const { data: giftStyles, error: giftStylesErr } = await supabase
     .from("gift_styles")
-    .select("style_name, threshold_amount, image_url")
+    .select("id, style_name, threshold_amount, image_url")
     .eq("campaign_id", campaignId)
     .order("threshold_amount", { ascending: true });
   if (giftStylesErr) return NextResponse.json({ error: giftStylesErr.message }, { status: 500 });
@@ -48,11 +48,11 @@ export async function POST(req: Request) {
   if (seriesErr) return NextResponse.json({ error: "建立系列失敗：" + seriesErr.message }, { status: 500 });
 
   // 依門檻金額分組
-  const grouped = new Map<number, { style_name: string; image_url: string | null }[]>();
+  const grouped = new Map<number, { id: string; style_name: string; image_url: string | null }[]>();
   giftStyles.forEach((g) => {
     const key = Number(g.threshold_amount);
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push({ style_name: g.style_name, image_url: g.image_url });
+    grouped.get(key)!.push({ id: g.id, style_name: g.style_name, image_url: g.image_url });
   });
 
   const productRows: any[] = [];
@@ -67,6 +67,7 @@ export async function POST(req: Request) {
         image_url: s.image_url || null,
         has_discount_flag: true,
         cod_allowed: true,
+        linked_gift_style_id: s.id,
         sort_order: sortOrder++,
       });
     });

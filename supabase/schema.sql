@@ -264,6 +264,8 @@ alter table products add column if not exists cod_allowed boolean not null defau
 alter table products add column if not exists has_discount_flag boolean not null default true;
 -- 2.2/2.8節：每個款式各自的固定運費金額，CSV匯入時一併寫入，後台手動新增款式則需個別填寫
 alter table products add column if not exists shipping_fee numeric not null default 0;
+-- 自動建立滿贈商品時，直接記錄這個商品對應到哪一筆滿贈款式登記，拆單工具判斷「這個商品要不要算進採購需求」時依此欄位，不用回頭比對名稱/款式字串
+alter table products add column if not exists linked_gift_style_id uuid references gift_styles(id) on delete set null;
 
 alter table campaigns disable row level security;
 -- fulfillment_status 是後來才加的欄位，如果 campaigns 表在更早版本就已經建立過，
@@ -333,6 +335,61 @@ create index if not exists idx_vendor_platform_style_caps_platform on vendor_pla
 alter table vendor_discount_tiers disable row level security;
 alter table vendor_platforms disable row level security;
 alter table vendor_platform_style_caps disable row level security;
+
+-- ============================================================
+-- 3.3節：拆單主頁面 — 我方採購單
+-- 這輪先做「店家手動建立採購單、指定平台、把商品品項分配進去、配置滿贈」這個核心工作流，
+-- 自動最佳化建議演算法留待之後加強，這輪讓店家可以手動操作、且有正確的上限檢查
+-- ============================================================
+
+create table if not exists vendor_purchase_batches (
+  id                uuid primary key default gen_random_uuid(),
+  campaign_id       uuid not null references campaigns(id) on delete cascade,
+  platform_id       uuid references vendor_platforms(id) on delete set null,
+  label             text, -- 店家自訂標籤，方便辨識（留空則用建立順序編號顯示）
+  extra_adjustment  numeric not null default 0, -- 3.2節「額外調整加總」，可正可負，直接影響實收金額
+  created_at        timestamptz default now()
+);
+create index if not exists idx_vendor_purchase_batches_campaign on vendor_purchase_batches (campaign_id);
+
+-- 一張採購單裡的商品品項：對應某張顧客訂單裡的某個品項，可能只分配走其中一部分數量
+-- （同一個 order_item 的其餘數量可能被分配進另一張採購單，因為拆分最小單位是「一件商品」）
+create table if not exists vendor_purchase_batch_items (
+  id              uuid primary key default gen_random_uuid(),
+  batch_id        uuid not null references vendor_purchase_batches(id) on delete cascade,
+  order_item_id   uuid not null references order_items(id) on delete cascade,
+  qty             int not null,
+  created_at      timestamptz default now()
+);
+create index if not exists idx_vendor_purchase_batch_items_batch on vendor_purchase_batch_items (batch_id);
+create index if not exists idx_vendor_purchase_batch_items_order_item on vendor_purchase_batch_items (order_item_id);
+
+-- 一張採購單配置了哪些滿贈款式、各自幾個（受平台的單筆總量上限＋各款式上限雙重限制）
+create table if not exists vendor_purchase_batch_gifts (
+  id              uuid primary key default gen_random_uuid(),
+  batch_id        uuid not null references vendor_purchase_batches(id) on delete cascade,
+  gift_style_id   uuid not null references gift_styles(id) on delete cascade,
+  qty             int not null,
+  created_at      timestamptz default now(),
+  unique (batch_id, gift_style_id)
+);
+create index if not exists idx_vendor_purchase_batch_gifts_batch on vendor_purchase_batch_gifts (batch_id);
+
+-- 額外採購紀錄（3.3節）：跟其他賣家/管道額外買到的現貨，用來抵掉贈品缺口，不強制走拆單
+create table if not exists vendor_extra_purchases (
+  id              uuid primary key default gen_random_uuid(),
+  campaign_id     uuid not null references campaigns(id) on delete cascade,
+  gift_style_id   uuid references gift_styles(id) on delete set null,
+  qty             int not null,
+  note            text,
+  created_at      timestamptz default now()
+);
+create index if not exists idx_vendor_extra_purchases_campaign on vendor_extra_purchases (campaign_id);
+
+alter table vendor_purchase_batches disable row level security;
+alter table vendor_purchase_batch_items disable row level security;
+alter table vendor_purchase_batch_gifts disable row level security;
+alter table vendor_extra_purchases disable row level security;
 
 -- ============================================================
 -- 保險機制：不管上面個別關閉RLS的語句有沒有漏掉、或是被 Supabase 專案設定

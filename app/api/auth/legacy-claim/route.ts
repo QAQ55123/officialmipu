@@ -4,7 +4,7 @@ import { hashMemberPw, normFb } from "@/lib/util";
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
 import { signMemberSession, memberSessionCookieHeader } from "@/lib/memberAuth";
-import { syncMembersSheet } from "@/lib/sheetsSync";
+import { syncMembersSheet, syncMemberOrdersByCampaign } from "@/lib/sheetsSync";
 
 /** 舊會員確認身份後，設定新帳密、正式建立帳號，並把該身份底下的舊訂單改指定成新帳號 */
 export async function POST(req: Request) {
@@ -96,5 +96,6 @@ export async function POST(req: Request) {
   });
   res.headers.set("Set-Cookie", memberSessionCookieHeader(token));
   syncMembersSheet().catch(() => {});
+  syncMemberOrdersByCampaign(created.id).catch(() => {});
   return res;
 }

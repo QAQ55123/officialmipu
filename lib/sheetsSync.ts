@@ -67,11 +67,33 @@ export async function syncProductsSheet() {
 }
 
 /**
- * 【待辦，等「訂單」「檔期」表建立後才能實作】
  * 依你的指示：legacy-claim／legacy-link 認領舊資料成功後，要同步「這個使用者在某個檔期內買了什麼」到
  * Google Sheet，依照檔期分頁（不是企劃），而且不需要像原本那樣同步成本／價目表分頁，
- * 只需要訂單內容分頁。這個函式目前先留空、等 orders/campaigns 表建立後再實作。
+ * 只需要訂單內容分頁。orders/campaigns 表現在都已經存在，這裡正式實作。
  */
-export async function syncMemberOrdersByCampaign(_memberId: string) {
-  // TODO: 等 orders、campaigns 表存在後實作
+export async function syncMemberOrdersByCampaign(memberId: string) {
+  const supabase = getSupabaseAdmin();
+  const { data: member } = await supabase.from("members").select("username").eq("id", memberId).maybeSingle();
+  if (!member) return;
+
+  const { data: orders } = await supabase
+    .from("orders")
+    .select("campaign_id, campaigns(name)")
+    .ilike("username", member.username)
+    .not("campaign_id", "is", null);
+
+  const campaignMap = new Map<string, string>();
+  (orders || []).forEach((o: any) => {
+    const name = o.campaigns?.name;
+    if (o.campaign_id && name) campaignMap.set(o.campaign_id, name);
+  });
+
+  for (const [campaignId, campaignName] of campaignMap) {
+    try {
+      // 只同步訂單內容分頁，不需要成本／價目表（那份是給店家內部用的，跟這個顧客認領舊資料無關）
+      await syncOrderRealtimeToPlanTab(campaignId, campaignName);
+    } catch (e) {
+      console.error(`同步會員檔期訂單失敗（檔期：${campaignName}）：`, e);
+    }
+  }
 }

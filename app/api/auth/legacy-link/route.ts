@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getMemberSession } from "@/lib/memberAuth";
+import { syncMemberOrdersByCampaign } from "@/lib/sheetsSync";
 
 /** 已經登入的會員，把一筆舊身份（跟底下的舊訂單）連結到目前這個帳號，不用另外註冊新帳號 */
 export async function POST(req: Request) {
@@ -38,5 +39,7 @@ export async function POST(req: Request) {
     .eq("legacy_identity_id", identity.id)
     .select("id");
 
+  syncMemberOrdersByCampaign(member.id).catch(() => {});
   return NextResponse.json({ ok: true, claimedOrders: (affectedOrders || []).length });
 }
+

@@ -77,6 +77,129 @@ export default function AdminPage() {
   const [giftSeriesCampaignId, setGiftSeriesCampaignId] = useState("");
   const [autoCreatingGiftSeries, setAutoCreatingGiftSeries] = useState(false);
   const [autoCreateGiftMsg, setAutoCreateGiftMsg] = useState("");
+
+  // ---- 3.1/3.3節：拆單主頁面 ----
+  const [activeCampaignForBatches, setActiveCampaignForBatches] = useState<any | null>(null);
+  const [batchesTab, setBatchesTab] = useState<"batches" | "gap" | "extra">("batches");
+  const [unassignedPool, setUnassignedPool] = useState<any[]>([]);
+  const [purchaseBatches, setPurchaseBatches] = useState<any[]>([]);
+  const [batchGiftGap, setBatchGiftGap] = useState<any[]>([]);
+  const [extraPurchases, setExtraPurchases] = useState<any[]>([]);
+  const [batchesMsg, setBatchesMsg] = useState("");
+  const [newBatchPlatformId, setNewBatchPlatformId] = useState("");
+  const [assignQtyByItem, setAssignQtyByItem] = useState<Record<string, string>>({});
+  const [assignTargetBatchByItem, setAssignTargetBatchByItem] = useState<Record<string, string>>({});
+  const [giftPickByBatch, setGiftPickByBatch] = useState<Record<string, string>>({});
+  const [giftQtyByBatch, setGiftQtyByBatch] = useState<Record<string, string>>({});
+  const [extraGiftStyleId, setExtraGiftStyleId] = useState("");
+  const [extraQty, setExtraQty] = useState("");
+  const [extraNote, setExtraNote] = useState("");
+
+  async function openPurchaseBatches(c: any) {
+    setActiveCampaignForBatches(c);
+    setBatchesTab("batches");
+    setBatchesMsg("");
+    await loadPurchaseBatchesData(c.id);
+    // 這頁也需要平台清單（換平台、新增採購單用）跟滿贈款式清單（配置滿贈用）
+    await loadVendorRules(c.id);
+  }
+
+  async function loadPurchaseBatchesData(campaignId: string) {
+    const [r1, r2, r3, r4] = await Promise.all([
+      fetch(`/api/admin/campaigns/${campaignId}/unassigned-items`),
+      fetch(`/api/admin/campaigns/${campaignId}/purchase-batches`),
+      fetch(`/api/admin/campaigns/${campaignId}/gift-gap-overview`),
+      fetch(`/api/admin/campaigns/${campaignId}/extra-purchases`),
+    ]);
+    const [d1, d2, d3, d4] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json()]);
+    setUnassignedPool(d1.pool || []);
+    setPurchaseBatches(d2.batches || []);
+    setBatchGiftGap(d3.overview || []);
+    setExtraPurchases(d4.extraPurchases || []);
+  }
+
+  async function createPurchaseBatch() {
+    if (!activeCampaignForBatches) return;
+    setBatchesMsg("");
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches`, "POST", { platformId: newBatchPlatformId || null });
+      setNewBatchPlatformId("");
+      loadPurchaseBatchesData(activeCampaignForBatches.id);
+    } catch (e: any) {
+      setBatchesMsg(e.message || "建立失敗");
+    }
+  }
+
+  async function assignItemToBatch(orderItemId: string) {
+    if (!activeCampaignForBatches) return;
+    const batchId = assignTargetBatchByItem[orderItemId];
+    const qty = Number(assignQtyByItem[orderItemId]);
+    if (!batchId) return setBatchesMsg("請先選擇要分配進哪張採購單");
+    if (!isFinite(qty) || qty <= 0) return setBatchesMsg("請輸入要分配的數量");
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}/items`, "POST", { orderItemId, qty });
+      setAssignQtyByItem((prev) => ({ ...prev, [orderItemId]: "" }));
+      loadPurchaseBatchesData(activeCampaignForBatches.id);
+    } catch (e: any) {
+      setBatchesMsg(e.message || "分配失敗");
+    }
+  }
+
+  async function removeBatchItem(batchId: string, batchItemId: string) {
+    if (!activeCampaignForBatches) return;
+    await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}/items`, "DELETE", { batchItemId });
+    loadPurchaseBatchesData(activeCampaignForBatches.id);
+  }
+
+  async function changeBatchPlatform(batchId: string, platformId: string) {
+    if (!activeCampaignForBatches) return;
+    await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}`, "PATCH", { platformId: platformId || null });
+    loadPurchaseBatchesData(activeCampaignForBatches.id);
+  }
+
+  async function deleteBatch(batchId: string) {
+    if (!activeCampaignForBatches) return;
+    if (!confirm("確定要刪除這張採購單嗎？裡面的品項會回到未分配池。")) return;
+    await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}`, "DELETE", {});
+    loadPurchaseBatchesData(activeCampaignForBatches.id);
+  }
+
+  async function setBatchGift(batchId: string) {
+    if (!activeCampaignForBatches) return;
+    const giftStyleId = giftPickByBatch[batchId];
+    const qty = Number(giftQtyByBatch[batchId]);
+    if (!giftStyleId) return setBatchesMsg("請選擇滿贈款式");
+    if (!isFinite(qty) || qty < 0) return setBatchesMsg("數量格式不正確");
+    try {
+      const d = await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}/gifts`, "PUT", { giftStyleId, qty });
+      if (d.warning) setBatchesMsg(d.warning);
+      else setBatchesMsg("");
+      loadPurchaseBatchesData(activeCampaignForBatches.id);
+    } catch (e: any) {
+      setBatchesMsg(e.message || "設定失敗");
+    }
+  }
+
+  async function addExtraPurchase() {
+    if (!activeCampaignForBatches) return;
+    setBatchesMsg("");
+    if (!extraGiftStyleId) return setBatchesMsg("請選擇滿贈款式");
+    const qty = Number(extraQty);
+    if (!isFinite(qty) || qty <= 0) return setBatchesMsg("數量格式不正確");
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/extra-purchases`, "POST", { giftStyleId: extraGiftStyleId, qty, note: extraNote });
+      setExtraGiftStyleId(""); setExtraQty(""); setExtraNote("");
+      loadPurchaseBatchesData(activeCampaignForBatches.id);
+    } catch (e: any) {
+      setBatchesMsg(e.message || "新增失敗");
+    }
+  }
+
+  async function deleteExtraPurchase(id: string) {
+    if (!activeCampaignForBatches) return;
+    await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/extra-purchases/${id}`, "DELETE", {});
+    loadPurchaseBatchesData(activeCampaignForBatches.id);
+  }
   const [vendorRulesTab, setVendorRulesTab] = useState<"discount" | "platforms">("discount");
   const [discountTiers, setDiscountTiers] = useState<any[]>([]);
   const [campaignGiftStyles, setCampaignGiftStyles] = useState<any[]>([]); // 這個檔期已登記的滿贈款式（來自2.7節），平台每款上限直接對應這份清單
@@ -2149,6 +2272,7 @@ export default function AdminPage() {
                     <span style={{ display: "flex", gap: 6 }}>
                       <button className="btn small secondary" onClick={() => openGiftStyles(c)}>滿贈款式登記</button>
                       <button className="btn small secondary" onClick={() => openVendorRules(c)}>廠商規則設定</button>
+                      <button className="btn small secondary" onClick={() => openPurchaseBatches(c)}>拆單</button>
                       <button className="btn small secondary" onClick={() => editCampaign(c)}>編輯</button>
                       <button className="btn small danger" onClick={() => deleteCampaign(c.id)}>刪除</button>
                     </span>
@@ -2280,6 +2404,166 @@ export default function AdminPage() {
               )}
 
               <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveCampaignForVendorRules(null)}>關閉廠商規則設定</button>
+            </div>
+          )}
+
+          {activeSection === "campaigns" && activeCampaignForBatches && (
+            <div className="auth-card">
+              <h3>拆單：{activeCampaignForBatches.name}</h3>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                <button className={`btn small ${batchesTab === "batches" ? "" : "secondary"}`} onClick={() => setBatchesTab("batches")}>採購單</button>
+                <button className={`btn small ${batchesTab === "gap" ? "" : "secondary"}`} onClick={() => setBatchesTab("gap")}>贈品缺口總覽</button>
+                <button className={`btn small ${batchesTab === "extra" ? "" : "secondary"}`} onClick={() => setBatchesTab("extra")}>額外採購</button>
+              </div>
+              <div className="auth-msg">{batchesMsg}</div>
+
+              {batchesTab === "batches" && (
+                <div>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontWeight: 600, marginBottom: 8 }}>未分配品項池</div>
+                    {unassignedPool.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>沒有未分配的品項</div>}
+                    {unassignedPool.map((it) => (
+                      <div key={it.orderItemId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                        <span style={{ fontSize: 13, minWidth: 200 }}>{it.username}：{it.productName}{it.style ? `（${it.style}）` : ""} 剩 {it.qty} 件（￥{it.unitPriceOriginal ?? it.unitPrice}/件）</span>
+                        <input
+                          type="number"
+                          placeholder="數量"
+                          style={{ width: 60 }}
+                          value={assignQtyByItem[it.orderItemId] || ""}
+                          onChange={(e) => setAssignQtyByItem((prev) => ({ ...prev, [it.orderItemId]: e.target.value }))}
+                        />
+                        <select
+                          style={{ padding: 6 }}
+                          value={assignTargetBatchByItem[it.orderItemId] || ""}
+                          onChange={(e) => setAssignTargetBatchByItem((prev) => ({ ...prev, [it.orderItemId]: e.target.value }))}
+                        >
+                          <option value="">選採購單</option>
+                          {purchaseBatches.map((b, idx) => (
+                            <option key={b.id} value={b.id}>採購單{idx + 1}{b.platform ? `（${b.platform.name}）` : ""}</option>
+                          ))}
+                        </select>
+                        <button className="btn small secondary" onClick={() => assignItemToBatch(it.orderItemId)}>分配</button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                    <select value={newBatchPlatformId} onChange={(e) => setNewBatchPlatformId(e.target.value)} style={{ padding: 8 }}>
+                      <option value="">（尚未指定平台）</option>
+                      {vendorPlatforms.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <button className="btn small" onClick={createPurchaseBatch}>新增採購單</button>
+                  </div>
+
+                  {purchaseBatches.map((b, idx) => (
+                    <div key={b.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+                        <span style={{ fontWeight: 600 }}>採購單{idx + 1}</span>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <select value={b.platform?.id || ""} onChange={(e) => changeBatchPlatform(b.id, e.target.value)} style={{ padding: 6 }}>
+                            <option value="">（尚未指定平台）</option>
+                            {vendorPlatforms.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                          <button className="btn small danger" onClick={() => deleteBatch(b.id)}>刪除採購單</button>
+                        </div>
+                      </div>
+
+                      {b.items.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有分配任何品項</div>}
+                      {b.items.map((it: any) => (
+                        <div key={it.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
+                          <span>{it.username}：{it.productName}{it.style ? `（${it.style}）` : ""} x{it.qty}（￥{it.unitPriceOriginal}/件）</span>
+                          <button className="btn small secondary" onClick={() => removeBatchItem(b.id, it.id)}>移出</button>
+                        </div>
+                      ))}
+
+                      <div style={{ fontSize: 13, marginTop: 8, color: "#5F5E5A" }}>
+                        原幣小計 ￥{Math.round(b.subtotalOriginal).toLocaleString("zh-TW")}
+                        {b.matchedThresholdAmount != null && <span>　達門檻￥{b.matchedThresholdAmount}，折扣￥{b.matchedDiscountAmount}</span>}
+                      </div>
+
+                      <div style={{ marginTop: 10, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
+                        <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 4 }}>滿贈配置</div>
+                        {b.gifts.map((g: any) => (
+                          <div key={g.giftStyleId} style={{ fontSize: 13 }}>{g.styleName}（門檻{g.thresholdAmount}）x{g.qty}</div>
+                        ))}
+                        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                          <select
+                            style={{ padding: 6 }}
+                            value={giftPickByBatch[b.id] || ""}
+                            onChange={(e) => setGiftPickByBatch((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                          >
+                            <option value="">選滿贈款式</option>
+                            {campaignGiftStyles.map((s) => (
+                              <option key={s.id} value={s.id}>{s.style_name}（門檻{s.threshold_amount}）</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            placeholder="數量"
+                            style={{ width: 60 }}
+                            value={giftQtyByBatch[b.id] || ""}
+                            onChange={(e) => setGiftQtyByBatch((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                          />
+                          <button className="btn small secondary" onClick={() => setBatchGift(b.id)}>設定</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {batchesTab === "gap" && (
+                <div>
+                  <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                    保底＝顧客結帳當下已看到、承諾一定會拿到的數量；已配置＝目前所有採購單設定的滿贈加總；額外採購會一併抵掉缺口。
+                  </p>
+                  {batchGiftGap.map((g) => (
+                    <div key={g.giftStyleId} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                      <span style={{ fontSize: 14 }}>{g.styleName}（門檻{g.thresholdAmount}）</span>
+                      <span style={{ fontSize: 13 }}>
+                        保底{g.promised} / 已配置{g.allocated} / 額外採購{g.extra}　
+                        <span style={{ color: g.diff < 0 ? "#B3261E" : "#639922", fontWeight: 600 }}>
+                          {g.diff < 0 ? `缺${-g.diff}` : `餘${g.diff}`}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {batchesTab === "extra" && (
+                <div>
+                  <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>跟其他賣家/管道額外買到的現貨，用來抵掉贈品缺口，不強制走拆單。</p>
+                  <div className="id-row">
+                    <span className="id-label">滿贈款式</span>
+                    <select value={extraGiftStyleId} onChange={(e) => setExtraGiftStyleId(e.target.value)} style={{ flex: 1, padding: 8 }}>
+                      <option value="">請選擇</option>
+                      {campaignGiftStyles.map((s) => (
+                        <option key={s.id} value={s.id}>{s.style_name}（門檻{s.threshold_amount}）</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="id-row"><span className="id-label">數量</span><input type="number" value={extraQty} onChange={(e) => setExtraQty(e.target.value)} /></div>
+                  <div className="id-row"><span className="id-label">備註</span><input type="text" value={extraNote} onChange={(e) => setExtraNote(e.target.value)} placeholder="選填" /></div>
+                  <button className="btn" onClick={addExtraPurchase}>新增額外採購紀錄</button>
+
+                  <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                    {extraPurchases.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有任何額外採購紀錄</div>}
+                    {extraPurchases.map((p) => (
+                      <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                        <span style={{ fontSize: 14 }}>{p.styleName} x{p.qty}{p.note ? `（${p.note}）` : ""}</span>
+                        <button className="btn small danger" onClick={() => deleteExtraPurchase(p.id)}>刪除</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveCampaignForBatches(null)}>關閉拆單</button>
             </div>
           )}
 
@@ -2421,7 +2705,7 @@ export default function AdminPage() {
                   <div key={i} style={{ display: "flex", gap: 8, marginBottom: 10, padding: 10, background: "#FAF8F2", borderRadius: 8, alignItems: "flex-start" }}>
                     {row.imageUrl && <img src={row.imageUrl} alt="預覽" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />}
                     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                         <input
                           type="text"
                           value={row.style}
@@ -2429,20 +2713,24 @@ export default function AdminPage() {
                           placeholder="款式（沒有分款式可留空）"
                           style={{ flex: 1 }}
                         />
-                        <input
-                          type="number"
-                          value={row.price}
-                          onChange={(e) => updateProductRow(i, "price", e.target.value)}
-                          placeholder="價格"
-                          style={{ width: 90 }}
-                        />
-                        <input
-                          type="number"
-                          value={row.shippingFee}
-                          onChange={(e) => updateProductRow(i, "shippingFee", e.target.value)}
-                          placeholder="運費"
-                          style={{ width: 80 }}
-                        />
+                        <div>
+                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>金額</div>
+                          <input
+                            type="number"
+                            value={row.price}
+                            onChange={(e) => updateProductRow(i, "price", e.target.value)}
+                            style={{ width: 60 }}
+                          />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>運費</div>
+                          <input
+                            type="number"
+                            value={row.shippingFee}
+                            onChange={(e) => updateProductRow(i, "shippingFee", e.target.value)}
+                            style={{ width: 50 }}
+                          />
+                        </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                         <input type="file" accept="image/*" onChange={(e) => handleProductRowImageUpload(i, e)} style={{ fontSize: 12 }} />
