@@ -651,7 +651,7 @@ export default function AdminPage() {
   const [importCategoryId, setImportCategoryId] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ total: number; success: number; failed: string[]; seriesCount?: number; seriesNames?: string[] } | null>(null);
+  const [importResult, setImportResult] = useState<{ total: number; success: number; created?: number; updated?: number; failed: string[]; seriesCount?: number; seriesNames?: string[] } | null>(null);
   const [importMsg, setImportMsg] = useState("");
 
   async function runProductImport() {
@@ -2330,6 +2330,7 @@ export default function AdminPage() {
                 欄位：系列名稱｜系列圖片網址｜商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址｜封面圖網址。
                 一列＝一個具體款式，同名商品會自動歸到同一組。系統會依「系列名稱」在你選的分類底下自動建立或沿用系列，
                 一次可以匯入好幾個不同系列的商品。金額填人民幣(￥)、運費填台幣(NT$)。圖片網址支援 Google 雲端硬碟分享連結。
+                <strong>重複匯入同一筆商品（同系列＋同商品名稱＋同款式）會更新既有資料，不會重複建立；圖片欄位留空時不會覆蓋掉原本設定好的圖片。</strong>
               </p>
 
               <div className="id-row">
@@ -2359,7 +2360,9 @@ export default function AdminPage() {
               {importResult && (
                 <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
                   <div style={{ fontSize: 14, color: "#2C2C2A", marginBottom: 8 }}>
-                    共 {importResult.total} 筆，成功 {importResult.success} 筆，失敗 {importResult.failed.length} 筆
+                    共 {importResult.total} 筆，成功 {importResult.success} 筆
+                    {importResult.created != null && importResult.updated != null && `（新增 ${importResult.created}、更新 ${importResult.updated}）`}
+                    ，失敗 {importResult.failed.length} 筆
                     {importResult.seriesCount ? `，涵蓋 ${importResult.seriesCount} 個系列` : ""}
                   </div>
                   {importResult.seriesNames && importResult.seriesNames.length > 0 && (

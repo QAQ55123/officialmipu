@@ -89,6 +89,8 @@ export async function POST(req: Request) {
     }
 
     let success = 0;
+    let created = 0;
+    let updated = 0;
     const failed: string[] = [];
     const insertRows: any[] = [];
     // 封面圖是「系列 + 商品名稱」層級共用的，最後統一同步
@@ -143,17 +145,43 @@ export async function POST(req: Request) {
         coverImageByKey.set(coverKey, { seriesId, name, coverUrl: toDirectImageUrl(coverImageUrlRaw) });
       }
 
-      insertRows.push({
-        series_id: seriesId,
-        name,
-        style,
-        price,
-        shipping_fee: shippingFee,
-        has_discount_flag: hasDiscountFlag,
-        cod_allowed: true,
-        image_url: imageUrlRaw ? toDirectImageUrl(imageUrlRaw) : null,
-        sort_order: await nextSortOrderFor(seriesId),
-      });
+      // 同一個系列＋同商品名稱＋同款式視為同一筆商品：已存在就更新（用Excel的新資料覆蓋），不存在才新增
+      const { data: existingProduct } = await supabase
+        .from("products")
+        .select("id")
+        .eq("series_id", seriesId)
+        .eq("name", name)
+        .eq("style", style)
+        .maybeSingle();
+
+      if (existingProduct) {
+        const updates: any = {
+          price,
+          shipping_fee: shippingFee,
+          has_discount_flag: hasDiscountFlag,
+        };
+        // 圖片欄位留空時不覆蓋既有圖片（避免不小心把之前設定好的圖清掉）
+        if (imageUrlRaw) updates.image_url = toDirectImageUrl(imageUrlRaw);
+        const { error: updateErr } = await supabase.from("products").update(updates).eq("id", existingProduct.id);
+        if (updateErr) {
+          failed.push(`第 ${rowNum} 列：${name}${style ? `（${style}）` : ""} — 更新失敗：${updateErr.message}`);
+          continue;
+        }
+        updated++;
+      } else {
+        insertRows.push({
+          series_id: seriesId,
+          name,
+          style,
+          price,
+          shipping_fee: shippingFee,
+          has_discount_flag: hasDiscountFlag,
+          cod_allowed: true,
+          image_url: imageUrlRaw ? toDirectImageUrl(imageUrlRaw) : null,
+          sort_order: await nextSortOrderFor(seriesId),
+        });
+        created++;
+      }
       success++;
     }
 
@@ -170,6 +198,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       total: rows.length,
       success,
+      created,
+      updated,
       failed,
       seriesCount: seriesCache.size,
       seriesNames: Array.from(seriesCache.keys()),
