@@ -648,28 +648,29 @@ export default function AdminPage() {
   const [allProductsForCopy, setAllProductsForCopy] = useState<ProductAdmin[]>([]); // item 8：複製款式改成跨系列，這裡放全部系列的商品
 
   // ---- 商品批次匯入 ----
-  const [importSeriesId, setImportSeriesId] = useState("");
+  const [importCategoryId, setImportCategoryId] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ total: number; success: number; failed: string[] } | null>(null);
+  const [importResult, setImportResult] = useState<{ total: number; success: number; failed: string[]; seriesCount?: number; seriesNames?: string[] } | null>(null);
   const [importMsg, setImportMsg] = useState("");
 
   async function runProductImport() {
     setImportMsg("");
     setImportResult(null);
-    if (!importSeriesId) return setImportMsg("請選擇要匯入到哪個系列");
+    if (!importCategoryId) return setImportMsg("請選擇要匯入到哪個分類");
     if (!importFile) return setImportMsg("請選擇要上傳的檔案");
     setImporting(true);
     try {
       const fd = new FormData();
       fd.append("file", importFile);
-      fd.append("seriesId", importSeriesId);
+      fd.append("categoryId", importCategoryId);
       const r = await fetch("/api/admin/products/import", { method: "POST", body: fd });
       const d = await r.json();
       if (!r.ok) {
         setImportMsg(d.error || "匯入失敗");
       } else {
         setImportResult(d);
+        loadPlans(); // 可能有新建立的系列，重新抓一次系列清單
       }
     } catch (e: any) {
       setImportMsg(e.message || "匯入失敗");
@@ -842,7 +843,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (unlocked && activeSection === "productImport") {
-      loadPlans();
+      loadCategories(); // 現在是選分類，不是選系列
     }
   }, [unlocked, activeSection]);
 
@@ -2326,16 +2327,22 @@ export default function AdminPage() {
             <div className="auth-card">
               <h3>批次匯入商品</h3>
               <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
-                欄位：商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址。一列＝一個具體款式，同名商品會自動歸到同一組。
-                圖片網址支援 Google 雲端硬碟分享連結。
+                欄位：系列名稱｜商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址｜封面圖網址。
+                一列＝一個具體款式，同名商品會自動歸到同一組。系統會依「系列名稱」在你選的分類底下自動建立或沿用系列，
+                一次可以匯入好幾個不同系列的商品。金額填人民幣(￥)、運費填台幣(NT$)。圖片網址支援 Google 雲端硬碟分享連結。
               </p>
 
               <div className="id-row">
-                <span className="id-label">匯入到系列</span>
-                <select value={importSeriesId} onChange={(e) => setImportSeriesId(e.target.value)} style={{ flex: 1, padding: 8 }}>
-                  <option value="">請選擇系列</option>
-                  {plans.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                <span className="id-label">匯入到分類</span>
+                <select value={importCategoryId} onChange={(e) => setImportCategoryId(e.target.value)} style={{ flex: 1, padding: 8 }}>
+                  <option value="">請選擇分類</option>
+                  {topCategories.map((c) => (
+                    <optgroup key={c.id} label={c.name}>
+                      <option value={c.id}>{c.name}</option>
+                      {childrenOf(c.id).map((sub) => (
+                        <option key={sub.id} value={sub.id}>　└ {sub.name}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>
@@ -2353,7 +2360,13 @@ export default function AdminPage() {
                 <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
                   <div style={{ fontSize: 14, color: "#2C2C2A", marginBottom: 8 }}>
                     共 {importResult.total} 筆，成功 {importResult.success} 筆，失敗 {importResult.failed.length} 筆
+                    {importResult.seriesCount ? `，涵蓋 ${importResult.seriesCount} 個系列` : ""}
                   </div>
+                  {importResult.seriesNames && importResult.seriesNames.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#5F5E5A", marginBottom: 8 }}>
+                      系列：{importResult.seriesNames.join("、")}
+                    </div>
+                  )}
                   {importResult.failed.map((msg, i) => (
                     <div key={i} style={{ fontSize: 12, color: "#993C1D" }}>{msg}</div>
                   ))}
@@ -2957,7 +2970,7 @@ export default function AdminPage() {
                 <input type="number" value={productForm.price} onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))} />
               </div>
               <div className="id-row">
-                <span className="id-label">運費金額（{productForm.linkedGiftStyleId ? "NT$" : "￥"}）</span>
+                <span className="id-label">運費金額（NT$）</span>
                 <input type="number" value={productForm.shippingFee} onChange={(e) => setProductForm((f) => ({ ...f, shippingFee: e.target.value }))} />
               </div>
               <div className="id-row">
@@ -3008,7 +3021,7 @@ export default function AdminPage() {
                           />
                         </div>
                         <div>
-                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>運費(￥)</div>
+                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>運費(NT$)</div>
                           <input
                             type="number"
                             value={row.shippingFee}

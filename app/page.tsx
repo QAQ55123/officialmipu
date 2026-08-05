@@ -1691,10 +1691,13 @@ export default function Home() {
 
                   const activeProductName = selectedProductName && grouped[selectedProductName] ? selectedProductName : productNames[0];
                   const activeStyles = grouped[activeProductName];
-                  const currentStyle = selectedStyleByProduct[activeProductName] ?? activeStyles[0].style;
+                  // 還沒選款式時 currentStyle 會是 undefined，主視覺要顯示商品封面圖、數量跟加入購物車要鎖住
+                  const currentStyle = selectedStyleByProduct[activeProductName];
+                  const hasPickedStyle = currentStyle !== undefined;
                   const current = activeStyles.find((s) => s.style === currentStyle) || activeStyles[0];
+                  const coverImage = activeStyles[0]?.coverImageUrl;
                   const key = `${current.name}||${current.style}`;
-                  const qty = cart[key] || 0;
+                  const qty = hasPickedStyle ? (cart[key] || 0) : 0;
 
                   const productQtyTotal = (pname: string) =>
                     grouped[pname].reduce((sum, s) => sum + (cart[`${s.name}||${s.style}`] || 0), 0);
@@ -1706,15 +1709,19 @@ export default function Home() {
                       </div>
 
                       <div className="product-gallery-v3">
-                        {current.imageUrl ? (
-                          <img
-                            src={current.imageUrl}
-                            alt={current.style || activeProductName}
-                            onClick={() => setLightboxUrl(current.imageUrl!)}
-                          />
-                        ) : (
-                          <div className="product-gallery-v3-empty">尚無圖片</div>
-                        )}
+                        {(() => {
+                          // 還沒選款式時先顯示商品封面圖；選了款式之後才切換成該款式自己的照片
+                          const displayImage = hasPickedStyle ? current.imageUrl : (coverImage || current.imageUrl);
+                          return displayImage ? (
+                            <img
+                              src={displayImage}
+                              alt={hasPickedStyle ? (current.style || activeProductName) : activeProductName}
+                              onClick={() => setLightboxUrl(displayImage)}
+                            />
+                          ) : (
+                            <div className="product-gallery-v3-empty">尚無圖片</div>
+                          );
+                        })()}
                       </div>
 
                       <div className="product-info-v3">
@@ -1733,34 +1740,25 @@ export default function Home() {
                         {productNames.length > 1 && (
                           <>
                             <div className="product-info-v3-label">商品</div>
-                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(88px, 1fr))", gap: 10, marginBottom: 12 }}>
-                              {productNames.map((pname) => {
-                                const cover = grouped[pname][0]?.coverImageUrl || grouped[pname][0]?.imageUrl;
-                                const qty = productQtyTotal(pname);
-                                return (
-                                  <button
-                                    key={pname}
-                                    onClick={() => setSelectedProductName(pname)}
-                                    style={{
-                                      position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-                                      padding: 6, borderRadius: 10, border: activeProductName === pname ? "2px solid #33415C" : "1px solid var(--line)",
-                                      background: "#fff", cursor: "pointer",
-                                    }}
-                                  >
-                                    {cover ? (
-                                      <img src={cover} alt={pname} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 6 }} />
-                                    ) : (
-                                      <div style={{ width: "100%", aspectRatio: "1", borderRadius: 6, background: "#F2E9D8" }} />
-                                    )}
-                                    <span style={{ fontSize: 12, color: "var(--text)", textAlign: "center" }}>{pname}</span>
-                                    {qty > 0 && (
-                                      <span style={{ position: "absolute", top: 4, right: 4, background: "#D85A30", color: "#fff", fontSize: 10, borderRadius: 999, minWidth: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>
-                                        {qty}
-                                      </span>
-                                    )}
-                                  </button>
-                                );
-                              })}
+                            <div className="style-pills">
+                              {productNames.map((pname) => (
+                                <button
+                                  key={pname}
+                                  className={`style-pill ${activeProductName === pname ? "active" : ""}`}
+                                  onClick={() => {
+                                    setSelectedProductName(pname);
+                                    // 切換到別的商品時，回到「還沒選款式」的狀態，主視覺才會顯示那個商品的封面圖
+                                    setSelectedStyleByProduct((prev) => {
+                                      const next = { ...prev };
+                                      delete next[pname];
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  {pname}
+                                  {productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>}
+                                </button>
+                              ))}
                             </div>
                           </>
                         )}
@@ -1787,16 +1785,20 @@ export default function Home() {
 
                         <div className="product-info-v3-label">數量</div>
                         <div className="stepper stepper-lg">
-                          <button className="step-btn" disabled={qty <= 0} onClick={() => changeQty(current.name, current.style, -1)}>－</button>
+                          <button className="step-btn" disabled={!hasPickedStyle || qty <= 0} onClick={() => changeQty(current.name, current.style, -1)}>－</button>
                           <input
                             className="qty"
                             type="number"
                             min={0}
                             value={qty}
+                            disabled={!hasPickedStyle}
                             onChange={(e) => setQtyExact(current.name, current.style, e.target.value)}
                           />
-                          <button className="step-btn" onClick={() => changeQty(current.name, current.style, 1)}>＋</button>
+                          <button className="step-btn" disabled={!hasPickedStyle} onClick={() => changeQty(current.name, current.style, 1)}>＋</button>
                         </div>
+                        {!hasPickedStyle && (
+                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>請先選擇款式</div>
+                        )}
 
                         <div className="product-checkout-row">
                           <span className="product-checkout-total">合計 {current.linkedGiftStyleId ? "NT$" : "￥"} {fmt(cartTotal)}</span>
