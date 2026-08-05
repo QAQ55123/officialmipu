@@ -7,7 +7,7 @@ import * as XLSX from "xlsx";
 export const dynamic = "force-dynamic";
 
 /**
- * 商品批次匯入（2.2節）：欄位「系列名稱｜商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址｜封面圖網址」，
+ * 商品批次匯入（2.2節）：欄位「系列名稱｜系列圖片網址｜商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址｜封面圖網址」，
  * 一列＝一個具體款式，同名商品自動歸到同一組（比照 mibu-app 原本模式，products 本身就是扁平結構）。
  *
  * 修正：改成「選一個分類 → 依 Excel 裡的『系列名稱』欄位，在該分類底下自動建立/沿用對應的系列」，
@@ -44,15 +44,19 @@ export async function POST(req: Request) {
     // 依「系列名稱」找出或建立系列（同一個分類底下同名的系列只會有一個）
     const seriesCache = new Map<string, string>(); // 系列名稱 -> series_id
     const sortOrderBySeriesId = new Map<string, number>();
-    async function resolveSeriesId(seriesName: string): Promise<string> {
+    async function resolveSeriesId(seriesName: string, seriesImageUrl: string): Promise<string> {
       if (seriesCache.has(seriesName)) return seriesCache.get(seriesName)!;
       const { data: existingSeries } = await supabase
         .from("series")
-        .select("id")
+        .select("id, image_url")
         .eq("category_id", categoryId)
         .eq("name", seriesName)
         .maybeSingle();
       if (existingSeries) {
+        // 系列已經存在：如果它原本沒有圖片、而這次 Excel 有填，就順便補上
+        if (seriesImageUrl && !existingSeries.image_url) {
+          await supabase.from("series").update({ image_url: toDirectImageUrl(seriesImageUrl) }).eq("id", existingSeries.id);
+        }
         seriesCache.set(seriesName, existingSeries.id);
         return existingSeries.id;
       }
@@ -60,7 +64,13 @@ export async function POST(req: Request) {
       const nextSeriesSort = lastSeries && lastSeries.length > 0 ? lastSeries[0].sort_order + 1 : 0;
       const { data: created, error: createErr } = await supabase
         .from("series")
-        .insert({ name: seriesName, category_id: categoryId, sort_order: nextSeriesSort, is_visible: true })
+        .insert({
+          name: seriesName,
+          category_id: categoryId,
+          sort_order: nextSeriesSort,
+          is_visible: true,
+          image_url: seriesImageUrl ? toDirectImageUrl(seriesImageUrl) : null,
+        })
         .select()
         .single();
       if (createErr || !created) throw new Error(`建立系列「${seriesName}」失敗：${createErr?.message || "未知錯誤"}`);
@@ -89,6 +99,7 @@ export async function POST(req: Request) {
       const row = rows[idx];
       const rowNum = idx + 2; // 試算表第1列是標題，資料從第2列開始
       const seriesName = String(row["系列名稱"] ?? "").trim();
+      const seriesImageUrl = String(row["系列圖片網址"] ?? "").trim();
       const name = String(row["商品名稱"] ?? "").trim();
       const style = String(row["款式"] ?? "").trim();
       const priceRaw = row["金額"];
@@ -119,7 +130,7 @@ export async function POST(req: Request) {
       let seriesId: string;
       try {
         const hadBefore = seriesCache.has(seriesName);
-        seriesId = await resolveSeriesId(seriesName);
+        seriesId = await resolveSeriesId(seriesName, seriesImageUrl);
         if (!hadBefore) createdSeriesNames.add(seriesName);
       } catch (e: any) {
         failed.push(`第 ${rowNum} 列：${e.message}`);
