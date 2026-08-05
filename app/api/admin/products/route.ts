@@ -36,6 +36,7 @@ export async function GET(req: Request) {
       shippingFee: Number(p.shipping_fee) || 0,
       linkedGiftStyleId: p.linked_gift_style_id || null,
       hasDiscountFlag: p.has_discount_flag,
+      coverImageUrl: p.cover_image_url || null,
     })),
   });
 }
@@ -71,11 +72,18 @@ export async function POST(req: Request) {
       cod_allowed: body.codAllowed === false ? false : true,
       shipping_fee: Number(body.shippingFee) || 0,
       has_discount_flag: !!body.hasDiscountFlag,
+      cover_image_url: body.coverImageUrl || null,
       sort_order: nextSortOrder,
     })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // 封面圖是「商品名稱」層級共用的，這個名稱底下如果已經有其他款式列，也要一併同步封面圖
+  if (body.coverImageUrl !== undefined) {
+    await supabase.from("products").update({ cover_image_url: body.coverImageUrl || null }).eq("series_id", body.seriesId).eq("name", name);
+  }
+
   syncProductsSheet().catch(() => {});
   return NextResponse.json({ ok: true, product: data });
 }
@@ -90,7 +98,7 @@ export async function PUT(req: Request) {
   if (!body.id) return NextResponse.json({ error: "缺少商品 id" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: oldProduct } = await supabase.from("products").select("image_url").eq("id", body.id).single();
+  const { data: oldProduct } = await supabase.from("products").select("image_url, series_id, name").eq("id", body.id).single();
 
   const { error } = await supabase
     .from("products")
@@ -102,9 +110,15 @@ export async function PUT(req: Request) {
       cod_allowed: body.codAllowed === false ? false : true,
       shipping_fee: Number(body.shippingFee) || 0,
       has_discount_flag: !!body.hasDiscountFlag,
+      cover_image_url: body.coverImageUrl || null,
     })
     .eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // 封面圖是「商品名稱」層級共用的，同名的其他款式列也要一起同步
+  if (body.coverImageUrl !== undefined && oldProduct) {
+    await supabase.from("products").update({ cover_image_url: body.coverImageUrl || null }).eq("series_id", oldProduct.series_id).eq("name", body.name || oldProduct.name);
+  }
 
   const newImageUrl = body.imageUrl || null;
   if (oldProduct?.image_url && oldProduct.image_url !== newImageUrl) {

@@ -3,6 +3,60 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { callJson, fetchJson } from "@/lib/adminClient";
 
+/**
+ * 3.3節：可搜尋過濾的目標採購單輸入框，依單號關鍵字搜尋，避免採購單數量一多下拉選單無法操作。
+ * 輸入文字即時過濾清單，點選其中一項才會真正選定（不能亂打不存在的東西）。
+ */
+function SearchableBatchPicker({
+  batches,
+  value,
+  search,
+  onSearchChange,
+  onSelect,
+}: {
+  batches: { id: string; label: string }[];
+  value: string;
+  search: string;
+  onSearchChange: (v: string) => void;
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = batches.find((b) => b.id === value);
+  const filtered = search.trim()
+    ? batches.filter((b) => b.label.toLowerCase().includes(search.trim().toLowerCase()))
+    : batches;
+
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <input
+        type="text"
+        placeholder="搜尋採購單…"
+        value={open ? search : selected?.label || search}
+        onFocus={() => { setOpen(true); onSearchChange(""); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onChange={(e) => onSearchChange(e.target.value)}
+        style={{ padding: 6, width: 160 }}
+      />
+      {open && (
+        <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", width: 220, boxShadow: "0 4px 12px rgba(0,0,0,.1)" }}>
+          {filtered.length === 0 && <div style={{ padding: 8, fontSize: 12, color: "#8A8779" }}>沒有符合的採購單</div>}
+          {filtered.map((b) => (
+            <div
+              key={b.id}
+              onMouseDown={() => { onSelect(b.id); setOpen(false); }}
+              style={{ padding: "6px 10px", fontSize: 13, cursor: "pointer" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#F1EFE8")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              {b.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PurchaseBatchesPage() {
   const params = useParams();
   const router = useRouter();
@@ -12,7 +66,9 @@ export default function PurchaseBatchesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  const [tab, setTab] = useState<"batches" | "gap" | "extra">("batches");
+  const [tab, setTab] = useState<"batches" | "gap" | "extra" | "backorders" | "reassign">("batches");
+  const [backorders, setBackorders] = useState<any[]>([]);
+  const [reassignNeeding, setReassignNeeding] = useState<any[]>([]);
   const [unassignedPool, setUnassignedPool] = useState<any[]>([]);
   const [purchaseBatches, setPurchaseBatches] = useState<any[]>([]);
   const [batchGiftGap, setBatchGiftGap] = useState<any[]>([]);
@@ -23,14 +79,23 @@ export default function PurchaseBatchesPage() {
   const [floatingToast, setFloatingToast] = useState("");
 
   const [newBatchPlatformId, setNewBatchPlatformId] = useState("");
+  const [autoSplitting, setAutoSplitting] = useState(false);
   const [assignQtyByItem, setAssignQtyByItem] = useState<Record<string, string>>({});
   const [assignTargetBatchByItem, setAssignTargetBatchByItem] = useState<Record<string, string>>({});
+  const [assignSearchByItem, setAssignSearchByItem] = useState<Record<string, string>>({});
+  const [draggedItem, setDraggedItem] = useState<{ orderItemId: string; qty: number; sourceBatchId: string; batchItemId: string } | null>(null);
+  const [splitQtyByItem, setSplitQtyByItem] = useState<Record<string, string>>({});
+  const [splitTargetByItem, setSplitTargetByItem] = useState<Record<string, string>>({});
+  const [splitSearchByItem, setSplitSearchByItem] = useState<Record<string, string>>({});
+  const [splitOpenForItem, setSplitOpenForItem] = useState<string | null>(null);
   const [giftPickByBatch, setGiftPickByBatch] = useState<Record<string, string>>({});
   const [giftQtyByBatch, setGiftQtyByBatch] = useState<Record<string, string>>({});
   const [giftErrorByBatch, setGiftErrorByBatch] = useState<Record<string, string>>({});
   const [extraGiftStyleId, setExtraGiftStyleId] = useState("");
   const [extraQty, setExtraQty] = useState("");
   const [extraNote, setExtraNote] = useState("");
+  const [extraOrderNumber, setExtraOrderNumber] = useState("");
+  const [extraSubtotal, setExtraSubtotal] = useState("");
 
   // ---- 到貨追蹤子頁面 ----
   const [activeBatchForArrival, setActiveBatchForArrival] = useState<any | null>(null);
@@ -65,16 +130,20 @@ export default function PurchaseBatchesPage() {
   }, [campaignId]);
 
   async function loadPurchaseBatchesData() {
-    const [d1, d2, d3, d4] = await Promise.all([
+    const [d1, d2, d3, d4, d5, d6] = await Promise.all([
       fetchJson(`/api/admin/campaigns/${campaignId}/unassigned-items`),
       fetchJson(`/api/admin/campaigns/${campaignId}/purchase-batches`),
       fetchJson(`/api/admin/campaigns/${campaignId}/gift-gap-overview`),
       fetchJson(`/api/admin/campaigns/${campaignId}/extra-purchases`),
+      fetchJson(`/api/admin/campaigns/${campaignId}/backorders`),
+      fetchJson(`/api/admin/campaigns/${campaignId}/reassign-candidates`),
     ]);
     setUnassignedPool(d1.pool || []);
     setPurchaseBatches(d2.batches || []);
     setBatchGiftGap(d3.overview || []);
     setExtraPurchases(d4.extraPurchases || []);
+    setBackorders(d5.backorders || []);
+    setReassignNeeding(d6.needing || []);
   }
 
   async function loadVendorRules() {
@@ -82,6 +151,64 @@ export default function PurchaseBatchesPage() {
     setVendorPlatforms(d2.platforms || []);
     const d3 = await fetchJson(`/api/admin/campaigns/${campaignId}/gift-styles`);
     setCampaignGiftStyles(d3.giftStyles || []);
+  }
+
+  async function doReassign(shipmentItemId: string, targetOrderItemId: string) {
+    setMsg("");
+    try {
+      const d = await callJson(`/api/admin/shipment-items/${shipmentItemId}/reassign`, "POST", { targetOrderItemId });
+      setMsg(d.message || "挪用成功");
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "挪用失敗");
+    }
+  }
+
+  async function autoSplit() {
+    setMsg("");
+    setAutoSplitting(true);
+    try {
+      const d = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/auto-split`, "POST", {});
+      setMsg(`已自動建立 ${d.createdBatchCount} 張採購單（${d.platformSummary}），可以再手動微調`);
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "自動分配失敗");
+    } finally {
+      setAutoSplitting(false);
+    }
+  }
+
+  async function splitMoveItem(sourceBatchId: string, batchItemId: string, orderItemId: string, totalQty: number, moveQty: number, targetBatchId: string) {
+    if (!isFinite(moveQty) || moveQty <= 0 || moveQty > totalQty) return setMsg("搬移數量格式不正確");
+    if (!targetBatchId) return setMsg("請選擇目標採購單");
+    setMsg("");
+    try {
+      // 先整筆刪除，讓這個訂單品項的數量重新變成「可分配」，再分別建回原採購單(剩餘)跟目標採購單(搬走的部分)
+      await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${sourceBatchId}/items`, "DELETE", { batchItemId });
+      const remain = totalQty - moveQty;
+      if (remain > 0) {
+        await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${sourceBatchId}/items`, "POST", { orderItemId, qty: remain });
+      }
+      await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${targetBatchId}/items`, "POST", { orderItemId, qty: moveQty });
+      setSplitOpenForItem(null);
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "搬移失敗");
+    }
+  }
+
+  async function moveItemToBatch(targetBatchId: string) {
+    if (!draggedItem) return;
+    if (draggedItem.sourceBatchId === targetBatchId) { setDraggedItem(null); return; }
+    setMsg("");
+    try {
+      await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${draggedItem.sourceBatchId}/items`, "DELETE", { batchItemId: draggedItem.batchItemId });
+      await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${targetBatchId}/items`, "POST", { orderItemId: draggedItem.orderItemId, qty: draggedItem.qty });
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "搬動失敗");
+    }
+    setDraggedItem(null);
   }
 
   async function createPurchaseBatch() {
@@ -114,8 +241,20 @@ export default function PurchaseBatchesPage() {
     loadPurchaseBatchesData();
   }
 
+  async function updateExtraAdjustment(batchId: string, text: string) {
+    try {
+      await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}`, "PATCH", { extraAdjustmentText: text });
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "更新失敗");
+    }
+  }
+
   async function changeBatchPlatform(batchId: string, platformId: string) {
-    await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}`, "PATCH", { platformId: platformId || null });
+    const d = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}`, "PATCH", { platformId: platformId || null });
+    if (d.adjustedGifts) {
+      setMsg(`換平台後已自動調整滿贈配置：${d.adjustedGifts.join("；")}`);
+    }
     loadPurchaseBatchesData();
   }
 
@@ -125,16 +264,12 @@ export default function PurchaseBatchesPage() {
     loadPurchaseBatchesData();
   }
 
-  async function setBatchGift(batchId: string) {
-    const giftStyleId = giftPickByBatch[batchId];
-    const qty = Number(giftQtyByBatch[batchId]);
-    if (!giftStyleId) return setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: "請選擇滿贈款式" }));
-    if (!isFinite(qty) || qty < 0) return setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: "數量格式不正確" }));
+  async function setBatchGiftQty(batchId: string, giftStyleId: string, qty: number) {
+    if (!giftStyleId) return;
     try {
       await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}/gifts`, "PUT", { giftStyleId, qty });
       setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: "" }));
       setGiftPickByBatch((prev) => ({ ...prev, [batchId]: "" }));
-      setGiftQtyByBatch((prev) => ({ ...prev, [batchId]: "" }));
       loadPurchaseBatchesData();
     } catch (e: any) {
       setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: e.message || "設定失敗" }));
@@ -161,8 +296,10 @@ export default function PurchaseBatchesPage() {
     const qty = Number(extraQty);
     if (!isFinite(qty) || qty <= 0) return setMsg("數量格式不正確");
     try {
-      await callJson(`/api/admin/campaigns/${campaignId}/extra-purchases`, "POST", { giftStyleId: extraGiftStyleId, qty, note: extraNote });
-      setExtraGiftStyleId(""); setExtraQty(""); setExtraNote("");
+      await callJson(`/api/admin/campaigns/${campaignId}/extra-purchases`, "POST", {
+        giftStyleId: extraGiftStyleId, qty, note: extraNote, orderNumber: extraOrderNumber, subtotal: extraSubtotal,
+      });
+      setExtraGiftStyleId(""); setExtraQty(""); setExtraNote(""); setExtraOrderNumber(""); setExtraSubtotal("");
       loadPurchaseBatchesData();
     } catch (e: any) {
       setMsg(e.message || "新增失敗");
@@ -242,8 +379,13 @@ export default function PurchaseBatchesPage() {
 
   async function toggleArrived(itemId: string, arrived: boolean) {
     if (!activeBatchForArrival) return;
-    await callJson(`/api/admin/shipment-items/${itemId}`, "PATCH", { arrived });
+    const d = await callJson(`/api/admin/shipment-items/${itemId}`, "PATCH", { arrived });
+    if (d.matchedBackorders) {
+      const desc = d.matchedBackorders.map((m: any) => `${m.username} x${m.qty}`).join("、");
+      setMsg(`已自動優先配對欠貨：${desc}`);
+    }
     loadArrivalTree(activeBatchForArrival.id);
+    loadPurchaseBatchesData();
   }
 
   async function removeShipmentItem(itemId: string) {
@@ -266,6 +408,8 @@ export default function PurchaseBatchesPage() {
             <button className={`btn small ${tab === "batches" ? "" : "secondary"}`} onClick={() => setTab("batches")}>採購單</button>
             <button className={`btn small ${tab === "gap" ? "" : "secondary"}`} onClick={() => setTab("gap")}>贈品缺口總覽</button>
             <button className={`btn small ${tab === "extra" ? "" : "secondary"}`} onClick={() => setTab("extra")}>額外採購</button>
+            <button className={`btn small ${tab === "backorders" ? "" : "secondary"}`} onClick={() => setTab("backorders")}>欠貨總覽</button>
+            <button className={`btn small ${tab === "reassign" ? "" : "secondary"}`} onClick={() => setTab("reassign")}>挪用建議</button>
           </div>
 
           {tab === "batches" && (
@@ -283,16 +427,13 @@ export default function PurchaseBatchesPage() {
                       value={assignQtyByItem[it.orderItemId] || ""}
                       onChange={(e) => setAssignQtyByItem((prev) => ({ ...prev, [it.orderItemId]: e.target.value }))}
                     />
-                    <select
-                      style={{ padding: 6 }}
+                    <SearchableBatchPicker
+                      batches={purchaseBatches.map((b, idx) => ({ id: b.id, label: `採購單${idx + 1}${b.platform ? `（${b.platform.name}）` : ""}` }))}
                       value={assignTargetBatchByItem[it.orderItemId] || ""}
-                      onChange={(e) => setAssignTargetBatchByItem((prev) => ({ ...prev, [it.orderItemId]: e.target.value }))}
-                    >
-                      <option value="">選採購單</option>
-                      {purchaseBatches.map((b, idx) => (
-                        <option key={b.id} value={b.id}>採購單{idx + 1}{b.platform ? `（${b.platform.name}）` : ""}</option>
-                      ))}
-                    </select>
+                      search={assignSearchByItem[it.orderItemId] || ""}
+                      onSearchChange={(v) => setAssignSearchByItem((prev) => ({ ...prev, [it.orderItemId]: v }))}
+                      onSelect={(id) => setAssignTargetBatchByItem((prev) => ({ ...prev, [it.orderItemId]: id }))}
+                    />
                     <button className="btn small secondary" onClick={() => assignItemToBatch(it.orderItemId)}>分配</button>
                   </div>
                 ))}
@@ -306,10 +447,18 @@ export default function PurchaseBatchesPage() {
                   ))}
                 </select>
                 <button className="btn small" onClick={createPurchaseBatch}>新增採購單</button>
+                <button className="btn small secondary" onClick={autoSplit} disabled={autoSplitting}>
+                  {autoSplitting ? "自動分配中…" : "自動分配未分配品項"}
+                </button>
               </div>
 
               {purchaseBatches.map((b, idx) => (
-                <div key={b.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div
+                  key={b.id}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => moveItemToBatch(b.id)}
+                  style={{ border: draggedItem ? "2px dashed #33415C" : "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 14 }}
+                >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
                     <span style={{ fontWeight: 600 }}>採購單{idx + 1}</span>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -334,11 +483,48 @@ export default function PurchaseBatchesPage() {
                     </div>
                   </div>
 
-                  {b.items.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有分配任何品項</div>}
+                  {b.items.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有分配任何品項（可以把品項拖曳過來）</div>}
                   {b.items.map((it: any) => (
-                    <div key={it.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
-                      <span>{it.username}：{it.productName}{it.style ? `（${it.style}）` : ""} x{it.qty}（￥{it.unitPriceOriginal}/件）</span>
-                      <button className="btn small secondary" onClick={() => removeBatchItem(b.id, it.id)}>移出</button>
+                    <div key={it.id}>
+                      <div
+                        draggable
+                        onDragStart={() => setDraggedItem({ orderItemId: it.orderItemId, qty: it.qty, sourceBatchId: b.id, batchItemId: it.id })}
+                        onDragEnd={() => setDraggedItem(null)}
+                        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 6px", cursor: "grab", borderRadius: 6, background: draggedItem?.batchItemId === it.id ? "#F1EFE8" : "transparent" }}
+                      >
+                        <span>⠿ {it.username}：{it.productName}{it.style ? `（${it.style}）` : ""} x{it.qty}（￥{it.unitPriceOriginal}/件）</span>
+                        <span style={{ display: "flex", gap: 6 }}>
+                          {it.qty > 1 && (
+                            <button className="btn small secondary" onClick={() => setSplitOpenForItem(splitOpenForItem === it.id ? null : it.id)}>拆分搬移</button>
+                          )}
+                          <button className="btn small secondary" onClick={() => removeBatchItem(b.id, it.id)}>移出</button>
+                        </span>
+                      </div>
+                      {splitOpenForItem === it.id && (
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 6px 8px 20px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 12, color: "#8A8779" }}>搬移數量</span>
+                          <input
+                            type="number"
+                            style={{ width: 60, minWidth: 60 }}
+                            placeholder={`1~${it.qty - 1}`}
+                            value={splitQtyByItem[it.id] || ""}
+                            onChange={(e) => setSplitQtyByItem((prev) => ({ ...prev, [it.id]: e.target.value }))}
+                          />
+                          <SearchableBatchPicker
+                            batches={purchaseBatches.filter((pb) => pb.id !== b.id).map((pb, i2) => ({ id: pb.id, label: `採購單${purchaseBatches.indexOf(pb) + 1}${pb.platform ? `（${pb.platform.name}）` : ""}` }))}
+                            value={splitTargetByItem[it.id] || ""}
+                            search={splitSearchByItem[it.id] || ""}
+                            onSearchChange={(v) => setSplitSearchByItem((prev) => ({ ...prev, [it.id]: v }))}
+                            onSelect={(id) => setSplitTargetByItem((prev) => ({ ...prev, [it.id]: id }))}
+                          />
+                          <button
+                            className="btn small secondary"
+                            onClick={() => splitMoveItem(b.id, it.id, it.orderItemId, it.qty, Number(splitQtyByItem[it.id]), splitTargetByItem[it.id])}
+                          >
+                            確認搬移
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
 
@@ -346,40 +532,74 @@ export default function PurchaseBatchesPage() {
                     原幣小計 ￥{Math.round(b.subtotalOriginal).toLocaleString("zh-TW")}
                     {b.matchedThresholdAmount != null && <span>　達門檻￥{b.matchedThresholdAmount}，折扣￥{b.matchedDiscountAmount}</span>}
                   </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                    <span style={{ fontSize: 12, color: "#8A8779" }}>額外調整（可連續輸入多筆數字，如 -20 -30，自動加總）</span>
+                    <input
+                      type="text"
+                      defaultValue={b.extraAdjustmentText}
+                      onBlur={(e) => updateExtraAdjustment(b.id, e.target.value)}
+                      style={{ width: 120, padding: 4, fontSize: 12 }}
+                    />
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>
+                    實收 ￥{Math.round(b.netReceivable).toLocaleString("zh-TW")}
+                  </div>
 
                   <div style={{ marginTop: 10, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
                     <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 4 }}>滿贈配置</div>
-                    {b.gifts.map((g: any) => (
-                      <div key={g.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "2px 0" }}>
-                        <span>{g.styleName}（門檻{g.thresholdAmount}）x{g.qty}</span>
-                        <span style={{ display: "flex", gap: 6 }}>
-                          <button className="btn small secondary" onClick={() => editBatchGift(b.id, g.giftStyleId, g.qty)}>編輯</button>
-                          <button className="btn small danger" onClick={() => removeBatchGift(b.id, g.giftStyleId)}>刪除</button>
-                        </span>
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                      <select
-                        style={{ padding: 6 }}
-                        value={giftPickByBatch[b.id] || ""}
-                        onChange={(e) => setGiftPickByBatch((prev) => ({ ...prev, [b.id]: e.target.value }))}
-                      >
-                        <option value="">選滿贈款式</option>
-                        {campaignGiftStyles.map((s) => (
-                          <option key={s.id} value={s.id}>{s.style_name}（門檻{s.threshold_amount}）</option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        placeholder="數量"
-                        style={{ width: 60, minWidth: 60 }}
-                        value={giftQtyByBatch[b.id] || ""}
-                        onChange={(e) => setGiftQtyByBatch((prev) => ({ ...prev, [b.id]: e.target.value }))}
-                      />
-                      <button className="btn small secondary" onClick={() => setBatchGift(b.id)}>
-                        {giftPickByBatch[b.id] && b.gifts.find((g: any) => g.giftStyleId === giftPickByBatch[b.id]) ? "儲存修改" : "設定"}
-                      </button>
-                    </div>
+                    {(() => {
+                      // 每款式的可選上限＝「依門檻算出的上限」跟「平台每款上限」兩者取較小值（3.2/3.3節）
+                      function effectiveMax(styleId: string, thresholdAmount: number): number {
+                        const amountBasedMax = Math.floor(b.subtotalOriginal / thresholdAmount);
+                        const cap = b.platform ? vendorPlatforms.find((p: any) => p.id === b.platform.id)?.styleCaps?.[styleId] : undefined;
+                        return cap != null ? Math.min(amountBasedMax, cap) : amountBasedMax;
+                      }
+                      const unlockedStyles = campaignGiftStyles
+                        .map((s) => ({ ...s, max: effectiveMax(s.id, s.threshold_amount) }))
+                        .filter((s) => s.max > 0);
+
+                      return (
+                        <>
+                          {b.gifts.map((g: any) => {
+                            const max = effectiveMax(g.giftStyleId, g.thresholdAmount);
+                            return (
+                              <div key={g.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
+                                <span>{g.styleName}（門檻{g.thresholdAmount}，上限{max}）</span>
+                                <div className="stepper">
+                                  <button className="step-btn" disabled={g.qty <= 0} onClick={() => setBatchGiftQty(b.id, g.giftStyleId, g.qty - 1)}>－</button>
+                                  <input className="qty" value={g.qty} readOnly />
+                                  <button className="step-btn" disabled={g.qty >= max} onClick={() => setBatchGiftQty(b.id, g.giftStyleId, g.qty + 1)}>＋</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {!b.platform && <div style={{ fontSize: 12, color: "#993C1D" }}>還沒指定平台，無法配置滿贈</div>}
+                          {b.platform && unlockedStyles.filter((s) => !b.gifts.find((g: any) => g.giftStyleId === s.id)).length > 0 && (
+                            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                              <select
+                                style={{ padding: 6 }}
+                                value={giftPickByBatch[b.id] || ""}
+                                onChange={(e) => setGiftPickByBatch((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                              >
+                                <option value="">新增款式（已排除未解鎖的）</option>
+                                {unlockedStyles
+                                  .filter((s) => !b.gifts.find((g: any) => g.giftStyleId === s.id))
+                                  .map((s) => (
+                                    <option key={s.id} value={s.id}>{s.style_name}（上限{s.max}）</option>
+                                  ))}
+                              </select>
+                              <button
+                                className="btn small secondary"
+                                disabled={!giftPickByBatch[b.id]}
+                                onClick={() => setBatchGiftQty(b.id, giftPickByBatch[b.id], 1)}
+                              >
+                                加入
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                     {giftErrorByBatch[b.id] && (
                       <div style={{ color: "#B3261E", fontSize: 12, marginTop: 4 }}>{giftErrorByBatch[b.id]}</div>
                     )}
@@ -410,7 +630,8 @@ export default function PurchaseBatchesPage() {
 
           {tab === "extra" && (
             <div>
-              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>跟其他賣家/管道額外買到的現貨，用來抵掉贈品缺口，不強制走拆單。</p>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>跟其他賣家/管道額外買到的現貨，用來抵掉贈品缺口，不強制走拆單，會計入這次檔期的成本。</p>
+              <div className="id-row"><span className="id-label">訂單編號（採購單號）</span><input type="text" value={extraOrderNumber} onChange={(e) => setExtraOrderNumber(e.target.value)} placeholder="選填" /></div>
               <div className="id-row">
                 <span className="id-label">滿贈款式</span>
                 <select value={extraGiftStyleId} onChange={(e) => setExtraGiftStyleId(e.target.value)} style={{ flex: 1, padding: 8 }}>
@@ -421,6 +642,7 @@ export default function PurchaseBatchesPage() {
                 </select>
               </div>
               <div className="id-row"><span className="id-label">數量</span><input type="number" value={extraQty} onChange={(e) => setExtraQty(e.target.value)} /></div>
+              <div className="id-row"><span className="id-label">小計（成本）</span><input type="number" value={extraSubtotal} onChange={(e) => setExtraSubtotal(e.target.value)} placeholder="選填" /></div>
               <div className="id-row"><span className="id-label">備註</span><input type="text" value={extraNote} onChange={(e) => setExtraNote(e.target.value)} placeholder="選填" /></div>
               <button className="btn" onClick={addExtraPurchase}>新增額外採購紀錄</button>
 
@@ -428,11 +650,52 @@ export default function PurchaseBatchesPage() {
                 {extraPurchases.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有任何額外採購紀錄</div>}
                 {extraPurchases.map((p) => (
                   <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
-                    <span style={{ fontSize: 14 }}>{p.styleName} x{p.qty}{p.note ? `（${p.note}）` : ""}</span>
+                    <span style={{ fontSize: 14 }}>
+                      {p.orderNumber ? `[${p.orderNumber}] ` : ""}{p.styleName} x{p.qty}
+                      {p.subtotal != null ? `　成本 ￥${p.subtotal}` : ""}
+                      {p.note ? `（${p.note}）` : ""}
+                    </span>
                     <button className="btn small danger" onClick={() => deleteExtraPurchase(p.id)}>刪除</button>
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {tab === "backorders" && (
+            <div>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                目前還沒補齊的欠貨清單，依產生時間先後排序。標記到貨時，系統會自動優先把新到貨的數量配對給最早的欠貨紀錄。
+              </p>
+              {backorders.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有任何欠貨紀錄</div>}
+              {backorders.map((b) => (
+                <div key={b.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                  <span style={{ fontSize: 14 }}>{b.username}：{b.productName}{b.style ? `（${b.style}）` : ""} 欠 {b.qty} 件</span>
+                  <span style={{ fontSize: 12, color: "#8A8779" }}>{new Date(b.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === "reassign" && (
+            <div>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                這些顧客的品項還沒到貨，但其他顧客有同商品同款式已經到貨，可以一鍵挪用湊齊，原本的顧客會自動產生欠貨紀錄。
+              </p>
+              {reassignNeeding.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有可以挪用的建議</div>}
+              {reassignNeeding.map((n: any) => (
+                <div key={n.orderItemId} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                  <div style={{ fontSize: 14, marginBottom: 6 }}>
+                    {n.username}：{n.productName}{n.style ? `（${n.style}）` : ""} 還缺 {n.stillNeed} 件
+                  </div>
+                  {n.candidates.map((c: any) => (
+                    <div key={c.shipmentItemId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
+                      <span>可挪用來源：{c.username} 已到貨 {c.qty} 件</span>
+                      <button className="btn small secondary" onClick={() => doReassign(c.shipmentItemId, n.orderItemId)}>一鍵挪用</button>
+                    </div>
+                  ))}
+                </div>
+              ))}
             </div>
           )}
         </div>

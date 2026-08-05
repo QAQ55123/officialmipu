@@ -265,6 +265,10 @@ alter table products add column if not exists has_discount_flag boolean not null
 alter table products add column if not exists shipping_fee numeric not null default 0;
 -- 自動建立滿贈商品時，直接記錄這個商品對應到哪一筆滿贈款式登記，拆單工具判斷「這個商品要不要算進採購需求」時依此欄位，不用回頭比對名稱/款式字串
 alter table products add column if not exists linked_gift_style_id uuid references gift_styles(id) on delete set null;
+-- 2.2節：商品本身另外有一張「封面圖」，跟每個款式各自的照片是分開的兩件事，
+-- 封面圖用在商品格線卡片上，款式照片則用在點進商品後選款式時顯示。
+-- 同一個「商品名稱」底下的所有款式列，共用同一張封面圖（因為封面圖是商品層級，不是款式層級）。
+alter table products add column if not exists cover_image_url text;
 
 alter table campaigns disable row level security;
 -- fulfillment_status 是後來才加的欄位，如果 campaigns 表在更早版本就已經建立過，
@@ -352,6 +356,8 @@ create table if not exists vendor_purchase_batches (
   extra_adjustment  numeric not null default 0, -- 3.2節「額外調整加總」，可正可負，直接影響實收金額
   created_at        timestamptz default now()
 );
+-- 額外調整支援連續輸入多筆數字（如 -20 -30），系統自動加總；這裡保留原始輸入文字方便店家之後回頭編輯
+alter table vendor_purchase_batches add column if not exists extra_adjustment_text text;
 create index if not exists idx_vendor_purchase_batches_campaign on vendor_purchase_batches (campaign_id);
 
 -- 一張採購單裡的商品品項：對應某張顧客訂單裡的某個品項，可能只分配走其中一部分數量
@@ -386,6 +392,9 @@ create table if not exists vendor_extra_purchases (
   note            text,
   created_at      timestamptz default now()
 );
+-- 3.3節：額外採購表單需要能填「訂單編號（採購單號）」跟「小計」，並計入該次檔期的成本，這兩個是後來才加的欄位
+alter table vendor_extra_purchases add column if not exists order_number text;
+alter table vendor_extra_purchases add column if not exists subtotal numeric;
 create index if not exists idx_vendor_extra_purchases_campaign on vendor_extra_purchases (campaign_id);
 
 alter table vendor_purchase_batches disable row level security;
@@ -441,6 +450,35 @@ create index if not exists idx_vendor_shipment_items_batch_gift on vendor_shipme
 alter table vendor_order_numbers disable row level security;
 alter table vendor_shipments disable row level security;
 alter table vendor_shipment_items disable row level security;
+
+-- ============================================================
+-- 保險機制：不管上面個別關閉RLS的語句有沒有漏掉、或是被 Supabase 專案設定
+-- （Authentication → Policies → Enable RLS on new tables）自動重新打開，
+-- 這裡動態抓出 public schema 底下「現有的所有表格」統一關閉一次，
+-- 每次貼這份 schema.sql 都會自動執行，不用再額外手動關一次。
+-- ============================================================
+-- ============================================================
+-- 3.3節：跨顧客重新指派（挪用）與欠貨追蹤
+-- ============================================================
+
+-- 補充：採購單品項要能記錄「挪用註記」，方便對帳時看出這幾件商品原本分屬不同顧客
+alter table vendor_purchase_batch_items add column if not exists reassignment_note text;
+
+-- 欠貨紀錄：某顧客的某商品被挪用走，欠他幾個，等原本那批貨到貨時優先補給他
+create table if not exists backorders (
+  id            uuid primary key default gen_random_uuid(),
+  campaign_id   uuid not null references campaigns(id) on delete cascade,
+  username      text not null,
+  product_name  text not null,
+  style         text default '',
+  qty           int not null,
+  fulfilled     boolean not null default false,
+  created_at    timestamptz default now()
+);
+create index if not exists idx_backorders_campaign on backorders (campaign_id);
+create index if not exists idx_backorders_lookup on backorders (campaign_id, product_name, style, fulfilled, created_at);
+
+alter table backorders disable row level security;
 
 -- ============================================================
 -- 保險機制：不管上面個別關閉RLS的語句有沒有漏掉、或是被 Supabase 專案設定

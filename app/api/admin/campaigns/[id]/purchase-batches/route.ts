@@ -69,7 +69,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       id: b.id,
       label: b.label,
       platform: b.vendor_platforms ? { id: b.vendor_platforms.id, name: b.vendor_platforms.name, orderGiftCap: b.vendor_platforms.order_gift_cap } : null,
-      extraAdjustment: Number(b.extra_adjustment) || 0,
       items: batchItems.map((it: any) => ({
         id: it.id,
         orderItemId: it.order_item_id,
@@ -88,6 +87,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       subtotalOriginal,
       matchedDiscountAmount: matchedTier ? Number(matchedTier.discount_amount) : 0,
       matchedThresholdAmount: matchedTier ? Number(matchedTier.threshold_amount) : null,
+      extraAdjustment: Number(b.extra_adjustment) || 0,
+      extraAdjustmentText: b.extra_adjustment_text || "",
+      // 3.2節：實收 = 該單小計 − 對應門檻的廠商折扣金額 + 額外調整加總
+      netReceivable: subtotalOriginal - (matchedTier ? Number(matchedTier.discount_amount) : 0) + (Number(b.extra_adjustment) || 0),
       arrivalTotalQty: arrival.totalQty,
       arrivalArrivedQty: arrival.arrivedQty,
     };

@@ -8,11 +8,11 @@ type SeriesAdmin = {
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
 };
-type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null };
+type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
-const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null };
+const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null, coverImageUrl: "" };
 
 export default function AdminPage() {
   const [username, setUsername] = useState("");
@@ -1209,7 +1209,7 @@ export default function AdminPage() {
   }
 
   function editProduct(p: ProductAdmin) {
-    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0), linkedGiftStyleId: p.linkedGiftStyleId ?? null });
+    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0), linkedGiftStyleId: p.linkedGiftStyleId ?? null, coverImageUrl: p.coverImageUrl || "" });
   }
 
   function addProductRow() {
@@ -1268,6 +1268,7 @@ export default function AdminPage() {
           hasDiscountFlag: productForm.hasDiscountFlag,
           codAllowed: productForm.codAllowed,
           shippingFee: productForm.shippingFee,
+          coverImageUrl: productForm.coverImageUrl || null,
         });
         setProductForm(emptyProductForm);
         setProductMsg("已儲存");
@@ -1284,6 +1285,7 @@ export default function AdminPage() {
             hasDiscountFlag: row.hasDiscountFlag,
             codAllowed: row.codAllowed,
             shippingFee: row.shippingFee || "0",
+            coverImageUrl: productForm.coverImageUrl || null,
           });
         }
         // 商品名稱保留，方便接著建下一批款式；款式列表清空回一列
@@ -1336,6 +1338,22 @@ export default function AdminPage() {
       setProductMsg("圖片上傳失敗：" + err.message);
     } finally {
       setUploadingProductImg(false);
+    }
+  }
+
+  const [uploadingCoverImg, setUploadingCoverImg] = useState(false);
+  const [coverImageUrlInput, setCoverImageUrlInput] = useState("");
+  async function handleProductCoverImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingCoverImg(true);
+    try {
+      const url = await uploadImage(file);
+      setProductForm((f) => ({ ...f, coverImageUrl: url }));
+    } catch (err: any) {
+      setProductMsg("封面圖上傳失敗：" + err.message);
+    } finally {
+      setUploadingCoverImg(false);
     }
   }
 
@@ -2857,6 +2875,25 @@ export default function AdminPage() {
           <div className="id-row">
             <span className="id-label">商品名稱</span>
             <input type="text" value={productForm.name} onChange={(e) => setProductForm((f) => ({ ...f, name: e.target.value }))} placeholder="例如：原味米菓" />
+          </div>
+          <div className="id-row">
+            <span className="id-label">商品封面圖</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+              <p style={{ fontSize: 11, color: "#9A9787", margin: 0 }}>跟款式照片是分開的，用在商品格線卡片上（同名商品共用同一張）</p>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input type="file" accept="image/*" onChange={handleProductCoverImageUpload} />
+                <input
+                  type="text"
+                  value={coverImageUrlInput}
+                  onChange={(e) => setCoverImageUrlInput(e.target.value)}
+                  placeholder="或貼上圖片網址"
+                  style={{ flex: 1, minWidth: 140 }}
+                />
+                <button className="btn small secondary" onClick={() => { if (coverImageUrlInput.trim()) { setProductForm((f) => ({ ...f, coverImageUrl: toDirectImageUrl(coverImageUrlInput.trim()) })); setCoverImageUrlInput(""); } }}>使用</button>
+              </div>
+              {uploadingCoverImg && <div style={{ fontSize: 12, color: "#8A8779" }}>封面圖上傳中…</div>}
+              {productForm.coverImageUrl && <img src={productForm.coverImageUrl} alt="封面圖預覽" style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8 }} />}
+            </div>
           </div>
           {!productForm.id && (
             <>

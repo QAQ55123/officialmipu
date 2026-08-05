@@ -9,7 +9,7 @@ type Plan = {
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
-type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null };
+type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null };
 type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
@@ -1733,17 +1733,34 @@ export default function Home() {
                         {productNames.length > 1 && (
                           <>
                             <div className="product-info-v3-label">商品</div>
-                            <div className="style-pills">
-                              {productNames.map((pname) => (
-                                <button
-                                  key={pname}
-                                  className={`style-pill ${activeProductName === pname ? "active" : ""}`}
-                                  onClick={() => setSelectedProductName(pname)}
-                                >
-                                  {pname}
-                                  {productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>}
-                                </button>
-                              ))}
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(88px, 1fr))", gap: 10, marginBottom: 12 }}>
+                              {productNames.map((pname) => {
+                                const cover = grouped[pname][0]?.coverImageUrl || grouped[pname][0]?.imageUrl;
+                                const qty = productQtyTotal(pname);
+                                return (
+                                  <button
+                                    key={pname}
+                                    onClick={() => setSelectedProductName(pname)}
+                                    style={{
+                                      position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                                      padding: 6, borderRadius: 10, border: activeProductName === pname ? "2px solid #33415C" : "1px solid var(--line)",
+                                      background: "#fff", cursor: "pointer",
+                                    }}
+                                  >
+                                    {cover ? (
+                                      <img src={cover} alt={pname} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 6 }} />
+                                    ) : (
+                                      <div style={{ width: "100%", aspectRatio: "1", borderRadius: 6, background: "#F2E9D8" }} />
+                                    )}
+                                    <span style={{ fontSize: 12, color: "var(--text)", textAlign: "center" }}>{pname}</span>
+                                    {qty > 0 && (
+                                      <span style={{ position: "absolute", top: 4, right: 4, background: "#D85A30", color: "#fff", fontSize: 10, borderRadius: 999, minWidth: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>
+                                        {qty}
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
                             </div>
                           </>
                         )}
@@ -2327,7 +2344,6 @@ export default function Home() {
                                 ))}
                                 {giftConversionTotal > 0 && (
                                   <div style={{ marginBottom: 10 }}>
-                                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>贈品／滿贈系列商品</div>
                                     <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 13 }}>
                                       <span style={{ fontWeight: 600 }}>NT$ {fmt(giftConversionTotal)}</span>
                                     </div>

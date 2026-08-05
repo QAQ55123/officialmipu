@@ -25,6 +25,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       styleName: p.gift_styles?.style_name || "（款式已刪除）",
       qty: p.qty,
       note: p.note,
+      orderNumber: p.order_number,
+      subtotal: p.subtotal != null ? Number(p.subtotal) : null,
       createdAt: p.created_at,
     })),
   });
@@ -45,7 +47,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("vendor_extra_purchases")
-    .insert({ campaign_id: params.id, gift_style_id: giftStyleId, qty, note: body.note || null })
+    .insert({
+      campaign_id: params.id,
+      gift_style_id: giftStyleId,
+      qty,
+      note: body.note || null,
+      order_number: body.orderNumber || null,
+      subtotal: body.subtotal !== undefined && body.subtotal !== "" ? Number(body.subtotal) : null,
+    })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
