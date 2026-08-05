@@ -27,6 +27,7 @@ export default function PurchaseBatchesPage() {
   const [assignTargetBatchByItem, setAssignTargetBatchByItem] = useState<Record<string, string>>({});
   const [giftPickByBatch, setGiftPickByBatch] = useState<Record<string, string>>({});
   const [giftQtyByBatch, setGiftQtyByBatch] = useState<Record<string, string>>({});
+  const [giftErrorByBatch, setGiftErrorByBatch] = useState<Record<string, string>>({});
   const [extraGiftStyleId, setExtraGiftStyleId] = useState("");
   const [extraQty, setExtraQty] = useState("");
   const [extraNote, setExtraNote] = useState("");
@@ -127,16 +128,16 @@ export default function PurchaseBatchesPage() {
   async function setBatchGift(batchId: string) {
     const giftStyleId = giftPickByBatch[batchId];
     const qty = Number(giftQtyByBatch[batchId]);
-    if (!giftStyleId) return setMsg("請選擇滿贈款式");
-    if (!isFinite(qty) || qty < 0) return setMsg("數量格式不正確");
+    if (!giftStyleId) return setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: "請選擇滿贈款式" }));
+    if (!isFinite(qty) || qty < 0) return setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: "數量格式不正確" }));
     try {
       await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}/gifts`, "PUT", { giftStyleId, qty });
-      setMsg("");
+      setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: "" }));
       setGiftPickByBatch((prev) => ({ ...prev, [batchId]: "" }));
       setGiftQtyByBatch((prev) => ({ ...prev, [batchId]: "" }));
       loadPurchaseBatchesData();
     } catch (e: any) {
-      setMsg(e.message || "設定失敗");
+      setGiftErrorByBatch((prev) => ({ ...prev, [batchId]: e.message || "設定失敗" }));
     }
   }
 
@@ -379,6 +380,9 @@ export default function PurchaseBatchesPage() {
                         {giftPickByBatch[b.id] && b.gifts.find((g: any) => g.giftStyleId === giftPickByBatch[b.id]) ? "儲存修改" : "設定"}
                       </button>
                     </div>
+                    {giftErrorByBatch[b.id] && (
+                      <div style={{ color: "#B3261E", fontSize: 12, marginTop: 4 }}>{giftErrorByBatch[b.id]}</div>
+                    )}
                   </div>
                 </div>
               ))}

@@ -79,6 +79,7 @@ export async function POST(req: Request) {
   }
 
   let orderTotal = 0;
+  let giftConvTotal = 0; // 滿贈系列商品的金額，取付上限要跟一般商品分開算
   let anyDisabledCombo = false;
   const rows: { name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null; unitOriginal: number | null; fxRate: number | null; hasDiscountFlagSnapshot: boolean }[] = [];
   for (const it of items) {
@@ -93,6 +94,7 @@ export async function POST(req: Request) {
       const unit = p.price;
       const subtotal = qty * unit;
       orderTotal += subtotal;
+      giftConvTotal += subtotal;
       rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: null, fxRate: null, hasDiscountFlagSnapshot: p.hasDiscountFlag });
       continue;
     }
@@ -111,13 +113,25 @@ export async function POST(req: Request) {
   if (rows.length === 0) return NextResponse.json({ error: "請至少選擇一項商品的數量" }, { status: 400 });
 
   if (payment === "取付") {
-    // 2.4節：這是「檔期」層級的總上限，不是每單、也不是單一系列的上限
+    const regularTotal = orderTotal - giftConvTotal;
+    // 2.4節：一般商品的取付上限，是「檔期」層級的總上限，不是每單、也不是單一系列的上限
     if (campaign.cod_campaign_cap != null && Number(campaign.cod_campaign_cap) > 0) {
       const cap = Number(campaign.cod_campaign_cap);
       const used = Number(campaign.cod_campaign_used) || 0;
-      if (used + orderTotal > cap) {
+      if (used + regularTotal > cap) {
         return NextResponse.json(
           { error: `取付金額已超過本檔期設定的金額 NT$${fmtMoney(cap)}，請改用匯款` },
+          { status: 400 }
+        );
+      }
+    }
+    // 滿贈系列商品有自己獨立的取付上限，跟一般商品分開累計、互不影響
+    if (campaign.gift_cod_campaign_cap != null && Number(campaign.gift_cod_campaign_cap) > 0) {
+      const giftCap = Number(campaign.gift_cod_campaign_cap);
+      const giftUsed = Number(campaign.gift_cod_campaign_used) || 0;
+      if (giftUsed + giftConvTotal > giftCap) {
+        return NextResponse.json(
+          { error: `贈品／滿贈系列商品的取付金額已超過本檔期設定的金額 NT$${fmtMoney(giftCap)}，請改用匯款` },
           { status: 400 }
         );
       }
@@ -186,9 +200,13 @@ export async function POST(req: Request) {
   }
 
   if (payment === "取付") {
+    const regularTotal = orderTotal - giftConvTotal;
     await supabase
       .from("campaigns")
-      .update({ cod_campaign_used: (Number(campaign.cod_campaign_used) || 0) + orderTotal })
+      .update({
+        cod_campaign_used: (Number(campaign.cod_campaign_used) || 0) + regularTotal,
+        gift_cod_campaign_used: (Number(campaign.gift_cod_campaign_used) || 0) + giftConvTotal,
+      })
       .eq("id", campaign.id);
   }
 

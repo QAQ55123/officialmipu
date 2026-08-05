@@ -2316,7 +2316,7 @@ export default function Home() {
                               <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
                                 {Array.from(rateGroups.entries()).map(([key, g]) => (
                                   <div key={key} style={{ marginBottom: 10 }}>
-                                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>
+                                    <div style={{ fontSize: 12, color: "#33415C", marginBottom: 4 }}>
                                       {key === "unavailable" ? "此組合目前未開放" : `${g.hasDiscountFlag ? "滿減商品" : "一般商品"} × 匯率 ${g.rate}`}
                                     </div>
                                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>

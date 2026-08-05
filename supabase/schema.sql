@@ -217,7 +217,6 @@ create table if not exists campaigns (
   -- 2.4節：取付檔期總上限（可留空=不限），已用金額由系統自動累計，不是店家手動輸入
   cod_campaign_cap   numeric,
   cod_campaign_used  numeric not null default 0,
-
   -- 2.6節：8種交易組合，{匯款,取付} x {有滿減,無滿減} x {有滿贈,無滿贈}，各自可開關+各自匯率
   txn_bank_discount_gift_enabled      boolean not null default true,
   txn_bank_discount_gift_rate         numeric,
@@ -271,6 +270,9 @@ alter table campaigns disable row level security;
 -- fulfillment_status 是後來才加的欄位，如果 campaigns 表在更早版本就已經建立過，
 -- create table if not exists 不會補上新欄位，這裡明確用 alter table 補齊
 alter table campaigns add column if not exists fulfillment_status text; -- 已購買/運輸中/已到貨/已開賣場，店家手動選的顯示標記，顯示在該檔期底下每張訂單上，跟通知信無關
+-- 滿贈系列商品要有自己獨立的取付額度上限，跟一般商品的取付上限(cod_campaign_cap)分開累計，互不影響
+alter table campaigns add column if not exists gift_cod_campaign_cap numeric;
+alter table campaigns add column if not exists gift_cod_campaign_used numeric not null default 0;
 
 alter table gift_styles disable row level security;
 

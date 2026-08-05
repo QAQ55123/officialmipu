@@ -7,8 +7,8 @@
   --text: #2C2C2A;
   --muted: #9A9787;
   --danger: #dc2626;
-  --tag-bg: #EADFC8;
-  --tag-text: #8A6D3B;
+  --tag-bg: rgba(255, 255, 255, 0.92);
+  --tag-text: #2C2C2A;
 }
 * { box-sizing: border-box; }
 html, body {

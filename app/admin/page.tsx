@@ -64,7 +64,7 @@ export default function AdminPage() {
   });
   const emptyCampaignForm = {
     id: "", name: "", opensAt: "", closesAt: "",
-    codCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "",
+    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "",
     rates: emptyCampaignRates(),
   };
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -489,6 +489,7 @@ export default function AdminPage() {
       id: c.id, name: c.name,
       opensAt: toTaipeiDatetimeLocal(c.opens_at), closesAt: toTaipeiDatetimeLocal(c.closes_at),
       codCampaignCap: c.cod_campaign_cap != null ? String(c.cod_campaign_cap) : "",
+      giftCodCampaignCap: c.gift_cod_campaign_cap != null ? String(c.gift_cod_campaign_cap) : "",
       giftBaseUnit: String(c.gift_base_unit ?? 100),
       vendorOrderGiftCap: c.vendor_order_gift_cap != null ? String(c.vendor_order_gift_cap) : "",
       rates,
@@ -515,6 +516,7 @@ export default function AdminPage() {
           opens_at: fromTaipeiDatetimeLocal(campaignForm.opensAt),
           closes_at: fromTaipeiDatetimeLocal(campaignForm.closesAt),
           cod_campaign_cap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
+          gift_cod_campaign_cap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
           gift_base_unit: Number(campaignForm.giftBaseUnit) || 100,
           vendor_order_gift_cap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           ...rateFields,
@@ -525,6 +527,7 @@ export default function AdminPage() {
           opensAt: fromTaipeiDatetimeLocal(campaignForm.opensAt),
           closesAt: fromTaipeiDatetimeLocal(campaignForm.closesAt),
           codCampaignCap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
+          giftCodCampaignCap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
           giftBaseUnit: Number(campaignForm.giftBaseUnit) || 100,
           vendorOrderGiftCap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           rates: rateFields,
@@ -2352,6 +2355,7 @@ export default function AdminPage() {
               <div className="id-row"><span className="id-label">開放起始</span><input type="datetime-local" value={campaignForm.opensAt} onChange={(e) => setCampaignForm((f) => ({ ...f, opensAt: e.target.value }))} /></div>
               <div className="id-row"><span className="id-label">開放結束</span><input type="datetime-local" value={campaignForm.closesAt} onChange={(e) => setCampaignForm((f) => ({ ...f, closesAt: e.target.value }))} /></div>
               <div className="id-row"><span className="id-label">取付檔期總上限</span><input type="number" value={campaignForm.codCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, codCampaignCap: e.target.value }))} placeholder="留空＝不限" /></div>
+              <div className="id-row"><span className="id-label">滿贈系列取付額度上限</span><input type="number" value={campaignForm.giftCodCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, giftCodCampaignCap: e.target.value }))} placeholder="留空＝不限，跟上面的一般商品取付上限分開累計" /></div>
               <div className="id-row"><span className="id-label">滿贈基礎單位</span><input type="number" value={campaignForm.giftBaseUnit} onChange={(e) => setCampaignForm((f) => ({ ...f, giftBaseUnit: e.target.value }))} /></div>
               <div className="id-row"><span className="id-label">廠商採購單贈品上限</span><input type="number" value={campaignForm.vendorOrderGiftCap} onChange={(e) => setCampaignForm((f) => ({ ...f, vendorOrderGiftCap: e.target.value }))} /></div>
 
@@ -2945,10 +2949,8 @@ export default function AdminPage() {
               <div>
                 {productRows.map((row, i) => (
                   <div key={i} style={{ display: "flex", gap: 8, marginBottom: 10, padding: 10, background: "#FAF8F2", borderRadius: 8, alignItems: "flex-start" }}>
-                    {row.imageUrl ? (
+                    {row.imageUrl && (
                       <img src={row.imageUrl} alt="預覽" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
-                    ) : (
-                      <div style={{ width: 44, height: 44, borderRadius: 6, background: "#EDE9DC", flexShrink: 0 }} />
                     )}
                     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
@@ -2957,7 +2959,7 @@ export default function AdminPage() {
                           value={row.style}
                           onChange={(e) => updateProductRow(i, "style", e.target.value)}
                           placeholder="款式（沒有分款式可留空）"
-                          style={{ flex: 1, maxWidth: 220, minWidth: 0 }}
+                          style={{ flex: 1, maxWidth: 220, minWidth: 0, padding: "9px 10px", border: "1px solid var(--line)", borderRadius: 8, fontSize: 15, background: "var(--card)", color: "var(--text)", boxSizing: "border-box" }}
                         />
                         <div>
                           <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>金額(￥)</div>
@@ -2965,7 +2967,7 @@ export default function AdminPage() {
                             type="number"
                             value={row.price}
                             onChange={(e) => updateProductRow(i, "price", e.target.value)}
-                            style={{ width: 60, minWidth: 60 }}
+                            style={{ width: 60, minWidth: 60, padding: "9px 6px", border: "1px solid var(--line)", borderRadius: 8, fontSize: 14, background: "var(--card)", color: "var(--text)", boxSizing: "border-box" }}
                           />
                         </div>
                         <div>
@@ -2974,7 +2976,7 @@ export default function AdminPage() {
                             type="number"
                             value={row.shippingFee}
                             onChange={(e) => updateProductRow(i, "shippingFee", e.target.value)}
-                            style={{ width: 50, minWidth: 50 }}
+                            style={{ width: 50, minWidth: 50, padding: "9px 6px", border: "1px solid var(--line)", borderRadius: 8, fontSize: 14, background: "var(--card)", color: "var(--text)", boxSizing: "border-box" }}
                           />
                         </div>
                         {i === productRows.length - 1 ? (
@@ -2990,7 +2992,7 @@ export default function AdminPage() {
                           value={productRowImageUrlInputs[i] || ""}
                           onChange={(e) => setProductRowImageUrlInputs((prev) => ({ ...prev, [i]: e.target.value }))}
                           placeholder="或貼上圖片網址"
-                          style={{ flex: 1, minWidth: 140, fontSize: 12 }}
+                          style={{ flex: 1, minWidth: 140, fontSize: 12, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--card)", color: "var(--text)", boxSizing: "border-box" }}
                         />
                         <button className="btn small secondary" onClick={() => applyProductRowImageUrl(i)}>使用</button>
                         {uploadingRowImg === i && <span style={{ fontSize: 12, color: "#8A8779" }}>上傳中…</span>}
