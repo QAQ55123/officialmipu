@@ -86,6 +86,17 @@ export default function AdminPage() {
   const [batchGiftGap, setBatchGiftGap] = useState<any[]>([]);
   const [extraPurchases, setExtraPurchases] = useState<any[]>([]);
   const [batchesMsg, setBatchesMsg] = useState("");
+  const [floatingToast, setFloatingToast] = useState("");
+
+  // 拆單相關頁面內容常常很長，訊息如果只顯示在頁面最上方，捲動下去操作時會看不到，
+  // 這裡額外用一個固定在畫面右下角、不會因為捲動而消失的浮動提示同步顯示
+  useEffect(() => {
+    if (batchesMsg) {
+      setFloatingToast(batchesMsg);
+      const t = setTimeout(() => setFloatingToast(""), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [batchesMsg]);
   const [newBatchPlatformId, setNewBatchPlatformId] = useState("");
   const [assignQtyByItem, setAssignQtyByItem] = useState<Record<string, string>>({});
   const [assignTargetBatchByItem, setAssignTargetBatchByItem] = useState<Record<string, string>>({});
@@ -104,6 +115,13 @@ export default function AdminPage() {
   const [assignShipQtyByPoolItem, setAssignShipQtyByPoolItem] = useState<Record<string, string>>({});
   const [assignShipTargetByPoolItem, setAssignShipTargetByPoolItem] = useState<Record<string, string>>({});
   const [arrivalMsg, setArrivalMsg] = useState("");
+  useEffect(() => {
+    if (arrivalMsg) {
+      setFloatingToast(arrivalMsg);
+      const t = setTimeout(() => setFloatingToast(""), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [arrivalMsg]);
 
   async function openArrivalTracking(batch: any) {
     setActiveBatchForArrival(batch);
@@ -259,12 +277,28 @@ export default function AdminPage() {
     if (!giftStyleId) return setBatchesMsg("請選擇滿贈款式");
     if (!isFinite(qty) || qty < 0) return setBatchesMsg("數量格式不正確");
     try {
-      const d = await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}/gifts`, "PUT", { giftStyleId, qty });
-      if (d.warning) setBatchesMsg(d.warning);
-      else setBatchesMsg("");
+      await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}/gifts`, "PUT", { giftStyleId, qty });
+      setBatchesMsg("");
+      setGiftPickByBatch((prev) => ({ ...prev, [batchId]: "" }));
+      setGiftQtyByBatch((prev) => ({ ...prev, [batchId]: "" }));
       loadPurchaseBatchesData(activeCampaignForBatches.id);
     } catch (e: any) {
       setBatchesMsg(e.message || "設定失敗");
+    }
+  }
+
+  function editBatchGift(batchId: string, giftStyleId: string, qty: number) {
+    setGiftPickByBatch((prev) => ({ ...prev, [batchId]: giftStyleId }));
+    setGiftQtyByBatch((prev) => ({ ...prev, [batchId]: String(qty) }));
+  }
+
+  async function removeBatchGift(batchId: string, giftStyleId: string) {
+    if (!activeCampaignForBatches) return;
+    try {
+      await callJson(`/api/admin/campaigns/${activeCampaignForBatches.id}/purchase-batches/${batchId}/gifts`, "PUT", { giftStyleId, qty: 0 });
+      loadPurchaseBatchesData(activeCampaignForBatches.id);
+    } catch (e: any) {
+      setBatchesMsg(e.message || "刪除失敗");
     }
   }
 
@@ -2360,7 +2394,7 @@ export default function AdminPage() {
                     <span style={{ display: "flex", gap: 6 }}>
                       <button className="btn small secondary" onClick={() => openGiftStyles(c)}>滿贈款式登記</button>
                       <button className="btn small secondary" onClick={() => openVendorRules(c)}>廠商規則設定</button>
-                      <button className="btn small secondary" onClick={() => openPurchaseBatches(c)}>拆單</button>
+                      <button className="btn small secondary" onClick={() => window.open(`/admin/campaigns/${c.id}/purchase-batches`, "_self")}>拆單</button>
                       <button className="btn small secondary" onClick={() => editCampaign(c)}>編輯</button>
                       <button className="btn small danger" onClick={() => deleteCampaign(c.id)}>刪除</button>
                     </span>
@@ -2587,7 +2621,13 @@ export default function AdminPage() {
                       <div style={{ marginTop: 10, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
                         <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 4 }}>滿贈配置</div>
                         {b.gifts.map((g: any) => (
-                          <div key={g.giftStyleId} style={{ fontSize: 13 }}>{g.styleName}（門檻{g.thresholdAmount}）x{g.qty}</div>
+                          <div key={g.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "2px 0" }}>
+                            <span>{g.styleName}（門檻{g.thresholdAmount}）x{g.qty}</span>
+                            <span style={{ display: "flex", gap: 6 }}>
+                              <button className="btn small secondary" onClick={() => editBatchGift(b.id, g.giftStyleId, g.qty)}>編輯</button>
+                              <button className="btn small danger" onClick={() => removeBatchGift(b.id, g.giftStyleId)}>刪除</button>
+                            </span>
+                          </div>
                         ))}
                         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                           <select
@@ -2607,7 +2647,9 @@ export default function AdminPage() {
                             value={giftQtyByBatch[b.id] || ""}
                             onChange={(e) => setGiftQtyByBatch((prev) => ({ ...prev, [b.id]: e.target.value }))}
                           />
-                          <button className="btn small secondary" onClick={() => setBatchGift(b.id)}>設定</button>
+                          <button className="btn small secondary" onClick={() => setBatchGift(b.id)}>
+                            {giftPickByBatch[b.id] && b.gifts.find((g: any) => g.giftStyleId === giftPickByBatch[b.id]) ? "儲存修改" : "設定"}
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -2903,15 +2945,19 @@ export default function AdminPage() {
               <div>
                 {productRows.map((row, i) => (
                   <div key={i} style={{ display: "flex", gap: 8, marginBottom: 10, padding: 10, background: "#FAF8F2", borderRadius: 8, alignItems: "flex-start" }}>
-                    {row.imageUrl && <img src={row.imageUrl} alt="預覽" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />}
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                    {row.imageUrl ? (
+                      <img src={row.imageUrl} alt="預覽" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 44, height: 44, borderRadius: 6, background: "#EDE9DC", flexShrink: 0 }} />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                         <input
                           type="text"
                           value={row.style}
                           onChange={(e) => updateProductRow(i, "style", e.target.value)}
                           placeholder="款式（沒有分款式可留空）"
-                          style={{ flex: 1 }}
+                          style={{ flex: 1, maxWidth: 220, minWidth: 0 }}
                         />
                         <div>
                           <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>金額(￥)</div>
@@ -2931,6 +2977,11 @@ export default function AdminPage() {
                             style={{ width: 50, minWidth: 50 }}
                           />
                         </div>
+                        {i === productRows.length - 1 ? (
+                          <button className="btn small secondary" onClick={addProductRow} title="再新增一列款式" style={{ flexShrink: 0 }}>＋</button>
+                        ) : (
+                          <button className="btn small secondary" onClick={() => removeProductRow(i)} title="移除這一列" style={{ flexShrink: 0 }}>－</button>
+                        )}
                       </div>
                       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                         <input type="file" accept="image/*" onChange={(e) => handleProductRowImageUpload(i, e)} style={{ fontSize: 12 }} />
@@ -2955,11 +3006,6 @@ export default function AdminPage() {
                         </label>
                       </div>
                     </div>
-                    {i === productRows.length - 1 ? (
-                      <button className="btn small secondary" onClick={addProductRow} title="再新增一列款式" style={{ flexShrink: 0 }}>＋</button>
-                    ) : (
-                      <button className="btn small secondary" onClick={() => removeProductRow(i)} title="移除這一列" style={{ flexShrink: 0 }}>－</button>
-                    )}
                   </div>
                 ))}
                 <div style={{ fontSize: 12, color: "#8A8779" }}>填好幾列，按「新增商品」會一次建立好幾筆同名不同款式（各自圖片）的商品</div>
@@ -3544,6 +3590,17 @@ export default function AdminPage() {
         </main>
       </div>
 
+      {floatingToast && (
+        <div
+          style={{
+            position: "fixed", bottom: 20, right: 20, maxWidth: 360,
+            background: "#33415C", color: "#fff", padding: "12px 16px", borderRadius: 10,
+            fontSize: 14, boxShadow: "0 4px 16px rgba(0,0,0,.2)", zIndex: 9999,
+          }}
+        >
+          {floatingToast}
+        </div>
+      )}
     </div>
   );
 }

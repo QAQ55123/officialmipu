@@ -9,7 +9,7 @@ type Plan = {
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
-type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean };
+type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null };
 type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
@@ -1720,7 +1720,7 @@ export default function Home() {
                       <div className="product-info-v3">
 
                         <div className="product-price-row">
-                          <span className="product-price-v3"><span style={{ fontSize: "0.7em" }}>￥</span>{fmt(current.price)}</span>
+                          <span className="product-price-v3"><span style={{ fontSize: "0.7em" }}>{current.linkedGiftStyleId ? "NT$" : "￥"}</span>{fmt(current.price)}</span>
                           <button
                             className={`favorite-icon-btn ${favoritedPlanIds.has(activePlan.id) ? "active" : ""}`}
                             onClick={() => toggleFavorite(activePlan.id)}
@@ -1782,7 +1782,7 @@ export default function Home() {
                         </div>
 
                         <div className="product-checkout-row">
-                          <span className="product-checkout-total">合計 ￥ {fmt(cartTotal)}</span>
+                          <span className="product-checkout-total">合計 {current.linkedGiftStyleId ? "NT$" : "￥"} {fmt(cartTotal)}</span>
                           <button
                             className="btn"
                             disabled={cartCount === 0}
@@ -2002,6 +2002,7 @@ export default function Home() {
                   const planName = live?.name || entries[0].planName;
                   const isInactive = live ? !live.found : false;
                   const groupTotal = entries.reduce((s, e) => s + e.qty * e.price, 0);
+                  const groupIsGiftConv = entries.length > 0 && entries.every((e) => !!cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.linkedGiftStyleId);
 
                   return (
                     <div key={planId} className={`cart-group ${isInactive ? "cart-group-inactive" : ""}`}>
@@ -2021,6 +2022,8 @@ export default function Home() {
                         const key = cartItemKey(planId, e.productName, e.style);
                         const singleCap = singleItemGiftCap(e.price, currentCampaign);
                         const isLast = idx === entries.length - 1;
+                        const isGiftConv = !!cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.linkedGiftStyleId;
+                        const currencySymbol = isGiftConv ? "NT$" : "￥";
                         return (
                           <div key={key} style={{ borderBottom: isLast ? "none" : "1px dashed var(--line)" }}>
                           <div className="cart-item-row" style={{ borderBottom: "none" }}>
@@ -2042,7 +2045,7 @@ export default function Home() {
                                 {cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag && (
                                   <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999 }}>滿減商品</span>
                                 )}
-                                <span className="cart-item-unit-price">￥ {fmt(e.price)} / 件</span>
+                                <span className="cart-item-unit-price">{currencySymbol} {fmt(e.price)} / 件</span>
                               </div>
                             </div>
                             <div className="cart-item-right">
@@ -2061,7 +2064,7 @@ export default function Home() {
                               ) : (
                                 <span style={{ fontSize: 13, color: "var(--muted)" }}>x{e.qty}</span>
                               )}
-                              <span className="cart-item-price">￥ {fmt(e.qty * e.price)}</span>
+                              <span className="cart-item-price">{currencySymbol} {fmt(e.qty * e.price)}</span>
                               <span className="cart-item-remove" onClick={() => removeCartItem(planId, e.productName, e.style)} title="移除">×</span>
                             </div>
                           </div>
@@ -2075,7 +2078,7 @@ export default function Home() {
                       })}
 
                       <div className="cart-group-footer">
-                        <span style={{ fontWeight: 600 }}>小計 ￥ {fmt(groupTotal)}</span>
+                        <span style={{ fontWeight: 600 }}>小計 {groupIsGiftConv ? "NT$" : "￥"} {fmt(groupTotal)}</span>
                         <button className="btn small secondary" onClick={() => removeCartGroup(planId)}>清除這組</button>
                       </div>
                     </div>
@@ -2261,20 +2264,25 @@ export default function Home() {
                               </div>
                               {!campaignCodAvailable && (
                                 <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
-                                  取付金額已超過本檔期設定的數量，請改用匯款
+                                  取付金額已超過本檔期設定的金額，請改用匯款
                                 </div>
                               )}
 
                               <div style={{ marginTop: 12 }}>
-                                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={wantsGift}
-                                    onChange={(e2) => setWantsGiftByPlan((prev) => ({ ...prev, [planId]: e2.target.checked }))}
-                                  />
-                                  要選擇滿贈
-                                </label>
-                                {wantsGift && giftLoading && (
+                                {(() => {
+                                  const allGiftConv = entries.length > 0 && entries.every((e) => isGiftConversionItem(planId, e));
+                                  if (allGiftConv) return null;
+                                  return (
+                                    <>
+                                      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={wantsGift}
+                                          onChange={(e2) => setWantsGiftByPlan((prev) => ({ ...prev, [planId]: e2.target.checked }))}
+                                        />
+                                        要選擇滿贈
+                                      </label>
+                                      {wantsGift && giftLoading && (
                                   <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>正在重新計算可選數量…</div>
                                 )}
                                 {wantsGift && !giftLoading && quota && (
@@ -2300,6 +2308,9 @@ export default function Home() {
                                     })}
                                   </div>
                                 )}
+                                    </>
+                                  );
+                                })()}
                               </div>
 
                               <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
