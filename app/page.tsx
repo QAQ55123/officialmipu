@@ -2394,26 +2394,31 @@ export default function Home() {
                                         />
                                         要選擇滿贈
                                       </label>
-                                      {wantsGift && giftLoading && (
-                                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>正在重新計算可選數量…</div>
+                                      {wantsGift && giftLoading && !quota && (
+                                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>正在計算可選數量…</div>
                                 )}
-                                {wantsGift && !giftLoading && quota && (
-                                  <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginTop: 8 }}>
+                                {wantsGift && quota && (
+                                  <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginTop: 8, opacity: giftLoading ? 0.55 : 1, transition: "opacity .15s" }}>
                                     <div style={{ fontSize: 13, color: pickedTotal < quota.quota ? "#B3261E" : "var(--muted)", marginBottom: 8 }}>
                                       可選 {pickedTotal} / {quota.quota} 個{pickedTotal < quota.quota && "（要選滿才能送出）"}
                                     </div>
                                     {quota.styleLimits.map((s) => {
                                       const picked = picks[s.giftStyleId] || 0;
+                                      const atStyleMax = s.max > 0 && picked >= s.max;
+                                      const quotaUsedUp = pickedTotal >= quota.quota;
                                       return (
                                         <div key={s.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                             {s.imageUrl && <img src={s.imageUrl} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />}
-                                            {s.styleName}{s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（尚未解鎖）</span>}
+                                            {s.styleName}
+                                            {s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（金額未達門檻）</span>}
+                                            {atStyleMax && !quotaUsedUp && <span style={{ color: "var(--muted)", fontSize: 12 }}>（已達這款上限 {s.max}）</span>}
+                                            {s.max > 0 && quotaUsedUp && picked < s.max && <span style={{ color: "var(--muted)", fontSize: 12 }}>（可選總數已滿）</span>}
                                           </span>
                                           <div className="stepper">
-                                            <button className="step-btn" disabled={picked <= 0} onClick={() => adjustGiftPick(s.giftStyleId, -1, s.max)}>－</button>
+                                            <button className="step-btn" disabled={giftLoading || picked <= 0} onClick={() => adjustGiftPick(s.giftStyleId, -1, s.max)}>－</button>
                                             <input className="qty" value={picked} readOnly />
-                                            <button className="step-btn" disabled={picked >= s.max} onClick={() => adjustGiftPick(s.giftStyleId, 1, s.max)}>＋</button>
+                                            <button className="step-btn" disabled={giftLoading || picked >= s.max} onClick={() => adjustGiftPick(s.giftStyleId, 1, s.max)}>＋</button>
                                           </div>
                                         </div>
                                       );

@@ -179,6 +179,7 @@ function maxForStyle(
   const remaining: Record<string, number> = {};
   styles.forEach((s) => (remaining[s.id] = picks[s.id] || 0));
   const groupUsed = new Array(groupAmounts.length).fill(0);
+  const targetUsedPerGroup = new Array(groupAmounts.length).fill(0);
 
   // 先把已選的配置進去（門檻高的優先）
   const sorted = [...styles].sort((a, b) => b.thresholdAmount - a.thresholdAmount);
@@ -190,16 +191,19 @@ function maxForStyle(
       if (give <= 0) continue;
       remaining[s.id] -= give;
       groupUsed[gi] += give;
+      if (s.id === target.id) targetUsedPerGroup[gi] += give;
     }
   }
   if (Object.values(remaining).some((v) => v > 0)) return -1; // 這個拆法根本滿足不了已選的
 
   // 剩下的空間，這個款式還能再放幾個
+  // 注意：要扣掉「這個款式在該組已經放了幾個」，不然會把已經用掉的名額重複算一次
   let extra = 0;
   const alreadyPicked = picks[target.id] || 0;
   for (let gi = 0; gi < groupAmounts.length; gi++) {
     if (groupAmounts[gi] < target.thresholdAmount) continue;
-    const room = Math.min(target.perStyleCap, vendorOrderGiftCap - groupUsed[gi]);
+    const usedByTargetInThisGroup = targetUsedPerGroup[gi] || 0;
+    const room = Math.min(target.perStyleCap - usedByTargetInThisGroup, vendorOrderGiftCap - groupUsed[gi]);
     if (room > 0) extra += room;
   }
   return alreadyPicked + extra;
