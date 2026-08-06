@@ -765,7 +765,6 @@ export default function Home() {
   }, 0);
   const cartCount = Object.values(cart).reduce((s, n) => s + n, 0);
   const globalCartCount = globalCart.reduce((s, e) => s + e.qty, 0);
-  const globalCartTotal = globalCart.reduce((s, e) => s + e.qty * e.price, 0);
 
   function addToCart() {
     if (submittingOrder) return;
@@ -1432,17 +1431,17 @@ export default function Home() {
                       <>
                         {Object.entries(
                           globalCart.reduce<Record<string, number>>((acc, e) => {
-                            acc[e.planName] = (acc[e.planName] || 0) + e.qty * e.price;
+                            acc[e.planName] = (acc[e.planName] || 0) + e.qty;
                             return acc;
                           }, {})
-                        ).map(([planName, subtotal]) => (
+                        ).map(([planName, qty]) => (
                           <div className="mibu-hover-panel-row" key={planName}>
                             <span>{planName}</span>
-                            <span>￥ {fmt(subtotal)}</span>
+                            <span>{qty} 件</span>
                           </div>
                         ))}
                         <div className="mibu-hover-panel-row" style={{ borderTop: "1px dashed var(--line)", marginTop: 6, paddingTop: 6, fontWeight: 600, color: "var(--text)" }}>
-                          <span>合計</span><span>￥ {fmt(globalCartTotal)}</span>
+                          <span>合計</span><span>{globalCartCount} 件</span>
                         </div>
                       </>
                     )}
@@ -1796,33 +1795,27 @@ export default function Home() {
                           </button>
                         </div>
 
-                        {productNames.length > 1 && (
-                          <>
-                            <div className="product-info-v3-label">商品</div>
-                            <div className="style-pills">
-                              {productNames.map((pname) => (
-                                <button
-                                  key={pname}
-                                  className={`style-pill ${activeProductName === pname ? "active" : ""}`}
-                                  onClick={() => {
-                                    setSelectedProductName(pname);
-                                    // 切換到別的商品時，回到「還沒選款式」的狀態，主視覺才會顯示那個商品的封面圖
-                                    setSelectedStyleByProduct((prev) => {
-                                      const next = { ...prev };
-                                      delete next[pname];
-                                      return next;
-                                    });
-                                  }}
-                                >
-                                  {pname}
-                                  {productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>}
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        )}
-
-                        {productNames.length === 1 && <h4>{activeProductName}</h4>}
+                        <div className="product-info-v3-label">商品</div>
+                        <div className="style-pills">
+                          {productNames.map((pname) => (
+                            <button
+                              key={pname}
+                              className={`style-pill ${activeProductName === pname ? "active" : ""}`}
+                              onClick={() => {
+                                setSelectedProductName(pname);
+                                // 切換到別的商品時，回到「還沒選款式」的狀態，主視覺才會顯示那個商品的封面圖
+                                setSelectedStyleByProduct((prev) => {
+                                  const next = { ...prev };
+                                  delete next[pname];
+                                  return next;
+                                });
+                              }}
+                            >
+                              {pname}
+                              {productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>}
+                            </button>
+                          ))}
+                        </div>
 
                         {current.hasDiscountFlag && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginBottom: 8 }}>滿減商品</span>}
 
