@@ -77,6 +77,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         style: it.order_items?.style,
         qty: it.qty,
         unitPriceOriginal: Number(it.order_items?.unit_price_original) || 0,
+        reassignmentNote: it.reassignment_note || null,
       })),
       gifts: batchGifts.map((g: any) => ({
         giftStyleId: g.gift_style_id,

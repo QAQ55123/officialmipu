@@ -14,6 +14,7 @@ export async function GET() {
     .from("campaigns")
     .select(
       "id, name, gift_base_unit, vendor_order_gift_cap, cod_campaign_cap, cod_campaign_used, " +
+        "gift_cod_campaign_cap, gift_cod_campaign_used, " +
         "txn_bank_discount_gift_enabled, txn_bank_discount_gift_rate, " +
         "txn_bank_discount_nogift_enabled, txn_bank_discount_nogift_rate, " +
         "txn_bank_nodiscount_gift_enabled, txn_bank_nodiscount_gift_rate, " +

@@ -699,6 +699,81 @@ export default function AdminPage() {
   const [memberNewProfileUrl, setMemberNewProfileUrl] = useState("");
   const [orderLookupNo, setOrderLookupNo] = useState("");
   const [orderLookupResult, setOrderLookupResult] = useState<any>(null);
+  // 3.3節：挪用機制的主要入口在顧客訂單畫面——顯示每個品項的到貨狀態，未到貨的附上可挪用的候選來源
+  const [orderArrivalItems, setOrderArrivalItems] = useState<any[]>([]);
+  const [reassignMsg, setReassignMsg] = useState("");
+  // 2.8節：出貨批次
+  const [shippingBatches, setShippingBatches] = useState<any[]>([]);
+  const [batchPickQty, setBatchPickQty] = useState<Record<string, string>>({});
+  const [shippingMsg, setShippingMsg] = useState("");
+
+  async function loadShippingBatches(orderNo: string) {
+    try {
+      const r = await fetch(`/api/admin/orders/${orderNo}/shipping-batches`);
+      const d = await r.json();
+      setShippingBatches(d.batches || []);
+    } catch {
+      setShippingBatches([]);
+    }
+  }
+
+  async function createShippingBatch() {
+    if (!orderLookupResult?.orderNo) return;
+    const items = Object.entries(batchPickQty)
+      .map(([orderItemId, qtyStr]) => ({ type: "item" as const, id: orderItemId, qty: Number(qtyStr) }))
+      .filter((x) => isFinite(x.qty) && x.qty > 0);
+    if (items.length === 0) return setShippingMsg("請至少勾選一個品項並填入數量");
+    setShippingMsg("");
+    try {
+      const d = await callJson(`/api/admin/orders/${orderLookupResult.orderNo}/shipping-batches`, "POST", { items });
+      setShippingMsg(`已建立出貨批次，這批運費 NT$ ${d.customerShippingFee}`);
+      setBatchPickQty({});
+      loadShippingBatches(orderLookupResult.orderNo);
+      loadOrderArrivalStatus(orderLookupResult.orderNo);
+    } catch (e: any) {
+      setShippingMsg(e.message || "建立失敗");
+    }
+  }
+
+  async function updateBatchInternalCost(batchId: string, internalCost: string) {
+    if (!orderLookupResult?.orderNo) return;
+    try {
+      await callJson(`/api/admin/orders/${orderLookupResult.orderNo}/shipping-batches/${batchId}`, "PATCH", { internalCost });
+      loadShippingBatches(orderLookupResult.orderNo);
+    } catch (e: any) {
+      setShippingMsg(e.message || "更新失敗");
+    }
+  }
+
+  async function deleteShippingBatch(batchId: string) {
+    if (!orderLookupResult?.orderNo) return;
+    if (!confirm("確定要刪除這個出貨批次嗎？裡面的品項會回到還沒出貨的狀態。")) return;
+    await callJson(`/api/admin/orders/${orderLookupResult.orderNo}/shipping-batches/${batchId}`, "DELETE", {});
+    loadShippingBatches(orderLookupResult.orderNo);
+    loadOrderArrivalStatus(orderLookupResult.orderNo);
+  }
+
+  async function loadOrderArrivalStatus(orderNo: string) {
+    setReassignMsg("");
+    try {
+      const r = await fetch(`/api/admin/orders/${orderNo}/arrival-status`);
+      const d = await r.json();
+      setOrderArrivalItems(d.items || []);
+    } catch {
+      setOrderArrivalItems([]);
+    }
+  }
+
+  async function doReassignFromOrder(shipmentItemId: string, targetOrderItemId: string) {
+    setReassignMsg("");
+    try {
+      const d = await callJson(`/api/admin/shipment-items/${shipmentItemId}/reassign`, "POST", { targetOrderItemId });
+      setReassignMsg(d.message || "挪用成功");
+      if (orderLookupResult?.orderNo) loadOrderArrivalStatus(orderLookupResult.orderNo);
+    } catch (e: any) {
+      setReassignMsg(e.message || "挪用失敗");
+    }
+  }
   const [orderPaidAmountInput, setOrderPaidAmountInput] = useState("");
   const [savingPaidAmount, setSavingPaidAmount] = useState(false);
   const [orderLookupMsg, setOrderLookupMsg] = useState("");
@@ -1464,6 +1539,8 @@ export default function AdminPage() {
       setOrderLookupResult(d.order);
       setOrderPaidAmountInput(String(d.order.paidAmount || 0));
       setEditItemRows((d.order.items || []).map((it: any) => ({ name: it.name, style: it.style || "", qty: String(it.qty) })));
+      loadOrderArrivalStatus(d.order.orderNo);
+      loadShippingBatches(d.order.orderNo);
       if (d.order.seriesId) {
         try {
           const pr = await fetch(`/api/admin/products?seriesId=${d.order.seriesId}`, { cache: "no-store" });
@@ -3182,6 +3259,91 @@ export default function AdminPage() {
                         </div>
                       ))}
                       <div style={{ textAlign: "right", fontWeight: 600, marginTop: 8 }}>合計 NT$ {orderLookupResult.total}</div>
+
+                      {orderArrivalItems.length > 0 && (
+                        <div style={{ marginTop: 12, borderTop: "1px solid #EDE9DC", paddingTop: 10 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>到貨狀態</div>
+                          {orderArrivalItems.map((ai: any) => (
+                            <div key={ai.orderItemId} style={{ padding: "6px 0", borderBottom: "1px dashed #EDE9DC" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+                                <span>{ai.productName}{ai.style ? `（${ai.style}）` : ""} x{ai.qty}</span>
+                                <span style={{ color: ai.stillNeed <= 0 ? "#639922" : "#B3261E", fontWeight: 600 }}>
+                                  {ai.stillNeed <= 0 ? "已到貨" : `已到 ${ai.arrivedQty}／還缺 ${ai.stillNeed}`}
+                                </span>
+                              </div>
+                              {ai.stillNeed > 0 && ai.candidates.length > 0 && (
+                                <div style={{ marginTop: 4, marginLeft: 12 }}>
+                                  <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 2 }}>可從其他顧客已到貨的貨挪用：</div>
+                                  {ai.candidates.map((c: any) => (
+                                    <div key={c.shipmentItemId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "2px 0" }}>
+                                      <span>{c.username} 已到貨 {c.qty} 件</span>
+                                      <button className="btn small secondary" onClick={() => doReassignFromOrder(c.shipmentItemId, ai.orderItemId)}>挪用</button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {ai.stillNeed > 0 && ai.candidates.length === 0 && (
+                                <div style={{ fontSize: 12, color: "#8A8779", marginTop: 2, marginLeft: 12 }}>目前沒有其他顧客的同款商品可以挪用</div>
+                              )}
+                            </div>
+                          ))}
+                          {reassignMsg && <div style={{ fontSize: 12, color: "#33415C", marginTop: 6 }}>{reassignMsg}</div>}
+
+                          <div style={{ marginTop: 12, borderTop: "1px solid #EDE9DC", paddingTop: 10 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>出貨批次</div>
+                            <p style={{ fontSize: 11, color: "#8A8779", margin: "0 0 8px" }}>
+                              勾選已到貨的品項建立出貨批次（可以只勾其中幾件），系統會算出這批的顧客運費加總。同一張訂單可以分好幾批出貨。
+                            </p>
+
+                            {orderArrivalItems.filter((ai: any) => ai.batchableQty > 0).length > 0 ? (
+                              <>
+                                {orderArrivalItems.filter((ai: any) => ai.batchableQty > 0).map((ai: any) => (
+                                  <div key={ai.orderItemId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "3px 0" }}>
+                                    <span>{ai.productName}{ai.style ? `（${ai.style}）` : ""}　可出貨 {ai.batchableQty} 件</span>
+                                    <input
+                                      type="number"
+                                      placeholder="0"
+                                      min={0}
+                                      max={ai.batchableQty}
+                                      style={{ width: 60, minWidth: 60, padding: 4 }}
+                                      value={batchPickQty[ai.orderItemId] || ""}
+                                      onChange={(e) => setBatchPickQty((prev) => ({ ...prev, [ai.orderItemId]: e.target.value }))}
+                                    />
+                                  </div>
+                                ))}
+                                <button className="btn small" style={{ marginTop: 6 }} onClick={createShippingBatch}>建立出貨批次</button>
+                              </>
+                            ) : (
+                              <div style={{ fontSize: 12, color: "#8A8779" }}>目前沒有已到貨、還沒出貨的品項</div>
+                            )}
+                            {shippingMsg && <div style={{ fontSize: 12, color: "#33415C", marginTop: 6 }}>{shippingMsg}</div>}
+
+                            {shippingBatches.map((sb: any, idx: number) => (
+                              <div key={sb.id} style={{ border: "1px solid #EDE9DC", borderRadius: 8, padding: 10, marginTop: 8 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600 }}>第 {idx + 1} 批</span>
+                                  <button className="btn small danger" onClick={() => deleteShippingBatch(sb.id)}>刪除</button>
+                                </div>
+                                {sb.items.map((bi: any) => (
+                                  <div key={bi.id} style={{ fontSize: 12, color: "#5F5E5A" }}>
+                                    {bi.label} x{bi.qty}{bi.isGift ? "（滿贈，運費0）" : `　運費 NT$ ${bi.shippingFee}`}
+                                  </div>
+                                ))}
+                                <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>顧客運費合計 NT$ {sb.customerShippingFee}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                                  <span style={{ fontSize: 11, color: "#8A8779" }}>內部物流成本（不轉嫁顧客）</span>
+                                  <input
+                                    type="number"
+                                    defaultValue={sb.internalCost ?? ""}
+                                    onBlur={(e) => updateBatchInternalCost(sb.id, e.target.value)}
+                                    style={{ width: 80, minWidth: 80, padding: 4, fontSize: 12 }}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {currentRole === "owner" && orderLookupResult.seriesId && (
                         <button className="btn small secondary" onClick={() => setEditingOrderItems(true)} style={{ marginTop: 8 }}>編輯商品／款式</button>
                       )}

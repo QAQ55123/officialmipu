@@ -48,6 +48,23 @@ export async function POST(req: Request, { params }: { params: { itemId: string 
   const targetUsername = (targetOrderItem as any).orders?.username;
   const campaignId = (targetOrderItem as any).orders?.campaign_id;
 
+  // 3.3節：如果這個顧客的品項先前已經挪用過別人的貨，這次是再從另一位顧客補齊（拼湊自多筆來源），
+  // 註記要累積記錄每一筆來源，不能只留最後一次，方便店家對帳時看出這份貨是從哪幾位顧客湊來的
+  const { data: existingSameTarget } = await supabase
+    .from("vendor_purchase_batch_items")
+    .select("reassignment_note")
+    .eq("order_item_id", targetOrderItemId)
+    .not("reassignment_note", "is", null);
+
+  const previousSources = (existingSameTarget || [])
+    .map((r: any) => r.reassignment_note)
+    .filter(Boolean);
+  const thisSource = `${sourceUsername || "（未知顧客）"} ${shipItem.qty} 件`;
+  const note =
+    previousSources.length > 0
+      ? `拼湊自多筆來源（第 ${previousSources.length + 1} 筆）：本次挪用自 ${thisSource}；先前已挪用過 ${previousSources.length} 筆`
+      : `挪用自 ${thisSource}，原本屬於他的這 ${shipItem.qty} 件改記為欠貨`;
+
   // 幫目標顧客建立一個新的採購單品項分配紀錄（掛在來源那張採購單底下），並把這筆到貨紀錄改指向它
   const { data: newBatchItem, error: newBatchItemErr } = await supabase
     .from("vendor_purchase_batch_items")
@@ -55,7 +72,7 @@ export async function POST(req: Request, { params }: { params: { itemId: string 
       batch_id: sourceBatchItem.batch_id,
       order_item_id: targetOrderItemId,
       qty: shipItem.qty,
-      reassignment_note: `挪用自 ${sourceUsername || "（未知顧客）"} 的到貨，原本屬於他的這 ${shipItem.qty} 件改記為欠貨`,
+      reassignment_note: note,
     })
     .select()
     .single();

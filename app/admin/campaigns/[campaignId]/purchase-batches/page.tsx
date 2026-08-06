@@ -88,6 +88,34 @@ export default function PurchaseBatchesPage() {
   const [splitTargetByItem, setSplitTargetByItem] = useState<Record<string, string>>({});
   const [splitSearchByItem, setSplitSearchByItem] = useState<Record<string, string>>({});
   const [splitOpenForItem, setSplitOpenForItem] = useState<string | null>(null);
+  // 3.3節：顧客欄位可搜尋下拉直接編輯對調
+  const [customerEditForItem, setCustomerEditForItem] = useState<string | null>(null);
+  const [customerCandidates, setCustomerCandidates] = useState<any[]>([]);
+  const [customerSearch, setCustomerSearch] = useState("");
+
+  async function openCustomerEdit(batchItemId: string, productName: string, style: string) {
+    setCustomerEditForItem(batchItemId);
+    setCustomerSearch("");
+    setCustomerCandidates([]);
+    try {
+      const d = await fetchJson(`/api/admin/campaigns/${campaignId}/order-items-by-product?productName=${encodeURIComponent(productName)}&style=${encodeURIComponent(style || "")}`);
+      setCustomerCandidates(d.items || []);
+    } catch (e: any) {
+      setMsg(e.message || "載入顧客清單失敗");
+    }
+  }
+
+  async function reassignCustomer(batchId: string, batchItemId: string, targetOrderItemId: string) {
+    setMsg("");
+    try {
+      const d = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}/items/${batchItemId}`, "PATCH", { targetOrderItemId });
+      setMsg(d.message || "已改指派");
+      setCustomerEditForItem(null);
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "改指派失敗");
+    }
+  }
   const [giftPickByBatch, setGiftPickByBatch] = useState<Record<string, string>>({});
   const [giftQtyByBatch, setGiftQtyByBatch] = useState<Record<string, string>>({});
   const [giftErrorByBatch, setGiftErrorByBatch] = useState<Record<string, string>>({});
@@ -402,6 +430,31 @@ export default function PurchaseBatchesPage() {
       <button className="btn secondary" style={{ marginBottom: 16 }} onClick={() => router.push("/admin")}>← 返回後台</button>
       <h2 style={{ marginBottom: 4 }}>拆單：{campaign?.name}</h2>
 
+      {(() => {
+        // 2.3節防呆檢查：全體拆單結果如果低於顧客結帳當下已看到的保底數量，照理不該發生，
+        // 屬於設定異常，這裡主動跳出警示，不用等店家自己點進「贈品缺口總覽」分頁才發現
+        const shortages = batchGiftGap.filter((g: any) => g.diff < 0);
+        if (shortages.length === 0) return null;
+        return (
+          <div style={{ background: "#FCEBEB", border: "1px solid #E5A5A5", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontWeight: 600, color: "#791F1F", marginBottom: 6 }}>
+              ⚠ 目前配置數量低於已經向顧客承諾的保底數量
+            </div>
+            <div style={{ fontSize: 13, color: "#791F1F", marginBottom: 8 }}>
+              照理不該發生，請檢查廠商規則設定（門檻、平台上限）或補上額外採購：
+            </div>
+            {shortages.map((g: any) => (
+              <div key={g.giftStyleId} style={{ fontSize: 13, color: "#791F1F" }}>
+                ・{g.styleName}（門檻{g.thresholdAmount}）：保底需要 {g.promised}，目前只有 {g.allocated + g.extra}，<strong>缺 {-g.diff}</strong>
+              </div>
+            ))}
+            <button className="btn small secondary" style={{ marginTop: 8 }} onClick={() => setTab("gap")}>
+              查看贈品缺口總覽
+            </button>
+          </div>
+        );
+      })()}
+
       {!activeBatchForArrival ? (
         <div className="auth-card">
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -497,9 +550,40 @@ export default function PurchaseBatchesPage() {
                           {it.qty > 1 && (
                             <button className="btn small secondary" onClick={() => setSplitOpenForItem(splitOpenForItem === it.id ? null : it.id)}>拆分搬移</button>
                           )}
+                          <button className="btn small secondary" onClick={() => customerEditForItem === it.id ? setCustomerEditForItem(null) : openCustomerEdit(it.id, it.productName, it.style)}>改顧客</button>
                           <button className="btn small secondary" onClick={() => removeBatchItem(b.id, it.id)}>移出</button>
                         </span>
                       </div>
+                      {customerEditForItem === it.id && (
+                        <div style={{ padding: "6px 6px 10px 20px" }}>
+                          <input
+                            type="text"
+                            placeholder="搜尋顧客帳號…"
+                            value={customerSearch}
+                            onChange={(e) => setCustomerSearch(e.target.value)}
+                            style={{ padding: 6, width: 200, marginBottom: 6 }}
+                          />
+                          <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
+                            {customerCandidates
+                              .filter((c: any) => !customerSearch.trim() || c.username.toLowerCase().includes(customerSearch.trim().toLowerCase()))
+                              .filter((c: any) => c.orderItemId !== it.orderItemId)
+                              .map((c: any) => (
+                                <div key={c.orderItemId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 10px", fontSize: 12, borderBottom: "1px dashed var(--line)" }}>
+                                  <span>{c.username}（訂購{c.qty}件，還可接收{c.remainingQty}件）</span>
+                                  <button className="btn small secondary" onClick={() => reassignCustomer(b.id, it.id, c.orderItemId)}>改成這位</button>
+                                </div>
+                              ))}
+                            {customerCandidates.filter((c: any) => c.orderItemId !== it.orderItemId).length === 0 && (
+                              <div style={{ padding: 8, fontSize: 12, color: "#8A8779" }}>沒有其他顧客訂購這個商品款式</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {it.reassignmentNote && (
+                        <div style={{ fontSize: 11, color: "#8A6D3B", background: "#FAEEDA", padding: "3px 8px", borderRadius: 6, margin: "2px 0 4px 20px" }}>
+                          {it.reassignmentNote}
+                        </div>
+                      )}
                       {splitOpenForItem === it.id && (
                         <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 6px 8px 20px", flexWrap: "wrap" }}>
                           <span style={{ fontSize: 12, color: "#8A8779" }}>搬移數量</span>

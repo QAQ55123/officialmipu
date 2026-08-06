@@ -81,6 +81,9 @@ export default function Home() {
   const [campaignCodAvailable, setCampaignCodAvailable] = useState(true);
   const [campaignCodCap, setCampaignCodCap] = useState<number | null>(null);
   const [campaignCodUsed, setCampaignCodUsed] = useState(0);
+  // 滿贈系列商品有自己獨立的取付額度，跟一般商品分開累計、互不影響
+  const [giftCodAvailable, setGiftCodAvailable] = useState(true);
+  const [giftCodCap, setGiftCodCap] = useState<number | null>(null);
   const [currentCampaign, setCurrentCampaign] = useState<any | null>(null); // 完整檔期資料，含8種匯率、滿贈基礎設定
   async function refreshCampaignStatus() {
     try {
@@ -92,6 +95,10 @@ export default function Home() {
       setCampaignCodCap(cap);
       setCampaignCodUsed(used);
       setCampaignCodAvailable(cap == null || used < cap);
+      const giftCap = d.campaign?.gift_cod_campaign_cap ?? null;
+      const giftUsed = Number(d.campaign?.gift_cod_campaign_used) || 0;
+      setGiftCodCap(giftCap);
+      setGiftCodAvailable(giftCap == null || giftUsed < giftCap);
       setCurrentCampaign(d.campaign || null);
     } catch {}
   }
@@ -2262,7 +2269,13 @@ export default function Home() {
                       {Object.entries(grouped).map(([planId, entries]) => {
                         const live = cartPlanStatus[planId];
                         const planName = live?.name || entries[0].planName;
-                        const codOffered = campaignCodAvailable;
+                        // 滿贈系列商品有自己獨立的取付額度，跟一般商品分開算：
+                        // 這組全部都是滿贈商品 → 只看滿贈那組上限；全是一般商品 → 只看一般上限；混合 → 兩個都要過
+                        const groupItemsAreGift = entries.map((e) => isGiftConversionItem(planId, e) || (isAltSite && hasAltSitePrice(e)));
+                        const hasGiftItems = groupItemsAreGift.some(Boolean);
+                        const hasRegularItems = groupItemsAreGift.some((x) => !x);
+                        const codOffered =
+                          (!hasRegularItems || campaignCodAvailable) && (!hasGiftItems || giftCodAvailable);
                         const codDisabled = !codOffered;
                         const rawPayment = checkoutPaymentByPlan[planId] || "匯款";
                         const payment = (rawPayment === "取付" && codDisabled) ? "匯款" : rawPayment;
@@ -2361,9 +2374,11 @@ export default function Home() {
                                   </button>
                                 ))}
                               </div>
-                              {!campaignCodAvailable && (
+                              {codDisabled && (
                                 <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
-                                  取付金額已超過本檔期設定的金額，請改用匯款
+                                  {hasGiftItems && !giftCodAvailable
+                                    ? "贈品／滿贈系列商品的取付金額已超過本檔期設定的金額，請改用匯款"
+                                    : "取付金額已超過本檔期設定的金額，請改用匯款"}
                                 </div>
                               )}
 

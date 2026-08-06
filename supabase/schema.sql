@@ -408,6 +408,39 @@ alter table vendor_purchase_batch_gifts disable row level security;
 alter table vendor_extra_purchases disable row level security;
 
 -- ============================================================
+-- 2.8節：運費與出貨批次（以「訂單品項」為單位，非整張訂單）
+-- 操作入口在顧客訂單畫面：店家勾選「已到貨」的品項 → 建立出貨批次 → 系統算出這批的運費加總
+-- 同一張顧客訂單可能因為品項分批到貨，被拆進好幾個不同的出貨批次
+-- ============================================================
+
+create table if not exists shipping_batches (
+  id                uuid primary key default gen_random_uuid(),
+  order_id          uuid not null references orders(id) on delete cascade,
+  customer_shipping_fee numeric not null default 0, -- 這批品項的商品固定運費加總（顧客要付的）
+  internal_cost     numeric, -- 店家付給物流商的實際費用，純內部成本紀錄，不會轉嫁給顧客
+  note              text,
+  created_at        timestamptz default now()
+);
+create index if not exists idx_shipping_batches_order on shipping_batches (order_id);
+
+-- 哪些訂單品項被歸進這個出貨批次（同一個品項可能只有部分數量被歸進來，因為分批到貨）
+create table if not exists shipping_batch_items (
+  id                uuid primary key default gen_random_uuid(),
+  shipping_batch_id uuid not null references shipping_batches(id) on delete cascade,
+  order_item_id     uuid references order_items(id) on delete cascade,
+  order_gift_selection_id uuid references order_gift_selections(id) on delete cascade, -- 滿贈品項比照一般商品，也能被歸進出貨批次，只是運費固定0
+  qty               int not null,
+  shipping_fee      numeric not null default 0, -- 這幾件的運費小計（滿贈品項固定0）
+  created_at        timestamptz default now(),
+  check ((order_item_id is not null and order_gift_selection_id is null) or (order_item_id is null and order_gift_selection_id is not null))
+);
+create index if not exists idx_shipping_batch_items_batch on shipping_batch_items (shipping_batch_id);
+create index if not exists idx_shipping_batch_items_order_item on shipping_batch_items (order_item_id);
+
+alter table shipping_batches disable row level security;
+alter table shipping_batch_items disable row level security;
+
+-- ============================================================
 -- 保險機制：不管上面個別關閉RLS的語句有沒有漏掉、或是被 Supabase 專案設定
 -- （Authentication → Policies → Enable RLS on new tables）自動重新打開，
 -- 這裡動態抓出 public schema 底下「現有的所有表格」統一關閉一次，
