@@ -54,8 +54,26 @@ export async function POST(req: Request) {
   const groups = splitIntoGroups(giftableItems, baseUnit, vendorCap);
   const quota = totalQuota(groups);
 
+  // 3.2節：每個款式各自的上限＝「依門檻金額算出的上限」與「平台的每款上限」兩者取較小值。
+  // 顧客結帳當下還不知道這批貨之後會下到哪個平台，所以取「所有平台中最小的那個每款上限」，
+  // 最保守，確保不管之後下到哪個平台，答應顧客的數量都一定給得出來。
+  const { data: allPlatforms } = await supabase.from("vendor_platforms").select("id").eq("campaign_id", campaignId);
+  const platformIds = (allPlatforms || []).map((p: any) => p.id);
+  const { data: styleCaps } = platformIds.length
+    ? await supabase.from("vendor_platform_style_caps").select("gift_style_id, per_style_cap").in("platform_id", platformIds)
+    : { data: [] };
+
+  const minCapByStyle = new Map<string, number>();
+  (styleCaps || []).forEach((c: any) => {
+    const current = minCapByStyle.get(c.gift_style_id);
+    minCapByStyle.set(c.gift_style_id, current == null ? c.per_style_cap : Math.min(current, c.per_style_cap));
+  });
+
   const styleLimits = (giftStyles || []).map((s: any) => {
-    const max = groups.reduce((sum, g) => sum + styleMaxForGroup(g.groupAmount, s.threshold_amount), 0);
+    const amountBasedMax = groups.reduce((sum, g) => sum + styleMaxForGroup(g.groupAmount, s.threshold_amount), 0);
+    const platformCap = minCapByStyle.get(s.id);
+    // 沒有設定每款上限的款式，只受金額換算上限限制；有設定的話取較小值
+    const max = platformCap != null ? Math.min(amountBasedMax, platformCap) : amountBasedMax;
     return { giftStyleId: s.id, styleName: s.style_name, imageUrl: s.image_url, max };
   });
 
