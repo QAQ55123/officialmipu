@@ -64,7 +64,7 @@ export default function AdminPage() {
   });
   const emptyCampaignForm = {
     id: "", name: "", opensAt: "", closesAt: "",
-    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "",
+    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "",
     rates: emptyCampaignRates(),
   };
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -480,6 +480,11 @@ export default function AdminPage() {
   }
 
   function editCampaign(c: any) {
+    // 結帳頁滿贈上限要依哪個平台計算，需要這個檔期的平台清單
+    fetch(`/api/admin/campaigns/${c.id}/vendor-platforms`)
+      .then((r) => r.json())
+      .then((d) => setVendorPlatforms(d.platforms || []))
+      .catch(() => {});
     const rates: any = {};
     for (const combo of TXN_COMBOS) {
       rates[`${combo.key}_enabled`] = c[`${combo.key}_enabled`] ?? true;
@@ -490,6 +495,7 @@ export default function AdminPage() {
       opensAt: toTaipeiDatetimeLocal(c.opens_at), closesAt: toTaipeiDatetimeLocal(c.closes_at),
       codCampaignCap: c.cod_campaign_cap != null ? String(c.cod_campaign_cap) : "",
       giftCodCampaignCap: c.gift_cod_campaign_cap != null ? String(c.gift_cod_campaign_cap) : "",
+      checkoutGiftPlatformId: c.checkout_gift_platform_id || "",
       giftBaseUnit: String(c.gift_base_unit ?? 100),
       vendorOrderGiftCap: c.vendor_order_gift_cap != null ? String(c.vendor_order_gift_cap) : "",
       rates,
@@ -517,6 +523,7 @@ export default function AdminPage() {
           closes_at: fromTaipeiDatetimeLocal(campaignForm.closesAt),
           cod_campaign_cap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
           gift_cod_campaign_cap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
+          checkout_gift_platform_id: campaignForm.checkoutGiftPlatformId || null,
           gift_base_unit: Number(campaignForm.giftBaseUnit) || 100,
           vendor_order_gift_cap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           ...rateFields,
@@ -528,6 +535,7 @@ export default function AdminPage() {
           closesAt: fromTaipeiDatetimeLocal(campaignForm.closesAt),
           codCampaignCap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
           giftCodCampaignCap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
+          checkoutGiftPlatformId: campaignForm.checkoutGiftPlatformId || null,
           giftBaseUnit: Number(campaignForm.giftBaseUnit) || 100,
           vendorOrderGiftCap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           rates: rateFields,
@@ -2471,6 +2479,15 @@ export default function AdminPage() {
               <div className="id-row"><span className="id-label">開放結束</span><input type="datetime-local" value={campaignForm.closesAt} onChange={(e) => setCampaignForm((f) => ({ ...f, closesAt: e.target.value }))} /></div>
               <div className="id-row"><span className="id-label">取付檔期總上限</span><input type="number" value={campaignForm.codCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, codCampaignCap: e.target.value }))} placeholder="留空＝不限" /></div>
               <div className="id-row"><span className="id-label">滿贈系列取付額度上限</span><input type="number" value={campaignForm.giftCodCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, giftCodCampaignCap: e.target.value }))} placeholder="留空＝不限，跟上面的一般商品取付上限分開累計" /></div>
+              <div className="id-row">
+                <span className="id-label">結帳頁滿贈上限依哪個平台</span>
+                <select value={campaignForm.checkoutGiftPlatformId} onChange={(e) => setCampaignForm((f) => ({ ...f, checkoutGiftPlatformId: e.target.value }))} style={{ flex: 1, padding: 8 }}>
+                  <option value="">（未指定，顧客端不套用每款上限）</option>
+                  {vendorPlatforms.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
               <div className="id-row"><span className="id-label">滿贈基礎單位</span><input type="number" value={campaignForm.giftBaseUnit} onChange={(e) => setCampaignForm((f) => ({ ...f, giftBaseUnit: e.target.value }))} /></div>
               <div className="id-row"><span className="id-label">廠商採購單贈品上限</span><input type="number" value={campaignForm.vendorOrderGiftCap} onChange={(e) => setCampaignForm((f) => ({ ...f, vendorOrderGiftCap: e.target.value }))} /></div>
 

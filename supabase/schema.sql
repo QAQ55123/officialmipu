@@ -281,6 +281,8 @@ alter table campaigns disable row level security;
 alter table campaigns add column if not exists fulfillment_status text; -- 已購買/運輸中/已到貨/已開賣場，店家手動選的顯示標記，顯示在該檔期底下每張訂單上，跟通知信無關
 -- 滿贈系列商品要有自己獨立的取付額度上限，跟一般商品的取付上限(cod_campaign_cap)分開累計，互不影響
 alter table campaigns add column if not exists gift_cod_campaign_cap numeric;
+-- 2.7節：顧客結帳當下還不知道這批貨之後會下到哪個平台，由店家指定「結帳頁的滿贈上限要依哪個平台的每款上限計算」
+alter table campaigns add column if not exists checkout_gift_platform_id uuid;
 alter table campaigns add column if not exists gift_cod_campaign_used numeric not null default 0;
 
 alter table gift_styles disable row level security;

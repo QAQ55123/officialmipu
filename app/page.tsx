@@ -904,7 +904,7 @@ export default function Home() {
     setSelectedCartKeys(new Set());
   }
 
-  async function fetchGiftQuotaForPlan(planId: string, items: GlobalCartEntry[]) {
+  async function fetchGiftQuotaForPlan(planId: string, items: GlobalCartEntry[], currentPicks?: Record<string, number>) {
     if (!currentCampaign) return;
     const liveProducts = cartPlanStatus[planId]?.products || [];
     const resolvedItems = items
@@ -914,11 +914,13 @@ export default function Home() {
       })
       .filter((x): x is { productId: string; qty: number } => !!x);
     if (resolvedItems.length === 0) return;
+    // 2.7節：每按一次加減都要重算——把目前已選的滿贈一起送過去，後端才知道還能給多少
+    const picks = currentPicks ?? (giftPicksByPlan[planId] || {});
     setGiftQuotaLoadingByPlan((prev) => ({ ...prev, [planId]: true }));
     try {
       const r = await fetch("/api/cart/quote", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ campaignId: currentCampaign.id, items: resolvedItems }),
+        body: JSON.stringify({ campaignId: currentCampaign.id, items: resolvedItems, picks }),
       });
       const d = await r.json();
       if (r.ok) setGiftQuotaByPlan((prev) => ({ ...prev, [planId]: { quota: d.quota, styleLimits: d.styleLimits } }));
@@ -2307,7 +2309,10 @@ export default function Home() {
                             const cur = prev[planId] || {};
                             const otherTotal = Object.entries(cur).filter(([k]) => k !== styleId).reduce((s, [, v]) => s + v, 0);
                             const next = Math.max(0, Math.min(max, (cur[styleId] || 0) + delta, (quota?.quota ?? 0) - otherTotal));
-                            return { ...prev, [planId]: { ...cur, [styleId]: next } };
+                            const nextPicks = { ...cur, [styleId]: next };
+                            // 2.7節：選了之後其他款式能拿多少會跟著變，立刻用新的已選內容重新試算
+                            fetchGiftQuotaForPlan(planId, entries, nextPicks);
+                            return { ...prev, [planId]: nextPicks };
                           });
                         }
 
