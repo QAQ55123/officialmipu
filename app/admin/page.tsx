@@ -8,11 +8,11 @@ type SeriesAdmin = {
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
 };
-type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null };
+type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
-const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null, coverImageUrl: "" };
+const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null, coverImageUrl: "", altSiteBankPrice: "", altSiteCodPrice: "" };
 
 export default function AdminPage() {
   const [username, setUsername] = useState("");
@@ -1210,7 +1210,7 @@ export default function AdminPage() {
   }
 
   function editProduct(p: ProductAdmin) {
-    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0), linkedGiftStyleId: p.linkedGiftStyleId ?? null, coverImageUrl: p.coverImageUrl || "" });
+    setProductForm({ id: p.id, name: p.name, style: p.style || "", price: String(p.price), imageUrl: p.imageUrl || "", hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, shippingFee: String(p.shippingFee ?? 0), linkedGiftStyleId: p.linkedGiftStyleId ?? null, coverImageUrl: p.coverImageUrl || "", altSiteBankPrice: p.altSiteBankPrice != null ? String(p.altSiteBankPrice) : "", altSiteCodPrice: p.altSiteCodPrice != null ? String(p.altSiteCodPrice) : "" });
   }
 
   function addProductRow() {
@@ -1270,6 +1270,8 @@ export default function AdminPage() {
           codAllowed: productForm.codAllowed,
           shippingFee: productForm.shippingFee,
           coverImageUrl: productForm.coverImageUrl || null,
+          altSiteBankPrice: productForm.altSiteBankPrice,
+          altSiteCodPrice: productForm.altSiteCodPrice,
         });
         setProductForm(emptyProductForm);
         setProductMsg("已儲存");
@@ -1287,6 +1289,8 @@ export default function AdminPage() {
             codAllowed: row.codAllowed,
             shippingFee: row.shippingFee || "0",
             coverImageUrl: productForm.coverImageUrl || null,
+            altSiteBankPrice: productForm.altSiteBankPrice,
+            altSiteCodPrice: productForm.altSiteCodPrice,
           });
         }
         // 商品名稱保留，方便接著建下一批款式；款式列表清空回一列
@@ -2971,6 +2975,17 @@ export default function AdminPage() {
               <div className="id-row">
                 <span className="id-label">價格（{productForm.linkedGiftStyleId ? "NT$" : "￥"}）</span>
                 <input type="number" value={productForm.price} onChange={(e) => setProductForm((f) => ({ ...f, price: e.target.value }))} />
+              </div>
+              <div style={{ border: "1px solid #6B4E8E", background: "#ECE6F2", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontSize: 12, color: "#4A3560" }}>獨立網頁專用價格（只有滿贈分類的商品才需要填，一般商品留空即可）</div>
+                <div className="id-row">
+                  <span className="id-label">匯款價（NT$）</span>
+                  <input type="number" value={productForm.altSiteBankPrice} onChange={(e) => setProductForm((f) => ({ ...f, altSiteBankPrice: e.target.value }))} placeholder="留空＝不適用" />
+                </div>
+                <div className="id-row">
+                  <span className="id-label">取付價（NT$）</span>
+                  <input type="number" value={productForm.altSiteCodPrice} onChange={(e) => setProductForm((f) => ({ ...f, altSiteCodPrice: e.target.value }))} placeholder="留空＝不適用" />
+                </div>
               </div>
               <div className="id-row">
                 <span className="id-label">運費金額（NT$）</span>

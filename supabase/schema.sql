@@ -269,6 +269,11 @@ alter table products add column if not exists linked_gift_style_id uuid referenc
 -- 封面圖用在商品格線卡片上，款式照片則用在點進商品後選款式時顯示。
 -- 同一個「商品名稱」底下的所有款式列，共用同一張封面圖（因為封面圖是商品層級，不是款式層級）。
 alter table products add column if not exists cover_image_url text;
+-- 獨立網頁（/remit 之類的專用路徑）專用的兩種台幣價格：滿贈分類的商品在獨立網頁上，
+-- 依顧客選擇匯款或取付顯示不同金額，跟主站顯示的 price 是三個各自獨立的價格。
+-- 一般商品這兩欄留空，在獨立網頁上跟主站顯示完全一樣。
+alter table products add column if not exists alt_site_bank_price numeric;
+alter table products add column if not exists alt_site_cod_price numeric;
 
 alter table campaigns disable row level security;
 -- fulfillment_status 是後來才加的欄位，如果 campaigns 表在更早版本就已經建立過，

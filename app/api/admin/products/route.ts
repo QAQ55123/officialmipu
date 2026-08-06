@@ -37,6 +37,8 @@ export async function GET(req: Request) {
       linkedGiftStyleId: p.linked_gift_style_id || null,
       hasDiscountFlag: p.has_discount_flag,
       coverImageUrl: p.cover_image_url || null,
+      altSiteBankPrice: p.alt_site_bank_price != null ? Number(p.alt_site_bank_price) : null,
+      altSiteCodPrice: p.alt_site_cod_price != null ? Number(p.alt_site_cod_price) : null,
     })),
   });
 }
@@ -73,6 +75,8 @@ export async function POST(req: Request) {
       shipping_fee: Number(body.shippingFee) || 0,
       has_discount_flag: !!body.hasDiscountFlag,
       cover_image_url: body.coverImageUrl || null,
+      alt_site_bank_price: body.altSiteBankPrice !== undefined && body.altSiteBankPrice !== "" && body.altSiteBankPrice !== null ? Number(body.altSiteBankPrice) : null,
+      alt_site_cod_price: body.altSiteCodPrice !== undefined && body.altSiteCodPrice !== "" && body.altSiteCodPrice !== null ? Number(body.altSiteCodPrice) : null,
       sort_order: nextSortOrder,
     })
     .select()
@@ -111,6 +115,8 @@ export async function PUT(req: Request) {
       shipping_fee: Number(body.shippingFee) || 0,
       has_discount_flag: !!body.hasDiscountFlag,
       cover_image_url: body.coverImageUrl || null,
+      alt_site_bank_price: body.altSiteBankPrice !== undefined && body.altSiteBankPrice !== "" && body.altSiteBankPrice !== null ? Number(body.altSiteBankPrice) : null,
+      alt_site_cod_price: body.altSiteCodPrice !== undefined && body.altSiteCodPrice !== "" && body.altSiteCodPrice !== null ? Number(body.altSiteCodPrice) : null,
     })
     .eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -9,7 +9,7 @@ type Plan = {
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
-type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null };
+type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null };
 type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
@@ -19,6 +19,8 @@ type GlobalCartEntry = {
   qty: number;
   price: number;
   imageUrl?: string;
+  altSiteBankPrice?: number | null;
+  altSiteCodPrice?: number | null;
 };
 
 const FULFILLMENT_STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -32,6 +34,26 @@ type PendingAction = null | "order" | "history" | "favorites" | "checkout";
 
 const fmt = (n: number) => new Intl.NumberFormat("zh-TW").format(Math.round(n));
 // 這件商品單獨算，會不會自己就已經達到廠商滿贈上限（2.7節拆單邏輯的簡化版，只看單一商品）
+/**
+ * 獨立網頁（/gift）專用價格判斷：
+ * 有設定 altSiteBankPrice / altSiteCodPrice 的商品（滿贈分類商品），在獨立網頁上要用這兩個台幣價格，
+ * 依顧客選的付款方式決定用哪一個；沒設定的一般商品，跟主站完全一樣（原幣＋匯率換算）。
+ */
+function hasAltSitePrice(p: { altSiteBankPrice?: number | null; altSiteCodPrice?: number | null } | undefined): boolean {
+  if (!p) return false;
+  return p.altSiteBankPrice != null || p.altSiteCodPrice != null;
+}
+
+/** 依付款方式取出獨立網頁該用的價格；payment 傳 null 代表還沒選（購物車階段） */
+function altSitePriceFor(
+  p: { altSiteBankPrice?: number | null; altSiteCodPrice?: number | null } | undefined,
+  payment: "匯款" | "取付" | null
+): number | null {
+  if (!p) return null;
+  if (payment === "取付") return p.altSiteCodPrice ?? p.altSiteBankPrice ?? null;
+  return p.altSiteBankPrice ?? p.altSiteCodPrice ?? null;
+}
+
 function singleItemGiftCap(unitPrice: number, campaign: any): number | null {
   if (!campaign?.gift_base_unit || !campaign?.vendor_order_gift_cap) return null;
   const baseUnit = campaign.gift_base_unit;
@@ -42,6 +64,13 @@ function singleItemGiftCap(unitPrice: number, campaign: any): number | null {
 
 export default function Home() {
   const [view, setView] = useState<"identity" | "plans" | "order" | "history" | "account" | "favorites" | "cart" | "checkout">("plans");
+
+  // 獨立網頁（/gift）：跟主站共用同一套畫面，唯一差別是滿贈分類的商品改用「獨立網頁專用價格」
+  // （匯款價／取付價兩種台幣金額），其餘一般商品完全一樣。比照 mibu-app 原本 /remit 的做法。
+  const [isAltSite, setIsAltSite] = useState(false);
+  useEffect(() => {
+    setIsAltSite(window.location.pathname.startsWith("/gift"));
+  }, []);
   const [identity, setIdentity] = useState<Identity>(null);
   const identityRef = useRef<Identity>(null);
   useEffect(() => { identityRef.current = identity; }, [identity]);
@@ -192,7 +221,7 @@ export default function Home() {
     } catch {}
   }, [globalCart]);
 
-  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; price: number; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null }[] }>>({});
+  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; price: number; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null; altSiteBankPrice: number | null; altSiteCodPrice: number | null }[] }>>({});
   const [cartPaymentByPlan, setCartPaymentByPlan] = useState<Record<string, string>>({});
   const [checkoutingPlanId, setCheckoutingPlanId] = useState<string | null>(null);
   const [selectedCartKeys, setSelectedCartKeys] = useState<Set<string>>(new Set());
@@ -746,7 +775,14 @@ export default function Home() {
         const p = products.find((pp) => pp.name === it.name && pp.style === it.style);
         const idx = next.findIndex((e) => e.planId === activePlan.id && e.productName === it.name && e.style === it.style);
         if (idx >= 0) {
-          next[idx] = { ...next[idx], qty: next[idx].qty + it.qty, price: p?.price ?? next[idx].price, imageUrl: p?.imageUrl ?? next[idx].imageUrl };
+          next[idx] = {
+            ...next[idx],
+            qty: next[idx].qty + it.qty,
+            price: p?.price ?? next[idx].price,
+            imageUrl: p?.imageUrl ?? next[idx].imageUrl,
+            altSiteBankPrice: p?.altSiteBankPrice ?? next[idx].altSiteBankPrice ?? null,
+            altSiteCodPrice: p?.altSiteCodPrice ?? next[idx].altSiteCodPrice ?? null,
+          };
         } else {
           next.push({
             planId: activePlan.id,
@@ -756,6 +792,8 @@ export default function Home() {
             qty: it.qty,
             price: p?.price ?? 0,
             imageUrl: p?.imageUrl,
+            altSiteBankPrice: p?.altSiteBankPrice ?? null,
+            altSiteCodPrice: p?.altSiteCodPrice ?? null,
           });
         }
       }
@@ -787,7 +825,7 @@ export default function Home() {
         if (plan) {
           next[id] = {
             name: plan.name, found: true,
-            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", price: Number(p.price), hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, linkedGiftStyleId: p.linkedGiftStyleId || null })),
+            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", price: Number(p.price), hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, linkedGiftStyleId: p.linkedGiftStyleId || null, altSiteBankPrice: p.altSiteBankPrice ?? null, altSiteCodPrice: p.altSiteCodPrice ?? null })),
           };
         } else {
           next[id] = { name: "", found: false, products: [] };
@@ -952,6 +990,7 @@ export default function Home() {
             username: identity.username,
             payment,
             campaignId: currentCampaign?.id || null,
+            isAltSite,
             wantsGift,
             giftSelections,
           }),
@@ -1727,7 +1766,20 @@ export default function Home() {
                       <div className="product-info-v3">
 
                         <div className="product-price-row">
-                          <span className="product-price-v3"><span style={{ fontSize: "0.7em" }}>{current.linkedGiftStyleId ? "NT$" : "￥"}</span>{fmt(current.price)}</span>
+                          {isAltSite && hasAltSitePrice(current) ? (
+                            <span className="product-price-v3" style={{ display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
+                              <span>
+                                <span style={{ fontSize: "0.5em", color: "var(--muted)", marginRight: 4 }}>匯款</span>
+                                <span style={{ fontSize: "0.7em" }}>NT$</span>{fmt(current.altSiteBankPrice ?? 0)}
+                              </span>
+                              <span style={{ color: "var(--text)" }}>
+                                <span style={{ fontSize: "0.5em", color: "var(--muted)", marginRight: 4 }}>取付</span>
+                                <span style={{ fontSize: "0.7em" }}>NT$</span>{fmt(current.altSiteCodPrice ?? 0)}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="product-price-v3"><span style={{ fontSize: "0.7em" }}>{current.linkedGiftStyleId ? "NT$" : "￥"}</span>{fmt(current.price)}</span>
+                          )}
                           <button
                             className={`favorite-icon-btn ${favoritedPlanIds.has(activePlan.id) ? "active" : ""}`}
                             onClick={() => toggleFavorite(activePlan.id)}
@@ -2022,6 +2074,10 @@ export default function Home() {
                   const isInactive = live ? !live.found : false;
                   const groupTotal = entries.reduce((s, e) => s + e.qty * e.price, 0);
                   const groupIsGiftConv = entries.length > 0 && entries.every((e) => !!cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.linkedGiftStyleId);
+                  // 獨立網頁：這組裡有任何商品設定了專用價格，小計就要分匯款/取付兩種顯示
+                  const groupHasAltPrice = isAltSite && entries.some((e) => hasAltSitePrice(e));
+                  const groupAltBankTotal = entries.reduce((s, e) => s + e.qty * (hasAltSitePrice(e) ? (altSitePriceFor(e, "匯款") ?? 0) : e.price), 0);
+                  const groupAltCodTotal = entries.reduce((s, e) => s + e.qty * (hasAltSitePrice(e) ? (altSitePriceFor(e, "取付") ?? 0) : e.price), 0);
 
                   return (
                     <div key={planId} className={`cart-group ${isInactive ? "cart-group-inactive" : ""}`}>
@@ -2043,6 +2099,7 @@ export default function Home() {
                         const isLast = idx === entries.length - 1;
                         const isGiftConv = !!cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.linkedGiftStyleId;
                         const currencySymbol = isGiftConv ? "NT$" : "￥";
+                        const showAltPrice = isAltSite && hasAltSitePrice(e);
                         return (
                           <div key={key} style={{ borderBottom: isLast ? "none" : "1px dashed var(--line)" }}>
                           <div className="cart-item-row" style={{ borderBottom: "none" }}>
@@ -2064,7 +2121,13 @@ export default function Home() {
                                 {cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag && (
                                   <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999 }}>滿減商品</span>
                                 )}
-                                <span className="cart-item-unit-price">{currencySymbol} {fmt(e.price)} / 件</span>
+                                {showAltPrice ? (
+                                  <span className="cart-item-unit-price">
+                                    匯款 NT$ {fmt(e.altSiteBankPrice ?? 0)} ／ 取付 NT$ {fmt(e.altSiteCodPrice ?? 0)} 每件
+                                  </span>
+                                ) : (
+                                  <span className="cart-item-unit-price">{currencySymbol} {fmt(e.price)} / 件</span>
+                                )}
                               </div>
                             </div>
                             <div className="cart-item-right">
@@ -2083,7 +2146,7 @@ export default function Home() {
                               ) : (
                                 <span style={{ fontSize: 13, color: "var(--muted)" }}>x{e.qty}</span>
                               )}
-                              <span className="cart-item-price">{currencySymbol} {fmt(e.qty * e.price)}</span>
+                              {!showAltPrice && <span className="cart-item-price">{currencySymbol} {fmt(e.qty * e.price)}</span>}
                               <span className="cart-item-remove" onClick={() => removeCartItem(planId, e.productName, e.style)} title="移除">×</span>
                             </div>
                           </div>
@@ -2097,7 +2160,14 @@ export default function Home() {
                       })}
 
                       <div className="cart-group-footer">
-                        <span style={{ fontWeight: 600 }}>小計 {groupIsGiftConv ? "NT$" : "￥"} {fmt(groupTotal)}</span>
+                        {groupHasAltPrice ? (
+                          <div style={{ fontSize: 13 }}>
+                            <div><span style={{ color: "var(--muted)" }}>小計（匯款）</span> <span style={{ fontWeight: 700 }}>NT$ {fmt(groupAltBankTotal)}</span></div>
+                            <div style={{ marginTop: 2 }}><span style={{ color: "var(--muted)" }}>小計（取付）</span> <span style={{ fontWeight: 700 }}>NT$ {fmt(groupAltCodTotal)}</span></div>
+                          </div>
+                        ) : (
+                          <span style={{ fontWeight: 600 }}>小計 {groupIsGiftConv ? "NT$" : "￥"} {fmt(groupTotal)}</span>
+                        )}
                         <button className="btn small secondary" onClick={() => removeCartGroup(planId)}>清除這組</button>
                       </div>
                     </div>
@@ -2154,6 +2224,10 @@ export default function Home() {
                     return { rate: enabled ? rate : null, enabled, hasDiscountFlag };
                   }
                   function itemAmount(planId: string, e: GlobalCartEntry, payment: string, wantsGift: boolean): number {
+                    // 獨立網頁：有設定專用價格的商品，依付款方式直接用對應的台幣價格，不套匯率
+                    if (isAltSite && hasAltSitePrice(e)) {
+                      return e.qty * (altSitePriceFor(e, payment === "取付" ? "取付" : "匯款") ?? 0);
+                    }
                     // 「贈品/滿贈」系列賣出的商品，價格直接就是台幣，不套匯率
                     if (isGiftConversionItem(planId, e)) return e.qty * e.price;
                     const { rate } = itemRateInfo(planId, e, payment, wantsGift);
@@ -2204,6 +2278,10 @@ export default function Home() {
                         const rateGroups = new Map<string, { rate: number; original: number; twd: number; hasDiscountFlag: boolean }>();
                         let giftConversionTotal = 0;
                         entries.forEach((e) => {
+                          if (isAltSite && hasAltSitePrice(e)) {
+                            giftConversionTotal += itemAmount(planId, e, payment, wantsGift);
+                            return;
+                          }
                           if (isGiftConversionItem(planId, e)) {
                             giftConversionTotal += itemAmount(planId, e, payment, wantsGift);
                             return;
@@ -2236,7 +2314,9 @@ export default function Home() {
                               {entries.map((e) => {
                                 const singleCap = singleItemGiftCapLocal(e);
                                 const isGiftConv = isGiftConversionItem(planId, e);
-                                const currencySymbol = isGiftConv ? "NT$" : "￥";
+                                const useAltPrice = isAltSite && hasAltSitePrice(e);
+                                const currencySymbol = (isGiftConv || useAltPrice) ? "NT$" : "￥";
+                                const displayUnitPrice = useAltPrice ? (altSitePriceFor(e, payment === "取付" ? "取付" : "匯款") ?? 0) : e.price;
                                 return (
                                   <div key={`${e.productName}||${e.style}`} style={{ padding: "10px 0", borderBottom: "1px dashed var(--line)" }}>
                                     <div className="cart-item-row" style={{ padding: 0, border: "none" }}>
@@ -2247,10 +2327,10 @@ export default function Home() {
                                           {(cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
                                             <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>
                                           )}
-                                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{currencySymbol}{fmt(e.price)} ／件</div>
+                                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{currencySymbol}{fmt(displayUnitPrice)} ／件</div>
                                         </div>
                                       </div>
-                                      <span className="cart-item-price">{currencySymbol}{fmt(e.qty * e.price)}</span>
+                                      <span className="cart-item-price">{currencySymbol}{fmt(e.qty * displayUnitPrice)}</span>
                                     </div>
                                     {singleCap != null && (
                                       <div style={{ fontSize: 12, color: "#993C1D", marginTop: 4 }}>

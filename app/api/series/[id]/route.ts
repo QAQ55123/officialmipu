@@ -19,7 +19,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const { data: products, error: prodErr } = await supabase
     .from("products")
-    .select("id, name, style, price, image_url, has_discount_flag, cod_allowed, linked_gift_style_id, cover_image_url")
+    .select("id, name, style, price, image_url, has_discount_flag, cod_allowed, linked_gift_style_id, cover_image_url, alt_site_bank_price, alt_site_cod_price")
     .eq("series_id", params.id)
     .order("sort_order", { ascending: true });
   if (prodErr) return NextResponse.json({ error: prodErr.message }, { status: 500 });
@@ -45,6 +45,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         codAllowed: p.cod_allowed !== false,
         linkedGiftStyleId: p.linked_gift_style_id || null,
         coverImageUrl: p.cover_image_url || null,
+        altSiteBankPrice: p.alt_site_bank_price != null ? Number(p.alt_site_bank_price) : null,
+        altSiteCodPrice: p.alt_site_cod_price != null ? Number(p.alt_site_cod_price) : null,
       })),
     },
     { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } }

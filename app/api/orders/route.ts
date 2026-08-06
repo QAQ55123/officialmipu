@@ -11,7 +11,7 @@ export const revalidate = 0;
 /** 新增訂單 */
 export async function POST(req: Request) {
   const body = await req.json();
-  const { seriesId, items, username, payment, wantsGift, giftSelections } = body; // items: [{ name, style, qty }]
+  const { seriesId, items, username, payment, wantsGift, giftSelections, isAltSite } = body; // items: [{ name, style, qty }]
 
   const supabase = getSupabaseAdmin();
 
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
 
   // 價目表對照（避免前端竄改價格），順便記錄圖片快照跟2.6/2.4節需要的滿減標記／取付開關
   const { data: products } = await supabase.from("products").select("*").eq("series_id", seriesId);
-  const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null }> = {};
+  const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null; altSiteBankPrice: number | null; altSiteCodPrice: number | null }> = {};
   (products || []).forEach((p) => {
     productMap[`${p.name}||${p.style || ""}`] = {
       price: Number(p.price),
@@ -60,6 +60,8 @@ export async function POST(req: Request) {
       hasDiscountFlag: !!p.has_discount_flag,
       codAllowed: p.cod_allowed !== false,
       linkedGiftStyleId: p.linked_gift_style_id || null,
+      altSiteBankPrice: p.alt_site_bank_price != null ? Number(p.alt_site_bank_price) : null,
+      altSiteCodPrice: p.alt_site_cod_price != null ? Number(p.alt_site_cod_price) : null,
     };
   });
 
@@ -88,6 +90,18 @@ export async function POST(req: Request) {
     const style = it.style || "";
     const p = productMap[`${it.name}||${style}`];
     if (!p) continue;
+
+    // 獨立網頁（/gift）：有設定專用價格的商品，依付款方式直接用對應的台幣價格，不套匯率
+    if (isAltSite && (p.altSiteBankPrice != null || p.altSiteCodPrice != null)) {
+      const unit = payment === "取付"
+        ? (p.altSiteCodPrice ?? p.altSiteBankPrice ?? 0)
+        : (p.altSiteBankPrice ?? p.altSiteCodPrice ?? 0);
+      const subtotal = qty * unit;
+      orderTotal += subtotal;
+      giftConvTotal += subtotal;
+      rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: null, fxRate: null, hasDiscountFlagSnapshot: p.hasDiscountFlag });
+      continue;
+    }
 
     // 「贈品/滿贈」系列賣出的商品，價格直接就是台幣，不套8種匯率換算（那些是店家已經買好的實體庫存，不是跟廠商用人民幣採購的商品）
     if (p.linkedGiftStyleId) {
