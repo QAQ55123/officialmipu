@@ -200,7 +200,9 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
   const supabase = getSupabaseAdmin();
   const { resolve } = await buildIdentityIndex();
 
-  type Group = { groupKey: string; nickname: string; fbUrl: string; planName: string; campaignName: string; payment: string; paidAmount: number; orderDate: Date; originalOrderNo: string; items: { name: string; style: string; qty: number; unitPrice: number }[] };
+  // 一次結帳＝一張訂單：同一個分組代號就是一張訂單，即使裡面有不同系列的商品，
+  // 所以系列改記在品項層級（planName 只保留第一筆當作訂單層級的顯示用途）
+  type Group = { groupKey: string; nickname: string; fbUrl: string; planName: string; campaignName: string; payment: string; paidAmount: number; orderDate: Date; originalOrderNo: string; items: { name: string; style: string; qty: number; unitPrice: number; planName: string }[] };
   const groups = new Map<string, Group>();
   const rowErrors: string[] = [];
 
@@ -234,7 +236,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       return;
     }
     if (!groups.has(groupKey)) groups.set(groupKey, { groupKey, nickname, fbUrl, planName, campaignName, payment, paidAmount, orderDate, originalOrderNo, items: [] });
-    groups.get(groupKey)!.items.push({ name: productName, style, qty, unitPrice });
+    groups.get(groupKey)!.items.push({ name: productName, style, qty, unitPrice, planName });
   });
 
   const planCache = new Map<string, any>();
@@ -255,17 +257,18 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
     if (!identity) unmatched++;
 
     if (!commit) {
-      const sourceRef = `manual:${g.planName}:${g.groupKey}`;
+      const sourceRef = `manual:${g.campaignName}:${g.groupKey}`;
       const { data: existingOrder } = await supabase.from("orders").select("order_no").eq("legacy_source_ref", sourceRef).maybeSingle();
       const dupLabel = existingOrder ? `（已經匯入過，訂單編號 ${existingOrder.order_no}，正式匯入時會自動跳過）` : "";
       const campaignCheck = await findCampaignByName(g.campaignName);
       const campaignLabel = campaignCheck ? "" : `　⚠找不到檔期「${g.campaignName}」，請先在後台建立`;
-      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${g.planName}（${g.campaignName}）－ ${g.items.length}項 小計NT$${total}${dupLabel}${campaignLabel}`, matched: !!identity, ambiguous, status: "ok" });
+      const seriesNames = Array.from(new Set(g.items.map((it) => it.planName))).join("、");
+      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${seriesNames}（${g.campaignName}）－ ${g.items.length}項 小計NT$${total}${dupLabel}${campaignLabel}`, matched: !!identity, ambiguous, status: "ok" });
       continue;
     }
 
     try {
-      const sourceRef = `manual:${g.planName}:${g.groupKey}`;
+      const sourceRef = `manual:${g.campaignName}:${g.groupKey}`;
       const { data: existingOrder } = await supabase.from("orders").select("order_no").eq("legacy_source_ref", sourceRef).maybeSingle();
       if (existingOrder) {
         results.push({ groupKey: g.groupKey, label: `${g.nickname} － 已經匯入過了（訂單編號 ${existingOrder.order_no}），跳過`, matched: !!identity, ambiguous, status: "ok" });
@@ -275,17 +278,23 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       const campaign = await findCampaignByName(g.campaignName);
       if (!campaign) throw new Error(`找不到檔期「${g.campaignName}」，請先在後台「檔期管理」建立這個檔期再匯入`);
 
-      const plan = await findOrCreateArchivedPlan(planCache, g.planName, g.orderDate, true);
+      // 一次結帳＝一張訂單：同一個分組代號可能橫跨好幾個系列，每個品項各自找到/建立自己的系列
+      const planByItemIndex: any[] = [];
       for (const it of g.items) {
-        const { data: existingProduct } = await supabase.from("products").select("id").eq("series_id", plan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
-        if (!existingProduct) await supabase.from("products").insert({ series_id: plan.id, name: it.name, style: it.style, price: it.unitPrice });
+        const itemPlan = await findOrCreateArchivedPlan(planCache, it.planName, g.orderDate, true);
+        planByItemIndex.push(itemPlan);
+        const { data: existingProduct } = await supabase.from("products").select("id").eq("series_id", itemPlan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
+        if (!existingProduct) await supabase.from("products").insert({ series_id: itemPlan.id, name: it.name, style: it.style, price: it.unitPrice });
       }
+      // 只有整張訂單都屬於同一個系列時，才在 orders 層級記系列
+      const uniquePlanIds = Array.from(new Set(planByItemIndex.map((p) => p.id)));
+      const plan = uniquePlanIds.length === 1 ? planByItemIndex[0] : null;
       const claimedMember = identity?.claimedMember;
       const targetUsername = claimedMember?.username || g.nickname;
       const profileUrl = claimedMember?.profile_url || g.fbUrl || identity?.fb_profile_url || "（尚未確認）";
       const paddedOrderNo = g.originalOrderNo ? padOrderNo(g.originalOrderNo) : genOrderNo();
       const { data: order, error: orderErr } = await supabase.from("orders").insert({
-        order_no: paddedOrderNo, series_id: plan.id, series_name_snapshot: g.planName,
+        order_no: paddedOrderNo, series_id: plan ? plan.id : null, series_name_snapshot: plan ? g.items[0].planName : null,
         campaign_id: campaign.id,
         username: targetUsername, profile_url: profileUrl, payment: g.payment, paid_amount: g.paidAmount,
         created_at: g.orderDate.toISOString(), legacy_identity_id: identity ? identity.id : null, legacy_unmatched: !identity,
@@ -298,7 +307,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
             : orderErr.message
         );
       }
-      const itemRows = g.items.map((it) => ({ order_id: order.id, product_name: it.name, style: it.style, qty: it.qty, unit_price: it.unitPrice, subtotal: it.qty * it.unitPrice }));
+      const itemRows = g.items.map((it, idx) => ({ order_id: order.id, product_name: it.name, style: it.style, qty: it.qty, unit_price: it.unitPrice, subtotal: it.qty * it.unitPrice, series_id: planByItemIndex[idx]?.id || null, series_name_snapshot: it.planName }));
       const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
       if (itemsErr) throw new Error(itemsErr.message);
 
@@ -308,10 +317,10 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         campaign.cod_campaign_used = (Number(campaign.cod_campaign_used) || 0) + total; // 同一次匯入裡後續同檔期的訂單要接續累加，不能每筆都讀到舊值
       }
 
-      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${g.planName}`, matched: !!identity, ambiguous, status: "ok" });
+      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${Array.from(new Set(g.items.map((it) => it.planName))).join("、")}`, matched: !!identity, ambiguous, status: "ok" });
       ok++;
     } catch (e: any) {
-      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${g.planName}`, matched: !!identity, ambiguous, status: "error", message: e.message });
+      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${Array.from(new Set(g.items.map((it) => it.planName))).join("、")}`, matched: !!identity, ambiguous, status: "error", message: e.message });
       failed++;
     }
   }

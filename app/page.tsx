@@ -2417,22 +2417,33 @@ export default function Home() {
                                 );
                                 }
 
+                                // 滿贈系列商品（店家拿贈品出來賣的）本來就不參與滿贈計算，一律獨立成一區
+                                const giftSeriesEntries = normalEntries.filter((e) => isGiftConversionItem(e.planId, e));
+                                const splittableEntries = normalEntries.filter((e) => !isGiftConversionItem(e.planId, e));
+                                const sectionTitle = (text: string, first: boolean) => (
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--primary)", margin: first ? "0 0 6px" : "14px 0 6px", paddingBottom: 4, borderBottom: "1px dashed var(--line)" }}>
+                                    {text}
+                                  </div>
+                                );
+
                                 return (
                                   <>
-                                    {normalEntries.length > 0 && (
+                                    {splittableEntries.length > 0 && (
                                       <>
-                                        {wantsGift && overCapEntries.length > 0 && (
-                                          <div style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 2px" }}>可拆單商品</div>
-                                        )}
-                                        {normalEntries.map(renderEntry)}
+                                        {wantsGift && sectionTitle("可拆單商品", true)}
+                                        {splittableEntries.map(renderEntry)}
                                       </>
                                     )}
                                     {overCapEntries.length > 0 && (
                                       <>
-                                        <div style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 2px" }}>
-                                          單價已達滿贈上限的商品（每件各自計算滿贈）
-                                        </div>
+                                        {sectionTitle("單價已達滿贈上限的商品（每件各自計算滿贈）", splittableEntries.length === 0)}
                                         {overCapEntries.map(renderEntry)}
+                                      </>
+                                    )}
+                                    {giftSeriesEntries.length > 0 && (
+                                      <>
+                                        {sectionTitle("贈品／滿贈系列商品", splittableEntries.length === 0 && overCapEntries.length === 0)}
+                                        {giftSeriesEntries.map(renderEntry)}
                                       </>
                                     )}
                                   </>
