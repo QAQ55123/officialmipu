@@ -68,6 +68,18 @@ export async function POST(req: Request) {
     perStyleCap: capByStyle.get(s.id) ?? Number.MAX_SAFE_INTEGER,
   }));
 
+  // 結帳頁要把商品分兩區顯示：可拆單的、以及單價已經超過廠商上限的（每件各自一張採購單）
+  const baseUnitForSplit = rules.length > 0 ? Math.min(...rules.map((r) => r.thresholdAmount)) : 0;
+  const overCapProductIds: string[] = [];
+  for (const cartItem of items) {
+    const product = (products || []).find((p: any) => p.id === cartItem.productId);
+    if (!product || (product as any).linked_gift_style_id) continue;
+    const unitAmount = Number((product as any).price) || 0;
+    if (baseUnitForSplit > 0 && Math.floor(unitAmount / baseUnitForSplit) > vendorCap) {
+      overCapProductIds.push(cartItem.productId);
+    }
+  }
+
   if (itemAmounts.length === 0 || rules.length === 0) {
     return NextResponse.json({
       cartSubtotal,
@@ -81,6 +93,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     cartSubtotal,
     quota: totalPossible,
+    overCapProductIds,
     styleLimits: (giftStyles || []).map((s: any) => ({
       giftStyleId: s.id,
       styleName: s.style_name,

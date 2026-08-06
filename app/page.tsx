@@ -235,7 +235,7 @@ export default function Home() {
   const [checkoutPaymentByPlan, setCheckoutPaymentByPlan] = useState<Record<string, string>>({});
   // 2.7節：每個系列分組各自決定要不要滿贈、選了哪些款式（範圍是這個系列分組送出的這張訂單）
   const [wantsGiftByPlan, setWantsGiftByPlan] = useState<Record<string, boolean>>({});
-  const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number }[] }>>({});
+  const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number }[]; overCapProductIds?: string[] }>>({});
   const [giftQuotaLoadingByPlan, setGiftQuotaLoadingByPlan] = useState<Record<string, boolean>>({});
   const [checkoutErrorByPlan, setCheckoutErrorByPlan] = useState<Record<string, string>>({});
   const [giftPicksByPlan, setGiftPicksByPlan] = useState<Record<string, Record<string, number>>>({});
@@ -923,7 +923,7 @@ export default function Home() {
         body: JSON.stringify({ campaignId: currentCampaign.id, items: resolvedItems, picks }),
       });
       const d = await r.json();
-      if (r.ok) setGiftQuotaByPlan((prev) => ({ ...prev, [planId]: { quota: d.quota, styleLimits: d.styleLimits } }));
+      if (r.ok) setGiftQuotaByPlan((prev) => ({ ...prev, [planId]: { quota: d.quota, styleLimits: d.styleLimits, overCapProductIds: d.overCapProductIds || [] } }));
     } catch {
       // 試算失敗不擋結帳流程，只是滿贈數量顯示不出來
     } finally {
@@ -2058,6 +2058,7 @@ export default function Home() {
                   </div>
                 )}
 
+                <div className={globalCart.length > 0 ? "cart-group" : ""}>
                 {Object.entries(
                   globalCart.reduce<Record<string, GlobalCartEntry[]>>((acc, e) => {
                     acc[e.planId] = acc[e.planId] || [];
@@ -2070,7 +2071,7 @@ export default function Home() {
                     const inactiveB = cartPlanStatus[planIdB] ? !cartPlanStatus[planIdB].found : false;
                     return Number(inactiveA) - Number(inactiveB);
                   })
-                  .map(([planId, entries]) => {
+                  .map(([planId, entries], groupIdx) => {
                   const live = cartPlanStatus[planId];
                   const planName = live?.name || entries[0].planName;
                   const isInactive = live ? !live.found : false;
@@ -2082,7 +2083,11 @@ export default function Home() {
                   const groupAltCodTotal = entries.reduce((s, e) => s + e.qty * (hasAltSitePrice(e) ? (altSitePriceFor(e, "取付") ?? 0) : e.price), 0);
 
                   return (
-                    <div key={planId} className={`cart-group ${isInactive ? "cart-group-inactive" : ""}`}>
+                    <div
+                      key={planId}
+                      className={isInactive ? "cart-group-inactive" : ""}
+                      style={{ paddingTop: groupIdx > 0 ? 16 : 0, marginTop: groupIdx > 0 ? 16 : 0, borderTop: groupIdx > 0 ? "1px solid var(--line)" : "none" }}
+                    >
                       <div className="cart-group-header">
                         <div>
                           <span
@@ -2175,6 +2180,7 @@ export default function Home() {
                     </div>
                   );
                 })}
+                </div>
 
                 {globalCart.length > 0 && (
                   <div className="cart-checkout-bar">
@@ -2322,7 +2328,17 @@ export default function Home() {
                               <div className="cart-group-header">
                                 <span className="cart-group-plan-name" style={{ cursor: "default", textDecoration: "none" }}>{planName}</span>
                               </div>
-                              {entries.map((e) => {
+                              {(() => {
+                                // 勾選要滿贈時，把商品分兩區顯示：可拆單的、以及單價已超過廠商上限的
+                                // （後者每件各自一張採購單，滿贈各自計算後加總，不跟別人湊組）
+                                const overCapIds = new Set(quota?.overCapProductIds || []);
+                                const liveProducts = cartPlanStatus[planId]?.products || [];
+                                const idOf = (e: GlobalCartEntry) =>
+                                  liveProducts.find((p) => p.name === e.productName && p.style === e.style)?.id || "";
+                                const overCapEntries = wantsGift ? entries.filter((e) => overCapIds.has(idOf(e))) : [];
+                                const normalEntries = wantsGift ? entries.filter((e) => !overCapIds.has(idOf(e))) : entries;
+
+                                function renderEntry(e: GlobalCartEntry) {
                                 const singleCap = singleItemGiftCapLocal(e);
                                 const isGiftConv = isGiftConversionItem(planId, e);
                                 const useAltPrice = isAltSite && hasAltSitePrice(e);
@@ -2350,7 +2366,29 @@ export default function Home() {
                                     )}
                                   </div>
                                 );
-                              })}
+                                }
+
+                                return (
+                                  <>
+                                    {normalEntries.length > 0 && (
+                                      <>
+                                        {wantsGift && overCapEntries.length > 0 && (
+                                          <div style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 2px" }}>可拆單商品</div>
+                                        )}
+                                        {normalEntries.map(renderEntry)}
+                                      </>
+                                    )}
+                                    {overCapEntries.length > 0 && (
+                                      <>
+                                        <div style={{ fontSize: 12, color: "var(--muted)", margin: "12px 0 2px" }}>
+                                          單價已達滿贈上限的商品（每件各自計算滿贈）
+                                        </div>
+                                        {overCapEntries.map(renderEntry)}
+                                      </>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
 
                             <div style={{ flex: "1 1 260px", minWidth: 0, background: "var(--card-bg, #fff)", border: "1px solid var(--line)", borderRadius: 10, padding: 14 }}>

@@ -106,23 +106,31 @@ function candidatePartitions(amounts: number[], thresholds: number[]): number[][
   // 全部合成一組
   results.push([total]);
 
-  // ① 依各門檻金額切割：湊到門檻就切一組，剩下的併到最後一組
+  // ① 依各門檻金額切割：湊到門檻就切一組。剩餘不足門檻的部分有兩種處理，兩種都要試——
+  //    (a) 併入最後一組：讓最後一組金額更大，可能開出更高門檻的名額
+  //    (b) 落單成獨立一組：多一組就多一份「每組上限」的空間（例：207+207+207+69 讓門檻200拿到3個）
   for (const t of thresholds) {
     for (const order of [sortedDesc, [...amounts].sort((a, b) => a - b)]) {
-      const groups: number[] = [];
+      const base: number[] = [];
       let cur = 0;
       for (const amt of order) {
         cur += amt;
         if (cur >= t) {
-          groups.push(cur);
+          base.push(cur);
           cur = 0;
         }
       }
       if (cur > 0) {
-        if (groups.length > 0) groups[groups.length - 1] += cur;
-        else groups.push(cur);
+        // (a) 併入最後一組
+        const merged = [...base];
+        if (merged.length > 0) merged[merged.length - 1] += cur;
+        else merged.push(cur);
+        results.push(merged);
+        // (b) 落單成獨立一組
+        results.push([...base, cur]);
+      } else if (base.length > 0) {
+        results.push(base);
       }
-      if (groups.length > 0) results.push(groups);
     }
   }
 
@@ -155,14 +163,26 @@ function canFill(
   const sorted = [...styles].sort((a, b) => b.thresholdAmount - a.thresholdAmount);
   for (const amount of groupAmounts) {
     let groupCount = 0; // 這張採購單已經放了幾個贈品，不能超過廠商單筆上限
+    // 每個門檻在這一組能開出幾個名額（同門檻的不同款式共用這批名額）
+    const slotsLeft: Record<number, number> = {};
+    for (const s of sorted) {
+      if (slotsLeft[s.thresholdAmount] === undefined) {
+        slotsLeft[s.thresholdAmount] = Math.floor(amount / s.thresholdAmount);
+      }
+    }
     for (const s of sorted) {
       if (remaining[s.id] <= 0 || groupCount >= vendorOrderGiftCap) continue;
-      // 同一組金額同時符合多個門檻，彼此不互相扣減；但每款在這張單裡受 perStyleCap 限制
       if (amount < s.thresholdAmount) continue;
-      const give = Math.min(s.perStyleCap, remaining[s.id], vendorOrderGiftCap - groupCount);
+      const give = Math.min(
+        s.perStyleCap,
+        remaining[s.id],
+        vendorOrderGiftCap - groupCount,
+        slotsLeft[s.thresholdAmount]
+      );
       if (give <= 0) continue;
       remaining[s.id] -= give;
       groupCount += give;
+      slotsLeft[s.thresholdAmount] -= give;
     }
   }
   return Object.values(remaining).every((v) => v <= 0);
@@ -180,6 +200,14 @@ function maxForStyle(
   styles.forEach((s) => (remaining[s.id] = picks[s.id] || 0));
   const groupUsed = new Array(groupAmounts.length).fill(0);
   const targetUsedPerGroup = new Array(groupAmounts.length).fill(0);
+  // 每組每個門檻還剩幾個名額（同門檻的不同款式共用）
+  const slotsLeft: Record<number, number>[] = groupAmounts.map((amount) => {
+    const m: Record<number, number> = {};
+    styles.forEach((s) => {
+      if (m[s.thresholdAmount] === undefined) m[s.thresholdAmount] = Math.floor(amount / s.thresholdAmount);
+    });
+    return m;
+  });
 
   // 先把已選的配置進去（門檻高的優先）
   const sorted = [...styles].sort((a, b) => b.thresholdAmount - a.thresholdAmount);
@@ -187,23 +215,33 @@ function maxForStyle(
     for (const s of sorted) {
       if (remaining[s.id] <= 0 || groupUsed[gi] >= vendorOrderGiftCap) continue;
       if (groupAmounts[gi] < s.thresholdAmount) continue;
-      const give = Math.min(s.perStyleCap, remaining[s.id], vendorOrderGiftCap - groupUsed[gi]);
+      const give = Math.min(
+        s.perStyleCap,
+        remaining[s.id],
+        vendorOrderGiftCap - groupUsed[gi],
+        slotsLeft[gi][s.thresholdAmount]
+      );
       if (give <= 0) continue;
       remaining[s.id] -= give;
       groupUsed[gi] += give;
+      slotsLeft[gi][s.thresholdAmount] -= give;
       if (s.id === target.id) targetUsedPerGroup[gi] += give;
     }
   }
   if (Object.values(remaining).some((v) => v > 0)) return -1; // 這個拆法根本滿足不了已選的
 
   // 剩下的空間，這個款式還能再放幾個
-  // 注意：要扣掉「這個款式在該組已經放了幾個」，不然會把已經用掉的名額重複算一次
+  // 三層限制取最小：每款上限（扣掉已放的）、該組總量剩餘、該門檻名額剩餘
   let extra = 0;
   const alreadyPicked = picks[target.id] || 0;
   for (let gi = 0; gi < groupAmounts.length; gi++) {
     if (groupAmounts[gi] < target.thresholdAmount) continue;
     const usedByTargetInThisGroup = targetUsedPerGroup[gi] || 0;
-    const room = Math.min(target.perStyleCap - usedByTargetInThisGroup, vendorOrderGiftCap - groupUsed[gi]);
+    const room = Math.min(
+      target.perStyleCap - usedByTargetInThisGroup,
+      vendorOrderGiftCap - groupUsed[gi],
+      slotsLeft[gi][target.thresholdAmount]
+    );
     if (room > 0) extra += room;
   }
   return alreadyPicked + extra;
@@ -220,7 +258,22 @@ export function computeStyleLimits(
   styles: GiftStyleRule[]
 ): { limits: Record<string, number>; totalPossible: number } {
   const thresholds = Array.from(new Set(styles.map((s) => s.thresholdAmount)));
-  const partitions = candidatePartitions(itemAmounts, thresholds);
+  const baseUnit = Math.min(...thresholds);
+
+  // 公式A：單件金額大到超過廠商上限時，這一件永遠自成一張採購單（跟別人湊組也拿不到更多），
+  // 而且超出的部分是死金額，有效金額被壓成「廠商上限 × 基礎單位」。
+  // 例：單價750、上限5、基礎100 → floor(750/100)=7 > 5，有效金額500，門檻300是 floor(500/300)=1 個。
+  // 750x3 就是 3 張各自獨立的採購單（各拿5個），不是 2250 合成一張（只拿5個）。
+  const overCapAmounts: number[] = [];
+  const splittableAmounts: number[] = [];
+  for (const amount of itemAmounts) {
+    if (Math.floor(amount / baseUnit) > vendorOrderGiftCap) overCapAmounts.push(vendorOrderGiftCap * baseUnit);
+    else splittableAmounts.push(amount);
+  }
+
+  // 可拆單的商品互相湊組；超上限的每件各自一組，固定加在後面
+  const partitions = (splittableAmounts.length > 0 ? candidatePartitions(splittableAmounts, thresholds) : [[]])
+    .map((p) => [...p, ...overCapAmounts]);
   const viable = partitions.filter((p) => canFill(p, vendorOrderGiftCap, picks, styles));
 
   const limits: Record<string, number> = {};
@@ -234,14 +287,31 @@ export function computeStyleLimits(
   }
 
   // 這批商品理論上最多能拿到幾個贈品（給畫面顯示參考）
+  // 這批商品理論上最多能拿到幾個贈品（給畫面顯示參考）
+  // 每一組（＝一張採購單）能放的贈品數：把該組解鎖的款式逐一放進去，
+  // 每款最多 perStyleCap 個，整組不超過廠商單筆上限
   let totalPossible = 0;
   for (const p of partitions) {
     let n = 0;
     for (const amount of p) {
+      // 這一組能放的贈品數，同樣受三層限制：
+      // ① 該組總量 = min(floor(組金額 ÷ 基礎單位), 廠商上限)
+      // ② 該門檻的名額數 = floor(組金額 ÷ 門檻)，同門檻款式共用
+      // ③ 每款上限
+      const groupCapacity = Math.min(Math.floor(amount / baseUnit), vendorOrderGiftCap);
+      const slotsLeft: Record<number, number> = {};
+      styles.forEach((s) => {
+        if (slotsLeft[s.thresholdAmount] === undefined) slotsLeft[s.thresholdAmount] = Math.floor(amount / s.thresholdAmount);
+      });
       let groupCount = 0;
+      // 門檻低的先放（低門檻名額多，能塞滿比較多贈品）
       for (const s of [...styles].sort((a, b) => a.thresholdAmount - b.thresholdAmount)) {
-        if (amount < s.thresholdAmount || groupCount >= vendorOrderGiftCap) continue;
-        groupCount += Math.min(s.perStyleCap, vendorOrderGiftCap - groupCount);
+        if (groupCount >= groupCapacity) break;
+        if (amount < s.thresholdAmount) continue;
+        const give = Math.min(s.perStyleCap, groupCapacity - groupCount, slotsLeft[s.thresholdAmount]);
+        if (give <= 0) continue;
+        groupCount += give;
+        slotsLeft[s.thresholdAmount] -= give;
       }
       n += groupCount;
     }

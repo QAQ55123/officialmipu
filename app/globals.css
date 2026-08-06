@@ -499,7 +499,7 @@ html, body {
   border: 1px solid var(--line);
 }
 .cart-item-img-empty { background: var(--bg); }
-.cart-item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cart-item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; align-items: flex-start; }
 .cart-item-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cart-item-unit-price { font-size: 12px; color: var(--muted); }
 .cart-item-right { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
