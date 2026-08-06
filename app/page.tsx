@@ -2345,6 +2345,11 @@ export default function Home() {
                         // 「贈品/滿贈」系列賣出的商品不套匯率，另外累加成一筆直接台幣小計，不歸進任何匯率分組。
                         const rateGroups = new Map<string, { rate: number; original: number; twd: number; hasDiscountFlag: boolean }>();
                         let giftConversionTotal = 0;
+                        // 明細也要跟左邊的商品區塊一樣分三區：可拆單、單價超上限、滿贈系列
+                        const overCapIdsForDetail = new Set(quota?.overCapProductIds || []);
+                        const productIdOf = (e: GlobalCartEntry) =>
+                          (cartPlanStatus[e.planId]?.products || []).find((p) => p.name === e.productName && p.style === e.style)?.id || "";
+                        const overCapRateGroups = new Map<string, { rate: number; original: number; twd: number; hasDiscountFlag: boolean }>();
                         entries.forEach((e) => {
                           if (isAltSite && hasAltSitePrice(e)) {
                             giftConversionTotal += itemAmount(e.planId, e, payment, wantsGift);
@@ -2358,8 +2363,10 @@ export default function Home() {
                           const key = info.rate == null ? "unavailable" : `${info.rate}|${info.hasDiscountFlag}`;
                           const original = e.qty * e.price;
                           const twd = itemAmount(e.planId, e, payment, wantsGift);
-                          if (!rateGroups.has(key)) rateGroups.set(key, { rate: info.rate ?? 0, original: 0, twd: 0, hasDiscountFlag: info.hasDiscountFlag });
-                          const g = rateGroups.get(key)!;
+                          // 單價超過滿贈上限的商品，明細也要獨立一區顯示
+                          const target = (wantsGift && overCapIdsForDetail.has(productIdOf(e))) ? overCapRateGroups : rateGroups;
+                          if (!target.has(key)) target.set(key, { rate: info.rate ?? 0, original: 0, twd: 0, hasDiscountFlag: info.hasDiscountFlag });
+                          const g = target.get(key)!;
                           g.original += original;
                           g.twd += twd;
                         });
@@ -2530,24 +2537,48 @@ export default function Home() {
                               </div>
 
                               <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                                {Array.from(rateGroups.entries()).map(([key, g]) => (
-                                  <div key={key} style={{ marginBottom: 10 }}>
-                                    <div style={{ fontSize: 12, color: "#33415C", marginBottom: 4 }}>
-                                      {key === "unavailable" ? "此組合目前未開放" : `${g.hasDiscountFlag ? "滿減商品" : "一般商品"} × 匯率 ${g.rate}`}
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                                      <span>￥{fmt(g.original)}</span>
-                                      <span style={{ fontWeight: 600 }}>NT$ {fmt(g.twd)}</span>
-                                    </div>
-                                  </div>
-                                ))}
-                                {giftConversionTotal > 0 && (
-                                  <div style={{ marginBottom: 10 }}>
-                                    <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 13 }}>
-                                      <span style={{ fontWeight: 600 }}>NT$ {fmt(giftConversionTotal)}</span>
-                                    </div>
-                                  </div>
-                                )}
+                                {(() => {
+                                  const renderRateGroups = (groups: typeof rateGroups) =>
+                                    Array.from(groups.entries()).map(([key, g]) => (
+                                      <div key={key} style={{ marginBottom: 10 }}>
+                                        <div style={{ fontSize: 12, color: "#33415C", marginBottom: 4 }}>
+                                          {key === "unavailable" ? "此組合目前未開放" : `${g.hasDiscountFlag ? "滿減商品" : "一般商品"} × 匯率 ${g.rate}`}
+                                        </div>
+                                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                                          <span>￥{fmt(g.original)}</span>
+                                          <span style={{ fontWeight: 600 }}>NT$ {fmt(g.twd)}</span>
+                                        </div>
+                                      </div>
+                                    ));
+                                  const detailTitle = (text: string) => (
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", margin: "0 0 6px" }}>{text}</div>
+                                  );
+                                  const showTitles = wantsGift && (overCapRateGroups.size > 0 || giftConversionTotal > 0);
+                                  return (
+                                    <>
+                                      {rateGroups.size > 0 && (
+                                        <>
+                                          {showTitles && detailTitle("可拆單商品")}
+                                          {renderRateGroups(rateGroups)}
+                                        </>
+                                      )}
+                                      {overCapRateGroups.size > 0 && (
+                                        <>
+                                          {detailTitle("單價已達滿贈上限的商品")}
+                                          {renderRateGroups(overCapRateGroups)}
+                                        </>
+                                      )}
+                                      {giftConversionTotal > 0 && (
+                                        <div style={{ marginBottom: 10 }}>
+                                          {showTitles && detailTitle("贈品／滿贈系列商品")}
+                                          <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 13 }}>
+                                            <span style={{ fontWeight: 600 }}>NT$ {fmt(giftConversionTotal)}</span>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
                                   <span style={{ fontSize: 13, color: "var(--muted)" }}>小計</span>
                                   <span style={{ fontWeight: 700, fontSize: 16 }}>NT$ {fmt(groupTotal)}</span>
