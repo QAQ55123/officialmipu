@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useRef, useMemo } from "react";
+import { sizedImageUrl } from "@/lib/imageUrl";
 import { Menu, Search, UserCircle, ShoppingCart, X, ChevronDown, ChevronRight, Heart, Bell } from "lucide-react";
 import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 
@@ -1732,7 +1733,7 @@ export default function Home() {
                     {plans.map((p) => (
                       <div key={p.id} className="plan-card-v2" onClick={() => openPlan(p)}>
                         <div className="plan-card-v2-img">
-                          {p.imageUrl && <img src={p.imageUrl} alt={p.name} />}
+                          {p.imageUrl && <img src={sizedImageUrl(p.imageUrl, "thumb")} alt={p.name} loading="lazy" decoding="async" />}
                           {p.categoryName && <span className="plan-card-v2-tag">{p.categoryName}</span>}
                         </div>
                         <div className="plan-card-v2-body">
@@ -1755,7 +1756,7 @@ export default function Home() {
                 {activePlan.promoImages && activePlan.promoImages.length > 0 && (
                   <div className="promo-gallery">
                     {activePlan.promoImages.map((url, i) => (
-                      <img key={i} src={url} alt={`宣傳圖 ${i + 1}`} onClick={() => setLightboxUrl(url)} />
+                      <img key={i} src={sizedImageUrl(url, "medium")} alt={`宣傳圖 ${i + 1}`} loading="lazy" decoding="async" onClick={() => setLightboxUrl(url)} />
                     ))}
                   </div>
                 )}
@@ -1794,8 +1795,9 @@ export default function Home() {
                           const displayImage = hasPickedStyle ? current.imageUrl : (coverImage || current.imageUrl);
                           return displayImage ? (
                             <img
-                              src={displayImage}
+                              src={sizedImageUrl(displayImage, "medium")}
                               alt={hasPickedStyle ? (current.style || activeProductName) : activeProductName}
+                              decoding="async"
                               onClick={() => setLightboxUrl(displayImage)}
                             />
                           ) : (
@@ -1990,7 +1992,7 @@ export default function Home() {
                             <div className="hist-item" key={idx}>
                               <div className="hist-item-left">
                                 {it.imageUrl ? (
-                                  <img src={it.imageUrl} alt={it.name} className="hist-item-img" />
+                                  <img src={sizedImageUrl(it.imageUrl, "thumb")} alt={it.name} className="hist-item-img" loading="lazy" decoding="async" />
                                 ) : (
                                   <div className="hist-item-img hist-item-img-empty" />
                                 )}
@@ -2012,7 +2014,7 @@ export default function Home() {
                                 {o.giftSelections.map((g: any, i: number) => (
                                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)" }}>
                                     {g.imageUrl ? (
-                                      <img src={g.imageUrl} alt={g.styleName} style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />
+                                      <img src={sizedImageUrl(g.imageUrl, "thumb")} alt={g.styleName} loading="lazy" decoding="async" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />
                                     ) : (
                                       <div style={{ width: 28, height: 28, borderRadius: 5, background: "var(--line)" }} />
                                     )}
@@ -2053,7 +2055,7 @@ export default function Home() {
                     {favoritePlans.map((p) => (
                       <div key={p.id} className="plan-card-v2" onClick={() => openPlan(p)}>
                         <div className="plan-card-v2-img">
-                          {p.imageUrl && <img src={p.imageUrl} alt={p.name} />}
+                          {p.imageUrl && <img src={sizedImageUrl(p.imageUrl, "thumb")} alt={p.name} loading="lazy" decoding="async" />}
                           {p.categoryName && <span className="plan-card-v2-tag">{p.categoryName}</span>}
                         </div>
                         <div className="plan-card-v2-body">
@@ -2170,7 +2172,7 @@ export default function Home() {
                                 onChange={() => toggleCartItemSelect(key)}
                               />
                               {e.imageUrl ? (
-                                <img src={e.imageUrl} alt={e.productName} className="cart-item-img" />
+                                <img src={sizedImageUrl(e.imageUrl, "thumb")} alt={e.productName} className="cart-item-img" loading="lazy" decoding="async" />
                               ) : (
                                 <div className="cart-item-img cart-item-img-empty" />
                               )}
@@ -2404,7 +2406,7 @@ export default function Home() {
                                   <div key={`${e.productName}||${e.style}`} style={{ padding: "10px 0", borderBottom: "1px dashed var(--line)" }}>
                                     <div className="cart-item-row" style={{ padding: 0, border: "none" }}>
                                       <div className="cart-item-left">
-                                        {e.imageUrl ? <img src={e.imageUrl} alt={e.productName} className="cart-item-img" /> : <div className="cart-item-img cart-item-img-empty" />}
+                                        {e.imageUrl ? <img src={sizedImageUrl(e.imageUrl, "thumb")} alt={e.productName} className="cart-item-img" loading="lazy" decoding="async" /> : <div className="cart-item-img cart-item-img-empty" />}
                                         <div>
                                           <div>{e.productName}{e.style ? `（${e.style}）` : ""} x{e.qty}</div>
                                           {(cartPlanStatus[e.planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
@@ -2514,7 +2516,7 @@ export default function Home() {
                                       return (
                                         <div key={s.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
                                           <span style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: "1 1 auto", minWidth: 0 }}>
-                                            {s.imageUrl && <img src={s.imageUrl} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 5, flexShrink: 0 }} />}
+                                            {s.imageUrl && <img src={sizedImageUrl(s.imageUrl, "thumb")} alt="" loading="lazy" decoding="async" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 5, flexShrink: 0 }} />}
                                             <span style={{ minWidth: 0 }}>
                                               <span style={{ fontSize: 13, display: "block", wordBreak: "break-word" }}>{s.styleName}</span>
                                               {(() => {
@@ -2766,7 +2768,7 @@ export default function Home() {
       {lightboxUrl && (
         <div className="lightbox show" onClick={() => setLightboxUrl(null)}>
           <span className="lightbox-close" onClick={() => setLightboxUrl(null)}>&times;</span>
-          <img src={lightboxUrl} className="lightbox-img" alt="放大檢視" onClick={(e) => e.stopPropagation()} />
+          <img src={sizedImageUrl(lightboxUrl, "large")} className="lightbox-img" alt="放大檢視" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
 
