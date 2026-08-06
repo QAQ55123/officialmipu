@@ -233,9 +233,16 @@ export default function Home() {
   const [checkoutingPlanId, setCheckoutingPlanId] = useState<string | null>(null);
   const [selectedCartKeys, setSelectedCartKeys] = useState<Set<string>>(new Set());
   const [checkoutPaymentByPlan, setCheckoutPaymentByPlan] = useState<Record<string, string>>({});
+  // 一次結帳＝一張訂單：付款方式、要不要滿贈、滿贈試算與已選，全部整筆共用（滿贈跨系列合併計算）
+  const [checkoutPayment, setCheckoutPayment] = useState("匯款");
+  const [checkoutWantsGift, setCheckoutWantsGift] = useState(true);
+  const [checkoutGiftPicks, setCheckoutGiftPicks] = useState<Record<string, number>>({});
+  const [checkoutGiftQuota, setCheckoutGiftQuota] = useState<{ quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number; unlocked?: boolean }[]; overCapProductIds?: string[] } | null>(null);
+  const [checkoutGiftLoading, setCheckoutGiftLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
   // 2.7節：每個系列分組各自決定要不要滿贈、選了哪些款式（範圍是這個系列分組送出的這張訂單）
   const [wantsGiftByPlan, setWantsGiftByPlan] = useState<Record<string, boolean>>({});
-  const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number }[]; overCapProductIds?: string[] }>>({});
+  const [giftQuotaByPlan, setGiftQuotaByPlan] = useState<Record<string, { quota: number; styleLimits: { giftStyleId: string; styleName: string; imageUrl: string | null; max: number; unlocked?: boolean }[]; overCapProductIds?: string[] }>>({});
   const [giftQuotaLoadingByPlan, setGiftQuotaLoadingByPlan] = useState<Record<string, boolean>>({});
   const [checkoutErrorByPlan, setCheckoutErrorByPlan] = useState<Record<string, string>>({});
   const [giftPicksByPlan, setGiftPicksByPlan] = useState<Record<string, Record<string, number>>>({});
@@ -931,6 +938,32 @@ export default function Home() {
     }
   }
 
+  /** 一次結帳＝一張訂單：滿贈把所有系列的商品合在一起算（單價超過上限的商品各自成單，後端處理） */
+  async function fetchCheckoutGiftQuota(entries: GlobalCartEntry[], currentPicks?: Record<string, number>) {
+    if (!currentCampaign) return;
+    const resolvedItems = entries
+      .map((e) => {
+        const match = (cartPlanStatus[e.planId]?.products || []).find((p) => p.name === e.productName && p.style === e.style);
+        return match ? { productId: match.id, qty: e.qty } : null;
+      })
+      .filter((x): x is { productId: string; qty: number } => !!x);
+    if (resolvedItems.length === 0) return;
+    const picks = currentPicks ?? checkoutGiftPicks;
+    setCheckoutGiftLoading(true);
+    try {
+      const r = await fetch("/api/cart/quote", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaignId: currentCampaign.id, items: resolvedItems, picks }),
+      });
+      const d = await r.json();
+      if (r.ok) setCheckoutGiftQuota({ quota: d.quota, styleLimits: d.styleLimits, overCapProductIds: d.overCapProductIds || [] });
+    } catch {
+      // 試算失敗不擋結帳流程
+    } finally {
+      setCheckoutGiftLoading(false);
+    }
+  }
+
   function goToCheckout() {
     const selectedActive = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isGroupActive(e.planId));
     if (selectedActive.length === 0) return showToast("請先勾選要結帳的商品（已失效的系列無法結帳）");
@@ -960,7 +993,9 @@ export default function Home() {
       for (const id of planIds) next[id] = true;
       return next;
     });
-    for (const [planId, items] of Object.entries(grouped)) fetchGiftQuotaForPlan(planId, items);
+    setCheckoutGiftPicks({});
+    setCheckoutError("");
+    fetchCheckoutGiftQuota(selectedActive);
   }
 
   async function submitCheckout() {
@@ -981,38 +1016,36 @@ export default function Home() {
     setCheckoutErrorByPlan({});
     const succeededPlanIds: string[] = [];
     const errors: string[] = [];
-    for (const planId of planIds) {
-      const groupItems = selectedEntries.filter((e) => e.planId === planId);
-      const planAllowsCod = true;
-      const payment = planAllowsCod ? (checkoutPaymentByPlan[planId] || "匯款") : "匯款";
-      const wantsGift = wantsGiftByPlan[planId] ?? true;
-      const picks = giftPicksByPlan[planId] || {};
-      const giftSelections = Object.entries(picks).filter(([, qty]) => qty > 0).map(([giftStyleId, qty]) => ({ giftStyleId, qty }));
-      try {
-        const r = await fetch("/api/orders", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            seriesId: planId,
-            items: groupItems.map((e) => ({ name: e.productName, style: e.style, qty: e.qty })),
-            username: identity.username,
-            payment,
-            campaignId: currentCampaign?.id || null,
-            isAltSite,
-            wantsGift,
-            giftSelections,
-          }),
-        });
-        const d = await r.json();
-        if (!r.ok) {
-          errors.push(`${groupItems[0].planName}：${d.error || "送出失敗"}`);
-          setCheckoutErrorByPlan((prev) => ({ ...prev, [planId]: d.error || "送出失敗" }));
-        } else {
-          succeededPlanIds.push(planId);
-        }
-      } catch {
-        errors.push(`${groupItems[0].planName}：網路連線失敗`);
+    // 一次結帳只送出一張訂單（滿贈跨系列合併計算，不再依系列拆單）
+    const payment = checkoutPayment;
+    const wantsGift = checkoutWantsGift;
+    const giftSelections = Object.entries(checkoutGiftPicks).filter(([, qty]) => qty > 0).map(([giftStyleId, qty]) => ({ giftStyleId, qty }));
+    let submitOk = false;
+    try {
+      const r = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: selectedEntries.map((e) => ({ seriesId: e.planId, name: e.productName, style: e.style, qty: e.qty })),
+          username: identity.username,
+          payment,
+          campaignId: currentCampaign?.id || null,
+          isAltSite,
+          wantsGift,
+          giftSelections,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        errors.push(d.error || "送出失敗");
+        setCheckoutError(d.error || "送出失敗");
+      } else {
+        submitOk = true;
+        succeededPlanIds.push(...planIds);
       }
+    } catch {
+      errors.push("網路連線失敗");
+      setCheckoutError("網路連線失敗");
     }
 
     if (succeededPlanIds.length > 0) {
@@ -2058,20 +2091,38 @@ export default function Home() {
                   </div>
                 )}
 
-                <div className={globalCart.length > 0 ? "cart-group" : ""}>
-                {Object.entries(
-                  globalCart.reduce<Record<string, GlobalCartEntry[]>>((acc, e) => {
-                    acc[e.planId] = acc[e.planId] || [];
-                    acc[e.planId].push(e);
-                    return acc;
-                  }, {})
-                )
-                  .sort(([planIdA], [planIdB]) => {
-                    const inactiveA = cartPlanStatus[planIdA] ? !cartPlanStatus[planIdA].found : false;
-                    const inactiveB = cartPlanStatus[planIdB] ? !cartPlanStatus[planIdB].found : false;
-                    return Number(inactiveA) - Number(inactiveB);
-                  })
-                  .map(([planId, entries], groupIdx) => {
+                {(() => {
+                  // 購物車分兩個框：一般商品一個框（裡面按系列分小區塊）、滿贈系列商品另一個框
+                  const isGiftItem = (e: GlobalCartEntry) =>
+                    !!cartPlanStatus[e.planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.linkedGiftStyleId;
+                  const normalItems = globalCart.filter((e) => !isGiftItem(e));
+                  const giftItems = globalCart.filter((e) => isGiftItem(e));
+
+                  function renderBox(list: GlobalCartEntry[], boxTitle?: string) {
+                    if (list.length === 0) return null;
+                    return (
+                      <div className="cart-group">
+                        {boxTitle && (
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--primary)", marginBottom: 12 }}>{boxTitle}</div>
+                        )}
+                        {Object.entries(
+                          list.reduce<Record<string, GlobalCartEntry[]>>((acc, e) => {
+                            acc[e.planId] = acc[e.planId] || [];
+                            acc[e.planId].push(e);
+                            return acc;
+                          }, {})
+                        )
+                          .sort(([planIdA], [planIdB]) => {
+                            const inactiveA = cartPlanStatus[planIdA] ? !cartPlanStatus[planIdA].found : false;
+                            const inactiveB = cartPlanStatus[planIdB] ? !cartPlanStatus[planIdB].found : false;
+                            return Number(inactiveA) - Number(inactiveB);
+                          })
+                          .map(([planId, entries], groupIdx) => renderPlanGroup(planId, entries, groupIdx))}
+                      </div>
+                    );
+                  }
+
+                  function renderPlanGroup(planId: string, entries: GlobalCartEntry[], groupIdx: number) {
                   const live = cartPlanStatus[planId];
                   const planName = live?.name || entries[0].planName;
                   const isInactive = live ? !live.found : false;
@@ -2179,8 +2230,15 @@ export default function Home() {
                       </div>
                     </div>
                   );
-                })}
-                </div>
+                  }
+
+                  return (
+                    <>
+                      {renderBox(normalItems)}
+                      {renderBox(giftItems, "贈品／滿贈系列商品")}
+                    </>
+                  );
+                })()}
 
                 {globalCart.length > 0 && (
                   <div className="cart-checkout-bar">
@@ -2253,38 +2311,34 @@ export default function Home() {
                     return sum + entries.reduce((s, e) => s + itemAmount(planId, e, payment, wantsGift), 0);
                   }, 0);
 
-                  // 滿贈要選滿才能送出：每個有勾選「要選擇滿贈」的分組，可選數量都要剛好選滿
+                  // 滿贈要選滿才能送出（一次結帳＝一張訂單，整筆一起判斷）
                   let giftNotFull = false;
-                  for (const planId of Object.keys(grouped)) {
-                    const wantsGift = wantsGiftByPlan[planId] ?? true;
-                    if (!wantsGift) continue;
-                    const quota = giftQuotaByPlan[planId];
-                    if (!quota || quota.quota <= 0) continue;
-                    const picks = giftPicksByPlan[planId] || {};
-                    const pickedTotal = Object.values(picks).reduce((s, n) => s + n, 0);
-                    if (pickedTotal < quota.quota) giftNotFull = true;
+                  if (checkoutWantsGift && checkoutGiftQuota && checkoutGiftQuota.quota > 0) {
+                    const pickedTotal = Object.values(checkoutGiftPicks).reduce((s, n) => s + n, 0);
+                    if (pickedTotal < checkoutGiftQuota.quota) giftNotFull = true;
                   }
 
                   return (
                     <>
-                      {Object.entries(grouped).map(([planId, entries]) => {
-                        const live = cartPlanStatus[planId];
-                        const planName = live?.name || entries[0].planName;
+                      {[0].map(() => {
+                        // 一次結帳＝一張訂單：付款方式、滿贈都是整筆共用，不再依系列分開
+                        const entries = selectedEntries;
+                        const planName = "";
                         // 滿贈系列商品有自己獨立的取付額度，跟一般商品分開算：
-                        // 這組全部都是滿贈商品 → 只看滿贈那組上限；全是一般商品 → 只看一般上限；混合 → 兩個都要過
-                        const groupItemsAreGift = entries.map((e) => isGiftConversionItem(planId, e) || (isAltSite && hasAltSitePrice(e)));
+                        // 全部都是滿贈商品 → 只看滿贈那組上限；全是一般商品 → 只看一般上限；混合 → 兩個都要過
+                        const groupItemsAreGift = entries.map((e) => isGiftConversionItem(e.planId, e) || (isAltSite && hasAltSitePrice(e)));
                         const hasGiftItems = groupItemsAreGift.some(Boolean);
                         const hasRegularItems = groupItemsAreGift.some((x) => !x);
                         const codOffered =
                           (!hasRegularItems || campaignCodAvailable) && (!hasGiftItems || giftCodAvailable);
                         const codDisabled = !codOffered;
-                        const rawPayment = checkoutPaymentByPlan[planId] || "匯款";
+                        const rawPayment = checkoutPayment;
                         const payment = (rawPayment === "取付" && codDisabled) ? "匯款" : rawPayment;
-                        const wantsGift = wantsGiftByPlan[planId] ?? true;
-                        const groupTotal = entries.reduce((s, e) => s + itemAmount(planId, e, payment, wantsGift), 0);
-                        const quota = giftQuotaByPlan[planId];
-                        const giftLoading = giftQuotaLoadingByPlan[planId];
-                        const picks = giftPicksByPlan[planId] || {};
+                        const wantsGift = checkoutWantsGift;
+                        const groupTotal = entries.reduce((s, e) => s + itemAmount(e.planId, e, payment, wantsGift), 0);
+                        const quota = checkoutGiftQuota;
+                        const giftLoading = checkoutGiftLoading;
+                        const picks = checkoutGiftPicks;
                         const pickedTotal = Object.values(picks).reduce((s, n) => s + n, 0);
 
                         // 依匯率分組：同一個分組裡，可能有商品用不同匯率（滿減v / 一般），分開顯示原幣小計+換算後小計。
@@ -2293,17 +2347,17 @@ export default function Home() {
                         let giftConversionTotal = 0;
                         entries.forEach((e) => {
                           if (isAltSite && hasAltSitePrice(e)) {
-                            giftConversionTotal += itemAmount(planId, e, payment, wantsGift);
+                            giftConversionTotal += itemAmount(e.planId, e, payment, wantsGift);
                             return;
                           }
-                          if (isGiftConversionItem(planId, e)) {
-                            giftConversionTotal += itemAmount(planId, e, payment, wantsGift);
+                          if (isGiftConversionItem(e.planId, e)) {
+                            giftConversionTotal += itemAmount(e.planId, e, payment, wantsGift);
                             return;
                           }
-                          const info = itemRateInfo(planId, e, payment, wantsGift);
+                          const info = itemRateInfo(e.planId, e, payment, wantsGift);
                           const key = info.rate == null ? "unavailable" : `${info.rate}|${info.hasDiscountFlag}`;
                           const original = e.qty * e.price;
-                          const twd = itemAmount(planId, e, payment, wantsGift);
+                          const twd = itemAmount(e.planId, e, payment, wantsGift);
                           if (!rateGroups.has(key)) rateGroups.set(key, { rate: info.rate ?? 0, original: 0, twd: 0, hasDiscountFlag: info.hasDiscountFlag });
                           const g = rateGroups.get(key)!;
                           g.original += original;
@@ -2311,36 +2365,31 @@ export default function Home() {
                         });
 
                         function adjustGiftPick(styleId: string, delta: number, max: number) {
-                          setGiftPicksByPlan((prev) => {
-                            const cur = prev[planId] || {};
+                          setCheckoutGiftPicks((cur) => {
                             const otherTotal = Object.entries(cur).filter(([k]) => k !== styleId).reduce((s, [, v]) => s + v, 0);
                             const next = Math.max(0, Math.min(max, (cur[styleId] || 0) + delta, (quota?.quota ?? 0) - otherTotal));
                             const nextPicks = { ...cur, [styleId]: next };
                             // 2.7節：選了之後其他款式能拿多少會跟著變，立刻用新的已選內容重新試算
-                            fetchGiftQuotaForPlan(planId, entries, nextPicks);
-                            return { ...prev, [planId]: nextPicks };
+                            fetchCheckoutGiftQuota(entries, nextPicks);
+                            return nextPicks;
                           });
                         }
 
                         return (
-                          <div key={planId} className="cart-group" style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+                          <div key="checkout-all" className="cart-group" style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
                             <div style={{ flex: "1.4 1 280px", minWidth: 0 }}>
-                              <div className="cart-group-header">
-                                <span className="cart-group-plan-name" style={{ cursor: "default", textDecoration: "none" }}>{planName}</span>
-                              </div>
                               {(() => {
                                 // 勾選要滿贈時，把商品分兩區顯示：可拆單的、以及單價已超過廠商上限的
                                 // （後者每件各自一張採購單，滿贈各自計算後加總，不跟別人湊組）
                                 const overCapIds = new Set(quota?.overCapProductIds || []);
-                                const liveProducts = cartPlanStatus[planId]?.products || [];
                                 const idOf = (e: GlobalCartEntry) =>
-                                  liveProducts.find((p) => p.name === e.productName && p.style === e.style)?.id || "";
+                                  (cartPlanStatus[e.planId]?.products || []).find((p) => p.name === e.productName && p.style === e.style)?.id || "";
                                 const overCapEntries = wantsGift ? entries.filter((e) => overCapIds.has(idOf(e))) : [];
                                 const normalEntries = wantsGift ? entries.filter((e) => !overCapIds.has(idOf(e))) : entries;
 
                                 function renderEntry(e: GlobalCartEntry) {
                                 const singleCap = singleItemGiftCapLocal(e);
-                                const isGiftConv = isGiftConversionItem(planId, e);
+                                const isGiftConv = isGiftConversionItem(e.planId, e);
                                 const useAltPrice = isAltSite && hasAltSitePrice(e);
                                 const currencySymbol = (isGiftConv || useAltPrice) ? "NT$" : "￥";
                                 const displayUnitPrice = useAltPrice ? (altSitePriceFor(e, payment === "取付" ? "取付" : "匯款") ?? 0) : e.price;
@@ -2351,7 +2400,7 @@ export default function Home() {
                                         {e.imageUrl ? <img src={e.imageUrl} alt={e.productName} className="cart-item-img" /> : <div className="cart-item-img cart-item-img-empty" />}
                                         <div>
                                           <div>{e.productName}{e.style ? `（${e.style}）` : ""} x{e.qty}</div>
-                                          {(cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
+                                          {(cartPlanStatus[e.planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
                                             <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>
                                           )}
                                           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{currencySymbol}{fmt(displayUnitPrice)} ／件</div>
@@ -2402,8 +2451,8 @@ export default function Home() {
                                     className={`src-btn ${payment === p ? "active" : ""}`}
                                     disabled={p === "取付" && codDisabled}
                                     onClick={() => {
-                                      setCheckoutPaymentByPlan((prev) => ({ ...prev, [planId]: p }));
-                                      setCheckoutErrorByPlan((prev) => { const next = { ...prev }; delete next[planId]; return next; });
+                                      setCheckoutPayment(p);
+                                      setCheckoutError("");
                                     }}
                                   >
                                     {p}
@@ -2420,7 +2469,7 @@ export default function Home() {
 
                               <div style={{ marginTop: 12 }}>
                                 {(() => {
-                                  const allGiftConv = entries.length > 0 && entries.every((e) => isGiftConversionItem(planId, e));
+                                  const allGiftConv = entries.length > 0 && entries.every((e) => isGiftConversionItem(e.planId, e));
                                   if (allGiftConv) return null;
                                   return (
                                     <>
@@ -2428,7 +2477,7 @@ export default function Home() {
                                         <input
                                           type="checkbox"
                                           checked={wantsGift}
-                                          onChange={(e2) => setWantsGiftByPlan((prev) => ({ ...prev, [planId]: e2.target.checked }))}
+                                          onChange={(e2) => { setCheckoutWantsGift(e2.target.checked); if (e2.target.checked) fetchCheckoutGiftQuota(entries, checkoutGiftPicks); }}
                                         />
                                         要選擇滿贈
                                       </label>
@@ -2449,9 +2498,10 @@ export default function Home() {
                                           <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                                             {s.imageUrl && <img src={s.imageUrl} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />}
                                             {s.styleName}
-                                            {s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（金額未達門檻）</span>}
-                                            {atStyleMax && !quotaUsedUp && <span style={{ color: "var(--muted)", fontSize: 12 }}>（已達這款上限 {s.max}）</span>}
-                                            {s.max > 0 && quotaUsedUp && picked < s.max && <span style={{ color: "var(--muted)", fontSize: 12 }}>（可選總數已滿）</span>}
+                                            {s.unlocked === false && <span style={{ color: "var(--muted)", fontSize: 12 }}>（金額未達門檻）</span>}
+                                            {s.unlocked !== false && s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（可選額度已用完）</span>}
+                                            {s.unlocked !== false && atStyleMax && !quotaUsedUp && <span style={{ color: "var(--muted)", fontSize: 12 }}>（已達這款上限 {s.max}）</span>}
+                                            {s.unlocked !== false && s.max > 0 && quotaUsedUp && picked < s.max && <span style={{ color: "var(--muted)", fontSize: 12 }}>（可選總數已滿）</span>}
                                           </span>
                                           <div className="stepper">
                                             <button className="step-btn" disabled={giftLoading || picked <= 0} onClick={() => adjustGiftPick(s.giftStyleId, -1, s.max)}>－</button>
@@ -2491,8 +2541,8 @@ export default function Home() {
                                   <span style={{ fontSize: 13, color: "var(--muted)" }}>小計</span>
                                   <span style={{ fontWeight: 700, fontSize: 16 }}>NT$ {fmt(groupTotal)}</span>
                                 </div>
-                                {checkoutErrorByPlan[planId] && (
-                                  <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>{checkoutErrorByPlan[planId]}</div>
+                                {checkoutError && (
+                                  <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>{checkoutError}</div>
                                 )}
                               </div>
                             </div>

@@ -89,6 +89,9 @@ export async function POST(req: Request) {
   }
 
   const { limits, totalPossible } = computeStyleLimits(itemAmounts, vendorCap, picks, rules);
+  // 另外算一次「都還沒選任何滿贈」的上限，用來判斷這個款式到底是「金額根本不夠」還是
+  // 「金額夠、只是額度被已選的用掉了」——這兩種在畫面上要給不同的提示文字
+  const { limits: baseLimits } = computeStyleLimits(itemAmounts, vendorCap, {}, rules);
 
   return NextResponse.json({
     cartSubtotal,
@@ -99,6 +102,7 @@ export async function POST(req: Request) {
       styleName: s.style_name,
       imageUrl: s.image_url,
       max: limits[s.id] ?? 0,
+      unlocked: (baseLimits[s.id] ?? 0) > 0,
     })),
   });
 }

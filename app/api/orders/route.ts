@@ -11,14 +11,17 @@ export const revalidate = 0;
 /** 新增訂單 */
 export async function POST(req: Request) {
   const body = await req.json();
-  const { seriesId, items, username, payment, wantsGift, giftSelections, isAltSite } = body; // items: [{ name, style, qty }]
+  // 一次結帳只產生一張訂單（滿贈要跨系列合併計算，不能再依系列拆單）
+  // items: [{ seriesId, name, style, qty }] —— 每個品項各自帶自己的系列
+  const { items, username, payment, wantsGift, giftSelections, isAltSite } = body;
 
   const supabase = getSupabaseAdmin();
 
-  if (!seriesId) return NextResponse.json({ error: "缺少系列" }, { status: 400 });
   if (!Array.isArray(items) || items.length === 0) {
     return NextResponse.json({ error: "請至少選擇一項商品的數量" }, { status: 400 });
   }
+  const seriesIds = Array.from(new Set(items.map((it: any) => it.seriesId).filter(Boolean)));
+  if (seriesIds.length === 0) return NextResponse.json({ error: "缺少系列" }, { status: 400 });
   const finalUsername = String(username || "").trim();
   if (!finalUsername) return NextResponse.json({ error: "請先登入身分" }, { status: 400 });
   if (!["匯款", "取付"].includes(payment)) {
@@ -32,9 +35,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "請先驗證信箱後才能下單，可以到「編輯會員資料」重新寄送驗證信。" }, { status: 403 });
   }
 
-  // 系列 / 取付上限
-  const { data: series, error: seriesErr } = await supabase.from("series").select("*").eq("id", seriesId).single();
-  if (seriesErr || !series) return NextResponse.json({ error: "找不到系列" }, { status: 404 });
+  // 這張訂單涵蓋的所有系列（一次結帳可能橫跨好幾個系列）
+  const { data: seriesList, error: seriesErr } = await supabase.from("series").select("*").in("id", seriesIds);
+  if (seriesErr || !seriesList || seriesList.length === 0) return NextResponse.json({ error: "找不到系列" }, { status: 404 });
+  const seriesById = new Map(seriesList.map((s: any) => [s.id, s]));
+  // 只有單一系列的訂單才在 orders 層級記系列，跨系列時留空（品項層級各自記錄）
+  const series = seriesList.length === 1 ? seriesList[0] : null;
 
   // 2.5節：檔期是否開放中，這是最後一道防線（前端按鈕已經先擋過一次，這裡避免分頁停留太久後才送出）
   // 2.6節：一併把8種匯率設定抓出來，計價要用
@@ -51,10 +57,10 @@ export async function POST(req: Request) {
   const campaign = openCampaigns[0];
 
   // 價目表對照（避免前端竄改價格），順便記錄圖片快照跟2.6/2.4節需要的滿減標記／取付開關
-  const { data: products } = await supabase.from("products").select("*").eq("series_id", seriesId);
+  const { data: products } = await supabase.from("products").select("*").in("series_id", seriesIds);
   const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null; altSiteBankPrice: number | null; altSiteCodPrice: number | null }> = {};
   (products || []).forEach((p) => {
-    productMap[`${p.name}||${p.style || ""}`] = {
+    productMap[`${p.series_id}||${p.name}||${p.style || ""}`] = {
       price: Number(p.price),
       imageUrl: p.image_url || null,
       hasDiscountFlag: !!p.has_discount_flag,
@@ -69,7 +75,7 @@ export async function POST(req: Request) {
   if (payment === "取付") {
     const blockedNames: string[] = [];
     for (const it of items) {
-      const p = productMap[`${it.name}||${it.style || ""}`];
+      const p = productMap[`${it.seriesId}||${it.name}||${it.style || ""}`];
       if (p && !p.codAllowed) blockedNames.push(`${it.name}${it.style ? `（${it.style}）` : ""}`);
     }
     if (blockedNames.length > 0) {
@@ -83,12 +89,12 @@ export async function POST(req: Request) {
   let orderTotal = 0;
   let giftConvTotal = 0; // 滿贈系列商品的金額，取付上限要跟一般商品分開算
   let anyDisabledCombo = false;
-  const rows: { name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null; unitOriginal: number | null; fxRate: number | null; hasDiscountFlagSnapshot: boolean }[] = [];
+  const rows: { seriesId: string; seriesName: string | null; name: string; style: string; qty: number; unit: number; subtotal: number; imageUrl: string | null; unitOriginal: number | null; fxRate: number | null; hasDiscountFlagSnapshot: boolean }[] = [];
   for (const it of items) {
     const qty = Number(it.qty) || 0;
     if (qty <= 0) continue;
     const style = it.style || "";
-    const p = productMap[`${it.name}||${style}`];
+    const p = productMap[`${it.seriesId}||${it.name}||${style}`];
     if (!p) continue;
 
     // 獨立網頁（/gift）：有設定專用價格的商品，依付款方式直接用對應的台幣價格，不套匯率
@@ -99,7 +105,7 @@ export async function POST(req: Request) {
       const subtotal = qty * unit;
       orderTotal += subtotal;
       giftConvTotal += subtotal;
-      rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: null, fxRate: null, hasDiscountFlagSnapshot: p.hasDiscountFlag });
+      rows.push({ seriesId: it.seriesId, seriesName: seriesById.get(it.seriesId)?.name || null, name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: null, fxRate: null, hasDiscountFlagSnapshot: p.hasDiscountFlag });
       continue;
     }
 
@@ -109,7 +115,7 @@ export async function POST(req: Request) {
       const subtotal = qty * unit;
       orderTotal += subtotal;
       giftConvTotal += subtotal;
-      rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: null, fxRate: null, hasDiscountFlagSnapshot: p.hasDiscountFlag });
+      rows.push({ seriesId: it.seriesId, seriesName: seriesById.get(it.seriesId)?.name || null, name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: null, fxRate: null, hasDiscountFlagSnapshot: p.hasDiscountFlag });
       continue;
     }
 
@@ -121,7 +127,7 @@ export async function POST(req: Request) {
     const unit = ceilToTwd(p.price, rate);
     const subtotal = qty * unit;
     orderTotal += subtotal;
-    rows.push({ name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: p.price, fxRate: rate, hasDiscountFlagSnapshot: p.hasDiscountFlag });
+    rows.push({ seriesId: it.seriesId, seriesName: seriesById.get(it.seriesId)?.name || null, name: it.name, style, qty, unit, subtotal, imageUrl: p.imageUrl, unitOriginal: p.price, fxRate: rate, hasDiscountFlagSnapshot: p.hasDiscountFlag });
   }
   if (anyDisabledCombo) return NextResponse.json({ error: "這個交易方式與滿贈組合目前未開放，請重新選擇" }, { status: 400 });
   if (rows.length === 0) return NextResponse.json({ error: "請至少選擇一項商品的數量" }, { status: 400 });
@@ -160,8 +166,8 @@ export async function POST(req: Request) {
       .from("orders")
       .insert({
         order_no: orderNo,
-        series_id: seriesId,
-        series_name_snapshot: series.name,
+        series_id: series ? series.id : null,
+        series_name_snapshot: series ? series.name : null,
         username: member.username,
         profile_url: member.profile_url,
         payment,
@@ -190,6 +196,8 @@ export async function POST(req: Request) {
     unit_price_original: r.unitOriginal,
     fx_rate: r.fxRate,
     has_discount_flag_snapshot: r.hasDiscountFlagSnapshot,
+    series_id: (r as any).seriesId || null,
+    series_name_snapshot: (r as any).seriesName || null,
   }));
   const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
   if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 });

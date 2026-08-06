@@ -137,6 +137,10 @@ create index if not exists idx_order_items_order on order_items (order_id);
 alter table order_items add column if not exists unit_price_original numeric; -- 原幣（人民幣）單價快照
 alter table order_items add column if not exists fx_rate numeric; -- 下單當下套用的匯率快照
 alter table order_items add column if not exists has_discount_flag_snapshot boolean; -- 下單當下這個商品是否標記滿減(v)
+-- 一次結帳只產生一張訂單（滿贈要跨系列合併計算，不能再依系列拆單），
+-- 所以「這個品項屬於哪個系列」改記在品項層級，orders.series_id 只在單一系列訂單時填寫
+alter table order_items add column if not exists series_id uuid references series(id) on delete set null;
+alter table order_items add column if not exists series_name_snapshot text;
 
 -- updated_at 自動更新
 create or replace function set_updated_at() returns trigger as $$
