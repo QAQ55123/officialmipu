@@ -2512,19 +2512,28 @@ export default function Home() {
                                       const atStyleMax = s.max > 0 && picked >= s.max;
                                       const quotaUsedUp = pickedTotal >= quota.quota;
                                       return (
-                                        <div key={s.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                                          <span style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                            {s.imageUrl && <img src={s.imageUrl} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />}
-                                            {s.styleName}
-                                            {s.unlocked === false && <span style={{ color: "var(--muted)", fontSize: 12 }}>（金額未達門檻）</span>}
-                                            {s.unlocked !== false && s.max === 0 && <span style={{ color: "var(--muted)", fontSize: 12 }}>（可選額度已用完）</span>}
-                                            {s.unlocked !== false && atStyleMax && !quotaUsedUp && <span style={{ color: "var(--muted)", fontSize: 12 }}>（已達這款上限 {s.max}）</span>}
-                                            {s.unlocked !== false && s.max > 0 && quotaUsedUp && picked < s.max && <span style={{ color: "var(--muted)", fontSize: 12 }}>（可選總數已滿）</span>}
+                                        <div key={s.giftStyleId} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 8 }}>
+                                          <span style={{ display: "flex", alignItems: "flex-start", gap: 8, flex: "1 1 auto", minWidth: 0 }}>
+                                            {s.imageUrl && <img src={s.imageUrl} alt="" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 5, flexShrink: 0 }} />}
+                                            <span style={{ minWidth: 0 }}>
+                                              <span style={{ fontSize: 13, display: "block", wordBreak: "break-word" }}>{s.styleName}</span>
+                                              {(() => {
+                                                // 提示文字放名稱下方獨立一行，每一列結構才會一致（放後面會讓每行長度參差不齊）
+                                                let hint = "";
+                                                if (s.unlocked === false) hint = "金額未達門檻";
+                                                else if (s.max === 0) hint = "可選額度已用完";
+                                                else if (quotaUsedUp && picked < s.max) hint = "可選總數已滿";
+                                                else if (atStyleMax) hint = `已達這款上限 ${s.max}`;
+                                                return hint ? (
+                                                  <span style={{ fontSize: 11, color: "var(--muted)", display: "block", marginTop: 2 }}>{hint}</span>
+                                                ) : null;
+                                              })()}
+                                            </span>
                                           </span>
-                                          <div className="stepper">
+                                          <div className="stepper" style={{ flexShrink: 0 }}>
                                             <button className="step-btn" disabled={giftLoading || picked <= 0} onClick={() => adjustGiftPick(s.giftStyleId, -1, s.max)}>－</button>
                                             <input className="qty" value={picked} readOnly />
-                                            <button className="step-btn" disabled={giftLoading || picked >= s.max} onClick={() => adjustGiftPick(s.giftStyleId, 1, s.max)}>＋</button>
+                                            <button className="step-btn" disabled={giftLoading || picked >= s.max || quotaUsedUp} onClick={() => adjustGiftPick(s.giftStyleId, 1, s.max)}>＋</button>
                                           </div>
                                         </div>
                                       );
