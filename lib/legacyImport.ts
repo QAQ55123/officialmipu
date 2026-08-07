@@ -232,22 +232,43 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
     const giftStyleName = norm(r["滿贈款式"]);
     const giftQty = Number(r["滿贈數量"] || 0);
 
-    if (!groupKey && !nickname && !planName && !productName) return;
-    if (!groupKey || !nickname || !planName || !productName || !qty) {
-      rowErrors.push(`第 ${rowNo} 列：缺少必填欄位，已略過`);
+    // 整列都空白就跳過
+    if (!groupKey && !nickname && !planName && !productName && !giftStyleName) return;
+
+    // 一張訂單的滿贈可能有好幾個款式，一列只能填一個，所以允許「只填滿贈、商品欄位留空」的列。
+    // 這種列只補滿贈，不會被當成商品，也就不需要商品名稱/數量/單價。
+    const isGiftOnlyRow = !productName && !!giftStyleName && giftQty > 0;
+
+    if (!groupKey) {
+      rowErrors.push(`第 ${rowNo} 列：缺少訂單分組代號，已略過`);
       return;
     }
-    if (!campaignName) {
-      rowErrors.push(`第 ${rowNo} 列：缺少檔期名稱，已略過（檔期名稱是必填，訂單要能對應到現有的檔期）`);
+    if (!isGiftOnlyRow) {
+      if (!nickname || !planName || !productName || !qty) {
+        rowErrors.push(`第 ${rowNo} 列：缺少必填欄位，已略過`);
+        return;
+      }
+      if (!campaignName) {
+        rowErrors.push(`第 ${rowNo} 列：缺少檔期名稱，已略過（檔期名稱是必填，訂單要能對應到現有的檔期）`);
+        return;
+      }
+      if (!["匯款", "取付"].includes(payment)) {
+        rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
+        return;
+      }
+    }
+
+    // 只填滿贈的列，必須依附在已經出現過的訂單上（不能自己開一張新訂單）
+    if (isGiftOnlyRow && !groups.has(groupKey)) {
+      rowErrors.push(`第 ${rowNo} 列：這一列只有滿贈資料，但找不到訂單分組代號「${groupKey}」的商品列（滿贈列要放在該訂單的商品列後面）`);
       return;
     }
-    if (!["匯款", "取付"].includes(payment)) {
-      rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
-      return;
-    }
+
     if (!groups.has(groupKey)) groups.set(groupKey, { groupKey, nickname, fbUrl, planName, campaignName, payment, paidAmount, orderDate, originalOrderNo, items: [], gifts: [], wantsGift: false });
     const grp = groups.get(groupKey)!;
-    grp.items.push({ name: productName, style, qty, unitPrice, planName, unitPriceOriginal, fxRate, hasDiscountFlag });
+    if (!isGiftOnlyRow) {
+      grp.items.push({ name: productName, style, qty, unitPrice, planName, unitPriceOriginal, fxRate, hasDiscountFlag });
+    }
     if (giftStyleName && giftQty > 0) {
       const existing = grp.gifts.find((g) => g.styleName === giftStyleName);
       if (existing) existing.qty += giftQty;
