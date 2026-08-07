@@ -202,7 +202,8 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
 
   // 一次結帳＝一張訂單：同一個分組代號就是一張訂單，即使裡面有不同系列的商品，
   // 所以系列改記在品項層級（planName 只保留第一筆當作訂單層級的顯示用途）
-  type Group = { groupKey: string; nickname: string; fbUrl: string; planName: string; campaignName: string; payment: string; paidAmount: number; orderDate: Date; originalOrderNo: string; items: { name: string; style: string; qty: number; unitPrice: number; planName: string }[] };
+  type Group = { groupKey: string; nickname: string; fbUrl: string; planName: string; campaignName: string; payment: string; paidAmount: number; orderDate: Date; originalOrderNo: string; items: { name: string; style: string; qty: number; unitPrice: number; planName: string; unitPriceOriginal: number | null; fxRate: number | null; hasDiscountFlag: boolean }[];
+    gifts: { styleName: string; qty: number }[]; wantsGift: boolean };
   const groups = new Map<string, Group>();
   const rowErrors: string[] = [];
 
@@ -221,6 +222,15 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
     const paidAmount = Number(r["已收金額"] || 0);
     const orderDate = parseFlexibleDate(r["下單日期"]);
     const originalOrderNo = norm(r["原始訂單編號"]); // 選填，舊系統原本的訂單編號，有填的話會保留（不足9碼補0）
+    // 拆單工具完全依賴原幣金額計算，沒有這欄的舊訂單在拆單池裡會變成壞資料，所以要一併匯入
+    const unitPriceOriginalRaw = r["原幣單價"];
+    const unitPriceOriginal = unitPriceOriginalRaw === "" || unitPriceOriginalRaw == null ? null : Number(unitPriceOriginalRaw);
+    const fxRateRaw = r["匯率"];
+    const fxRate = fxRateRaw === "" || fxRateRaw == null ? null : Number(fxRateRaw);
+    const hasDiscountFlag = norm(r["是否滿減"]).toLowerCase() === "v";
+    // 滿贈：一列可以填一個款式與數量，同一張訂單的滿贈分散在該訂單的任意幾列都可以
+    const giftStyleName = norm(r["滿贈款式"]);
+    const giftQty = Number(r["滿贈數量"] || 0);
 
     if (!groupKey && !nickname && !planName && !productName) return;
     if (!groupKey || !nickname || !planName || !productName || !qty) {
@@ -235,8 +245,15 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
       return;
     }
-    if (!groups.has(groupKey)) groups.set(groupKey, { groupKey, nickname, fbUrl, planName, campaignName, payment, paidAmount, orderDate, originalOrderNo, items: [] });
-    groups.get(groupKey)!.items.push({ name: productName, style, qty, unitPrice, planName });
+    if (!groups.has(groupKey)) groups.set(groupKey, { groupKey, nickname, fbUrl, planName, campaignName, payment, paidAmount, orderDate, originalOrderNo, items: [], gifts: [], wantsGift: false });
+    const grp = groups.get(groupKey)!;
+    grp.items.push({ name: productName, style, qty, unitPrice, planName, unitPriceOriginal, fxRate, hasDiscountFlag });
+    if (giftStyleName && giftQty > 0) {
+      const existing = grp.gifts.find((g) => g.styleName === giftStyleName);
+      if (existing) existing.qty += giftQty;
+      else grp.gifts.push({ styleName: giftStyleName, qty: giftQty });
+      grp.wantsGift = true;
+    }
   });
 
   const planCache = new Map<string, any>();
@@ -295,6 +312,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       const paddedOrderNo = g.originalOrderNo ? padOrderNo(g.originalOrderNo) : genOrderNo();
       const { data: order, error: orderErr } = await supabase.from("orders").insert({
         order_no: paddedOrderNo, series_id: plan ? plan.id : null, series_name_snapshot: plan ? g.items[0].planName : null,
+        wants_gift: g.wantsGift,
         campaign_id: campaign.id,
         username: targetUsername, profile_url: profileUrl, payment: g.payment, paid_amount: g.paidAmount,
         created_at: g.orderDate.toISOString(), legacy_identity_id: identity ? identity.id : null, legacy_unmatched: !identity,
@@ -307,9 +325,44 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
             : orderErr.message
         );
       }
-      const itemRows = g.items.map((it, idx) => ({ order_id: order.id, product_name: it.name, style: it.style, qty: it.qty, unit_price: it.unitPrice, subtotal: it.qty * it.unitPrice, series_id: planByItemIndex[idx]?.id || null, series_name_snapshot: it.planName }));
+      const itemRows = g.items.map((it, idx) => ({
+        order_id: order.id, product_name: it.name, style: it.style, qty: it.qty,
+        unit_price: it.unitPrice, subtotal: it.qty * it.unitPrice,
+        series_id: planByItemIndex[idx]?.id || null, series_name_snapshot: it.planName,
+        unit_price_original: it.unitPriceOriginal,
+        fx_rate: it.fxRate,
+        has_discount_flag_snapshot: it.hasDiscountFlag,
+      }));
       const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
       if (itemsErr) throw new Error(itemsErr.message);
+
+      // 滿贈：比照正常下單流程寫進 order_gift_selections，讓拆單工具的缺口總覽算得到這些訂單
+      if (g.gifts.length > 0) {
+        const { data: campaignGiftStyles } = await supabase
+          .from("gift_styles")
+          .select("id, style_name, image_url")
+          .eq("campaign_id", campaign.id);
+        const styleByName = new Map((campaignGiftStyles || []).map((s: any) => [s.style_name, s]));
+        const giftRows: any[] = [];
+        for (const gift of g.gifts) {
+          const matched = styleByName.get(gift.styleName);
+          if (!matched) {
+            rowErrors.push(`訂單 ${g.groupKey}：找不到滿贈款式「${gift.styleName}」（此檔期沒有登記這個款式），該筆滿贈已略過`);
+            continue;
+          }
+          giftRows.push({
+            order_id: order.id,
+            gift_style_id: matched.id,
+            style_name_snapshot: matched.style_name,
+            image_url_snapshot: matched.image_url || null,
+            qty: gift.qty,
+          });
+        }
+        if (giftRows.length > 0) {
+          const { error: giftErr } = await supabase.from("order_gift_selections").insert(giftRows);
+          if (giftErr) rowErrors.push(`訂單 ${g.groupKey}：滿贈寫入失敗（${giftErr.message}）`);
+        }
+      }
 
       // 匯入舊訂單如果是取付，比照正常下單流程，一併累加進該檔期的取付已用額度
       if (g.payment === "取付") {
