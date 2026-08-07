@@ -34,6 +34,9 @@ type Identity = { username: string; profileUrl: string; email: string; emailVeri
 type PendingAction = null | "order" | "history" | "favorites" | "checkout";
 
 const fmt = (n: number) => new Intl.NumberFormat("zh-TW").format(Math.round(n));
+/** 原幣（人民幣）金額：保留小數，例如 19.9 就顯示 19.9，不做四捨五入。
+ *  台幣換算後的金額仍然用 fmt() 取整數。 */
+const fmtOriginal = (n: number) => new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 2 }).format(n);
 // 這件商品單獨算，會不會自己就已經達到廠商滿贈上限（2.7節拆單邏輯的簡化版，只看單一商品）
 /**
  * 獨立網頁（/gift）專用價格判斷：
@@ -1821,7 +1824,7 @@ export default function Home() {
                               </span>
                             </span>
                           ) : (
-                            <span className="product-price-v3"><span style={{ fontSize: "0.7em" }}>{current.linkedGiftStyleId ? "NT$" : "￥"}</span>{fmt(current.price)}</span>
+                            <span className="product-price-v3"><span style={{ fontSize: "0.7em" }}>{current.linkedGiftStyleId ? "NT$" : "￥"}</span>{current.linkedGiftStyleId ? fmt(current.price) : fmtOriginal(current.price)}</span>
                           )}
                           <button
                             className={`favorite-icon-btn ${favoritedPlanIds.has(activePlan.id) ? "active" : ""}`}
@@ -1890,7 +1893,7 @@ export default function Home() {
                         )}
 
                         <div className="product-checkout-row">
-                          <span className="product-checkout-total">合計 {current.linkedGiftStyleId ? "NT$" : "￥"} {fmt(cartTotal)}</span>
+                          <span className="product-checkout-total">合計 {current.linkedGiftStyleId ? "NT$" : "￥"} {current.linkedGiftStyleId ? fmt(cartTotal) : fmtOriginal(cartTotal)}</span>
                           <button
                             className="btn"
                             disabled={cartCount === 0}
@@ -2000,7 +2003,7 @@ export default function Home() {
                                   <div>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</div>
                                   {it.hasDiscountFlagSnapshot && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>}
                                   {it.unitPriceOriginal != null && it.fxRate != null && (
-                                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmt(it.unitPriceOriginal)} × 匯率 {it.fxRate}</div>
+                                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmtOriginal(it.unitPriceOriginal)} × 匯率 {it.fxRate}</div>
                                   )}
                                 </div>
                               </div>
@@ -2186,7 +2189,7 @@ export default function Home() {
                                     匯款 NT$ {fmt(e.altSiteBankPrice ?? 0)} ／ 取付 NT$ {fmt(e.altSiteCodPrice ?? 0)} 每件
                                   </span>
                                 ) : (
-                                  <span className="cart-item-unit-price">{currencySymbol} {fmt(e.price)} / 件</span>
+                                  <span className="cart-item-unit-price">{currencySymbol} {currencySymbol === "￥" ? fmtOriginal(e.price) : fmt(e.price)} / 件</span>
                                 )}
                               </div>
                             </div>
@@ -2206,7 +2209,7 @@ export default function Home() {
                               ) : (
                                 <span style={{ fontSize: 13, color: "var(--muted)" }}>x{e.qty}</span>
                               )}
-                              {!showAltPrice && <span className="cart-item-price">{currencySymbol} {fmt(e.qty * e.price)}</span>}
+                              {!showAltPrice && <span className="cart-item-price">{currencySymbol} {currencySymbol === "￥" ? fmtOriginal(e.qty * e.price) : fmt(e.qty * e.price)}</span>}
                               <span className="cart-item-remove" onClick={() => removeCartItem(planId, e.productName, e.style)} title="移除">×</span>
                             </div>
                           </div>
@@ -2226,7 +2229,7 @@ export default function Home() {
                             <div style={{ marginTop: 2 }}><span style={{ color: "var(--muted)" }}>小計（取付）</span> <span style={{ fontWeight: 700 }}>NT$ {fmt(groupAltCodTotal)}</span></div>
                           </div>
                         ) : (
-                          <span style={{ fontWeight: 600 }}>小計 {groupIsGiftConv ? "NT$" : "￥"} {fmt(groupTotal)}</span>
+                          <span style={{ fontWeight: 600 }}>小計 {groupIsGiftConv ? "NT$" : "￥"} {groupIsGiftConv ? fmt(groupTotal) : fmtOriginal(groupTotal)}</span>
                         )}
                         <button className="btn small secondary" onClick={() => removeCartGroup(planId)}>清除這組</button>
                       </div>
@@ -2246,7 +2249,7 @@ export default function Home() {
                   <div className="cart-checkout-bar">
                     <span>
                       已選 <strong>{selectedCartKeys.size}</strong> 項商品　
-                      合計 <strong>￥ {fmt(
+                      合計 <strong>￥ {fmtOriginal(
                         globalCart
                           .filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)))
                           .reduce((s, e) => s + e.qty * e.price, 0)
@@ -2412,10 +2415,10 @@ export default function Home() {
                                           {(cartPlanStatus[e.planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag) && (
                                             <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>
                                           )}
-                                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{currencySymbol}{fmt(displayUnitPrice)} ／件</div>
+                                          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{currencySymbol}{currencySymbol === "￥" ? fmtOriginal(displayUnitPrice) : fmt(displayUnitPrice)} ／件</div>
                                         </div>
                                       </div>
-                                      <span className="cart-item-price">{currencySymbol}{fmt(e.qty * displayUnitPrice)}</span>
+                                      <span className="cart-item-price">{currencySymbol}{currencySymbol === "￥" ? fmtOriginal(e.qty * displayUnitPrice) : fmt(e.qty * displayUnitPrice)}</span>
                                     </div>
                                     {singleCap != null && (
                                       <div style={{ fontSize: 12, color: "#993C1D", marginTop: 4 }}>
@@ -2556,7 +2559,7 @@ export default function Home() {
                                           {key === "unavailable" ? "此組合目前未開放" : `${g.hasDiscountFlag ? "滿減商品" : "一般商品"} × 匯率 ${g.rate}`}
                                         </div>
                                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                                          <span>￥{fmt(g.original)}</span>
+                                          <span>￥{fmtOriginal(g.original)}</span>
                                           <span style={{ fontWeight: 600 }}>NT$ {fmt(g.twd)}</span>
                                         </div>
                                       </div>
@@ -2564,7 +2567,10 @@ export default function Home() {
                                   const detailTitle = (text: string) => (
                                     <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", margin: "0 0 6px" }}>{text}</div>
                                   );
-                                  const showTitles = wantsGift && (overCapRateGroups.size > 0 || giftConversionTotal > 0);
+                                  // 只要明細裡同時存在多個類別，就要標示每一區是什麼，跟有沒有勾選滿贈無關
+                                  // （滿贈系列商品是獨立的商品類別，不標的話顧客看不懂那筆金額是什麼）
+                                  const sectionCount = (rateGroups.size > 0 ? 1 : 0) + (overCapRateGroups.size > 0 ? 1 : 0) + (giftConversionTotal > 0 ? 1 : 0);
+                                  const showTitles = sectionCount > 1;
                                   return (
                                     <>
                                       {rateGroups.size > 0 && (
