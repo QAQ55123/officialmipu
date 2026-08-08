@@ -57,6 +57,10 @@ function SearchableBatchPicker({
   );
 }
 
+/** 原幣金額格式化：保留小數（商品單價可能有小數，例如 19.9），最多兩位 */
+const fmtAmount = (n: number) =>
+  new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+
 export default function PurchaseBatchesPage() {
   const params = useParams();
   const router = useRouter();
@@ -411,6 +415,7 @@ export default function PurchaseBatchesPage() {
       await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${activeBatchForArrival.id}/arrival`, "POST", { orderNumber: newOrderNumber });
       setNewOrderNumber("");
       loadArrivalTree(activeBatchForArrival.id);
+      loadPurchaseBatchesData(); // 採購單列表的「已採購／尚未採購」狀態要跟著更新
     } catch (e: any) {
       setMsg(e.message || "新增失敗");
     }
@@ -421,6 +426,7 @@ export default function PurchaseBatchesPage() {
     if (!confirm("確定要刪除這個廠商訂單編號嗎？底下的物流單號也會一起刪除。")) return;
     await callJson(`/api/admin/order-numbers/${orderNumberId}`, "DELETE", {});
     loadArrivalTree(activeBatchForArrival.id);
+    loadPurchaseBatchesData(); // 刪光訂單編號後，狀態要變回「尚未採購」
   }
 
   async function addShipment(orderNumberId: string) {
@@ -519,12 +525,25 @@ export default function PurchaseBatchesPage() {
 
           {tab === "batches" && (
             <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                <select value={newBatchPlatformId} onChange={(e) => setNewBatchPlatformId(e.target.value)} style={{ padding: 8 }}>
+                  <option value="">（尚未指定平台）</option>
+                  {vendorPlatforms.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <button className="btn small" onClick={createPurchaseBatch}>新增採購單</button>
+                <button className="btn small secondary" onClick={autoSplit} disabled={autoSplitting}>
+                  {autoSplitting ? "自動分配中…" : "自動分配未分配品項"}
+                </button>
+              </div>
+
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>未分配品項池</div>
                 {unassignedPool.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>沒有未分配的品項</div>}
                 {unassignedPool.map((it) => (
                   <div key={it.orderItemId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
-                    <span style={{ fontSize: 13, minWidth: 200 }}>{it.username}：{it.seriesName ? `${it.seriesName} / ` : ""}{it.productName}{it.style ? `（${it.style}）` : ""} 剩 {it.qty} 件（￥{it.unitPriceOriginal ?? it.unitPrice}/件）</span>
+                    <span style={{ fontSize: 13, minWidth: 200 }}>{it.username}：{it.seriesName ? `${it.seriesName} / ` : ""}{it.productName}{it.style ? `（${it.style}）` : ""} 剩 {it.qty} 件（￥{fmtAmount(it.unitPriceOriginal ?? it.unitPrice)}/件）</span>
                     <input
                       type="number"
                       placeholder="數量"
@@ -542,19 +561,6 @@ export default function PurchaseBatchesPage() {
                     <button className="btn small secondary" onClick={() => assignItemToBatch(it.orderItemId)}>分配</button>
                   </div>
                 ))}
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-                <select value={newBatchPlatformId} onChange={(e) => setNewBatchPlatformId(e.target.value)} style={{ padding: 8 }}>
-                  <option value="">（尚未指定平台）</option>
-                  {vendorPlatforms.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-                <button className="btn small" onClick={createPurchaseBatch}>新增採購單</button>
-                <button className="btn small secondary" onClick={autoSplit} disabled={autoSplitting}>
-                  {autoSplitting ? "自動分配中…" : "自動分配未分配品項"}
-                </button>
               </div>
 
               {purchaseBatches.length > 0 && (
@@ -644,7 +650,7 @@ export default function PurchaseBatchesPage() {
                         onDragEnd={() => setDraggedItem(null)}
                         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 6px", cursor: "grab", borderRadius: 6, background: draggedItem?.batchItemId === it.id ? "#F1EFE8" : "transparent" }}
                       >
-                        <span>⠿ {it.username}：{it.seriesName ? `${it.seriesName} / ` : ""}{it.productName}{it.style ? `（${it.style}）` : ""} x{it.qty}（￥{it.unitPriceOriginal}/件）</span>
+                        <span>⠿ {it.username}：{it.seriesName ? `${it.seriesName} / ` : ""}{it.productName}{it.style ? `（${it.style}）` : ""} x{it.qty}（￥{fmtAmount(it.unitPriceOriginal)}/件）</span>
                         <span style={{ display: "flex", gap: 6 }}>
                           {it.qty > 1 && (
                             <button className="btn small secondary" onClick={() => setSplitOpenForItem(splitOpenForItem === it.id ? null : it.id)}>拆分搬移</button>
@@ -712,9 +718,9 @@ export default function PurchaseBatchesPage() {
                   ))}
 
                   <div style={{ fontSize: 13, marginTop: 8, color: "#5F5E5A" }}>
-                    原幣小計 ￥{Math.round(b.subtotalOriginal).toLocaleString("zh-TW")}
+                    原幣小計 ￥{fmtAmount(b.subtotalOriginal)}
                     {b.discountableOriginal != null && b.discountableOriginal !== b.subtotalOriginal && (
-                      <span>　（可折金額 ￥{Math.round(b.discountableOriginal).toLocaleString("zh-TW")}，只算有滿減標記的商品）</span>
+                      <span>　（可折金額 ￥{fmtAmount(b.discountableOriginal)}，只算有滿減標記的商品）</span>
                     )}
                     {b.matchedThresholdAmount != null && <span>　達門檻￥{b.matchedThresholdAmount}，折扣￥{b.matchedDiscountAmount}</span>}
                   </div>
@@ -728,7 +734,7 @@ export default function PurchaseBatchesPage() {
                     />
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>
-                    實收 ￥{Math.round(b.netReceivable).toLocaleString("zh-TW")}
+                    實收 ￥{fmtAmount(b.netReceivable)}
                   </div>
 
                   <div style={{ marginTop: 10, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
@@ -981,7 +987,7 @@ export default function PurchaseBatchesPage() {
             </div>
           ))}
 
-          <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => setActiveBatchForArrival(null)}>返回採購單列表</button>
+          <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => { setActiveBatchForArrival(null); loadPurchaseBatchesData(); }}>返回採購單列表</button>
         </div>
       )}
 
