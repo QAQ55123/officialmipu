@@ -30,7 +30,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   // 拆單試算匯率與指定平台（用來把贈品台幣售價換算成原幣、取每款上限）
   const { data: campaignRow } = await supabase
     .from("campaigns")
-    .select("split_calc_fx_rate, checkout_gift_platform_id")
+    .select("split_calc_fx_rate, checkout_gift_platform_id, gift_base_unit")
     .eq("id", params.id)
     .maybeSingle();
 
@@ -229,9 +229,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     createdCount++;
     platformUsage.set(bestPlatform.name, (platformUsage.get(bestPlatform.name) || 0) + 1);
 
-    // 這張採購單能配多少滿贈：三層限制（該組總量、該門檻名額數、平台每款上限），
-    // 而且只配還有缺口的款式，缺最多的優先
-    const platformGiftCap = Number(bestPlatform.order_gift_cap) || 0;
+    // 這張採購單能配多少滿贈。總量上限 = min(floor(組金額 ÷ 基礎單位), 平台單筆上限)——
+    // 這一層之前漏掉了，只用平台固定上限去擋，導致金額不足的採購單也被配滿
+    // （例：359元、基礎100 → floor(359/100)=3 才對，卻用平台上限5去擋而配出4個）。
+    const giftBaseUnit = Number(campaignRow?.gift_base_unit) || 100;
+    const platformGiftCap = Math.min(
+      Math.floor(g.groupAmount / giftBaseUnit),
+      Number(bestPlatform.order_gift_cap) || 0
+    );
     if (platformGiftCap > 0) {
       const slotsLeft = new Map<number, number>();
       giftStyles.forEach((s) => {
