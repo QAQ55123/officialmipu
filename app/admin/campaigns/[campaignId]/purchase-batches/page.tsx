@@ -524,7 +524,7 @@ export default function PurchaseBatchesPage() {
                 {unassignedPool.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>沒有未分配的品項</div>}
                 {unassignedPool.map((it) => (
                   <div key={it.orderItemId} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
-                    <span style={{ fontSize: 13, minWidth: 200 }}>{it.username}：{it.productName}{it.style ? `（${it.style}）` : ""} 剩 {it.qty} 件（￥{it.unitPriceOriginal ?? it.unitPrice}/件）</span>
+                    <span style={{ fontSize: 13, minWidth: 200 }}>{it.username}：{it.seriesName ? `${it.seriesName} / ` : ""}{it.productName}{it.style ? `（${it.style}）` : ""} 剩 {it.qty} 件（￥{it.unitPriceOriginal ?? it.unitPrice}/件）</span>
                     <input
                       type="number"
                       placeholder="數量"
@@ -644,7 +644,7 @@ export default function PurchaseBatchesPage() {
                         onDragEnd={() => setDraggedItem(null)}
                         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 6px", cursor: "grab", borderRadius: 6, background: draggedItem?.batchItemId === it.id ? "#F1EFE8" : "transparent" }}
                       >
-                        <span>⠿ {it.username}：{it.productName}{it.style ? `（${it.style}）` : ""} x{it.qty}（￥{it.unitPriceOriginal}/件）</span>
+                        <span>⠿ {it.username}：{it.seriesName ? `${it.seriesName} / ` : ""}{it.productName}{it.style ? `（${it.style}）` : ""} x{it.qty}（￥{it.unitPriceOriginal}/件）</span>
                         <span style={{ display: "flex", gap: 6 }}>
                           {it.qty > 1 && (
                             <button className="btn small secondary" onClick={() => setSplitOpenForItem(splitOpenForItem === it.id ? null : it.id)}>拆分搬移</button>

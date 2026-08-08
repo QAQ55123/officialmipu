@@ -139,7 +139,59 @@ function candidatePartitions(pieces: SplitPiece[], tiers: DiscountTier[], giftRu
     }
   }
 
-  // ③ 平均分成 k 組（避免上面兩種都漏掉的中間情況）
+  // ③ 挑「加進去後最接近門檻」的品項來湊：
+  //    照排序硬拿下一件，常常會超過門檻很多（例：286再拿一件69就變355，浪費55），
+  //    改成從剩餘品項裡挑最適合的那一件，讓每組盡量剛好卡在門檻上，多出來的錢才能留給下一組。
+  for (const cut of cutPoints) {
+    const remaining = [...pieces];
+    const groups: SplitPiece[][] = [];
+    let cur: SplitPiece[] = [];
+    let curAmount = 0;
+
+    while (remaining.length > 0) {
+      // 先找「加進去剛好達到門檻、而且超過最少」的那一件
+      let bestIdx = -1;
+      let bestOvershoot = Infinity;
+      remaining.forEach((p, i) => {
+        const after = curAmount + p.amount;
+        if (after >= cut) {
+          const overshoot = after - cut;
+          if (overshoot < bestOvershoot) {
+            bestOvershoot = overshoot;
+            bestIdx = i;
+          }
+        }
+      });
+
+      if (bestIdx >= 0) {
+        // 找得到就用它收尾，這組剛好卡在門檻附近
+        cur.push(remaining[bestIdx]);
+        curAmount += remaining[bestIdx].amount;
+        remaining.splice(bestIdx, 1);
+        groups.push(cur);
+        cur = [];
+        curAmount = 0;
+      } else {
+        // 還沒有任何一件能達到門檻，就拿最大的那件繼續累積
+        let maxIdx = 0;
+        remaining.forEach((p, i) => {
+          if (p.amount > remaining[maxIdx].amount) maxIdx = i;
+        });
+        cur.push(remaining[maxIdx]);
+        curAmount += remaining[maxIdx].amount;
+        remaining.splice(maxIdx, 1);
+      }
+    }
+
+    if (cur.length > 0) {
+      if (groups.length > 0) results.push(groups.map((g, i) => (i === groups.length - 1 ? [...g, ...cur] : g)));
+      results.push([...groups, cur]);
+    } else if (groups.length > 0) {
+      results.push(groups);
+    }
+  }
+
+  // ④ 平均分成 k 組（避免上面幾種都漏掉的中間情況）
   for (let k = 2; k <= Math.min(pieces.length, 20); k++) {
     const buckets: SplitPiece[][] = Array.from({ length: k }, () => []);
     const sums = new Array(k).fill(0);

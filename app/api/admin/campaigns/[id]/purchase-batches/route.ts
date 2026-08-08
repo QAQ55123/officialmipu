@@ -23,7 +23,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const batchIds = (batches || []).map((b) => b.id);
 
   const { data: items } = batchIds.length
-    ? await supabase.from("vendor_purchase_batch_items").select("*, order_items(product_name, style, unit_price, unit_price_original, has_discount_flag_snapshot, order_id, orders(username))").in("batch_id", batchIds)
+    ? await supabase.from("vendor_purchase_batch_items").select("*, order_items(product_name, style, unit_price, unit_price_original, has_discount_flag_snapshot, series_name_snapshot, order_id, orders(username))").in("batch_id", batchIds)
     : { data: [] };
 
   const { data: gifts } = batchIds.length
@@ -79,6 +79,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         id: it.id,
         orderItemId: it.order_item_id,
         username: it.order_items?.orders?.username,
+        seriesName: it.order_items?.series_name_snapshot || null,
         productName: it.order_items?.product_name,
         style: it.order_items?.style,
         qty: it.qty,

@@ -21,7 +21,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("id, username, order_items(id, product_name, style, qty, unit_price, unit_price_original)")
+    .select("id, username, order_items(id, product_name, style, qty, unit_price, unit_price_original, series_name_snapshot)")
     .eq("campaign_id", params.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -50,6 +50,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         pool.push({
           orderItemId: it.id,
           username: o.username,
+          seriesName: it.series_name_snapshot || null,
           productName: it.product_name,
           style: it.style,
           qty: remaining,
