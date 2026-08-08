@@ -101,5 +101,35 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
     };
   });
 
-  return NextResponse.json({ items });
+  // 2.8節：滿贈品項比照一般商品，同樣要顯示到貨狀態、同樣可被勾進出貨批次（運費固定0）
+  const { data: giftSelections } = await supabase
+    .from("order_gift_selections")
+    .select("id, style_name_snapshot, qty")
+    .eq("order_id", order.id);
+
+  const giftIds = (giftSelections || []).map((g: any) => g.id);
+
+  // 滿贈已經被歸進哪些出貨批次
+  const { data: shippedGifts } = giftIds.length
+    ? await supabase.from("shipping_batch_items").select("order_gift_selection_id, qty").in("order_gift_selection_id", giftIds)
+    : { data: [] };
+  const batchedQtyByGift = new Map<string, number>();
+  (shippedGifts || []).forEach((s: any) => {
+    if (!s.order_gift_selection_id) return;
+    batchedQtyByGift.set(s.order_gift_selection_id, (batchedQtyByGift.get(s.order_gift_selection_id) || 0) + s.qty);
+  });
+
+  const gifts = (giftSelections || []).map((g: any) => {
+    const batchedQty = batchedQtyByGift.get(g.id) || 0;
+    return {
+      giftSelectionId: g.id,
+      styleName: g.style_name_snapshot,
+      qty: g.qty,
+      batchedQty,
+      // 滿贈的到貨追蹤走的是採購單那條線，這裡先讓店家能把已經拿到的贈品勾進出貨批次
+      batchableQty: Math.max(0, g.qty - batchedQty),
+    };
+  });
+
+  return NextResponse.json({ items, gifts });
 }

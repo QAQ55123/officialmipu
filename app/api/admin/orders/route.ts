@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: order, error } = await supabase
     .from("orders")
-    .select("*, series(name), order_items(*)")
+    .select("*, series(name), order_items(*), order_gift_selections(gift_style_id, style_name_snapshot, image_url_snapshot, qty)")
     .eq("order_no", orderNo)
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -52,6 +52,14 @@ export async function GET(req: Request) {
         imageUrl: it.image_url,
       })),
       total: (order.order_items || []).reduce((s: number, it: any) => s + Number(it.subtotal), 0),
+      wantsGift: !!order.wants_gift,
+      // 顧客選的滿贈（免費領的），讓店家在後台就能確認資料對不對，不用去顧客端看
+      gifts: (order.order_gift_selections || []).map((g: any) => ({
+        giftStyleId: g.gift_style_id,
+        styleName: g.style_name_snapshot,
+        imageUrl: g.image_url_snapshot,
+        qty: g.qty,
+      })),
     },
   });
 }

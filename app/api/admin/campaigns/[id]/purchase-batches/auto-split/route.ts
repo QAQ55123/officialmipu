@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
-import { splitByDiscountTiers, type SplitPiece, type DiscountTier } from "@/lib/purchaseSplit";
+import { splitByDiscountTiers, type SplitPiece, type DiscountTier, type GiftValueRule } from "@/lib/purchaseSplit";
 
 /**
  * 3.1/3.4節：自動最佳化拆單。只處理目前「未分配品項池」裡的品項（已經手動分配過的不會被動到），
@@ -27,6 +27,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: "這個檔期還沒有設定任何平台，請先到「廠商規則設定」新增平台" }, { status: 400 });
   }
 
+  // 拆單試算匯率與指定平台（用來把贈品台幣售價換算成原幣、取每款上限）
+  const { data: campaignRow } = await supabase
+    .from("campaigns")
+    .select("split_calc_fx_rate, checkout_gift_platform_id")
+    .eq("id", params.id)
+    .maybeSingle();
+
   const { data: giftStyleRows } = await supabase.from("gift_styles").select("id, threshold_amount").eq("campaign_id", params.id);
   const giftStyles = (giftStyleRows || []).map((s) => ({ id: s.id, thresholdAmount: Number(s.threshold_amount) }));
 
@@ -35,18 +42,38 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     ? await supabase.from("vendor_platform_style_caps").select("platform_id, gift_style_id, per_style_cap").in("platform_id", platformIds)
     : { data: [] };
 
-  // 算出「某個金額，在某個平台底下，最多能榨出多少滿贈總量」——用這個當作跨平台比較的依據
+  /**
+   * 算出「某個金額，在某個平台底下，最多能榨出多少滿贈總量」——用這個當作跨平台比較的依據。
+   * 三層限制要一起套用（跟顧客端 lib/giftQuota.ts 的規則一致）：
+   *   ① 該組總量上限（廠商單筆上限）
+   *   ② 該門檻的名額數 floor(組金額 ÷ 門檻)，同門檻的不同款式共用這批名額
+   *   ③ 每款上限
+   * 之前漏掉①②，同門檻的款式會各自算滿再相加，導致高估、選錯平台。
+   */
   function giftValueForPlatform(amount: number, platformId: string, orderGiftCap: number): number {
-    let total = 0;
+    // ② 每個門檻在這一組能開幾個名額（同門檻款式共用）
+    const slotsLeft = new Map<number, number>();
     for (const s of giftStyles) {
       if (s.thresholdAmount <= 0) continue;
-      const amountBasedMax = Math.floor(amount / s.thresholdAmount);
-      if (amountBasedMax <= 0) continue;
-      const cap = (styleCapRows || []).find((c: any) => c.platform_id === platformId && c.gift_style_id === s.id);
-      const effectiveMax = cap ? Math.min(amountBasedMax, cap.per_style_cap) : amountBasedMax;
-      total += effectiveMax;
+      if (!slotsLeft.has(s.thresholdAmount)) slotsLeft.set(s.thresholdAmount, Math.floor(amount / s.thresholdAmount));
     }
-    return Math.min(total, orderGiftCap);
+
+    let total = 0;
+    // 門檻低的先放（低門檻名額多，能塞滿比較多贈品）
+    const sortedStyles = [...giftStyles].sort((a, b) => a.thresholdAmount - b.thresholdAmount);
+    for (const s of sortedStyles) {
+      if (s.thresholdAmount <= 0) continue;
+      if (total >= orderGiftCap) break; // ① 該組總量上限
+      const slots = slotsLeft.get(s.thresholdAmount) ?? 0;
+      if (slots <= 0) continue;
+      const cap = (styleCapRows || []).find((c: any) => c.platform_id === platformId && c.gift_style_id === s.id);
+      const perStyleCap = cap ? cap.per_style_cap : Number.MAX_SAFE_INTEGER; // ③ 每款上限
+      const give = Math.min(perStyleCap, slots, orderGiftCap - total);
+      if (give <= 0) continue;
+      total += give;
+      slotsLeft.set(s.thresholdAmount, slots - give);
+    }
+    return total;
   }
 
   function pickBestPlatform(amount: number): { id: string; name: string } {
@@ -68,7 +95,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   // 撈未分配品項池（邏輯同 unassigned-items，這裡重複一次是因為要保留 order_item_id 才能展開成單件）
   const { data: orders } = await supabase
     .from("orders")
-    .select("id, order_items(id, product_name, style, qty, unit_price_original)")
+    .select("id, order_items(id, product_name, style, qty, unit_price_original, has_discount_flag_snapshot)")
     .eq("campaign_id", params.id);
 
   const orderItemIds: string[] = [];
@@ -94,14 +121,51 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       const remaining = it.qty - allocatedQty;
       const unitAmount = Number(it.unit_price_original) || 0;
       for (let i = 0; i < remaining; i++) {
-        pieces.push({ id: it.id, amount: unitAmount });
+        pieces.push({ id: it.id, amount: unitAmount, hasDiscountFlag: !!it.has_discount_flag_snapshot });
       }
     });
   });
 
   if (pieces.length === 0) return NextResponse.json({ error: "沒有可以自動分配的品項（未分配品項池是空的）" }, { status: 400 });
 
-  const groups = splitByDiscountTiers(pieces, tiers);
+  // 贈品估值：用「滿贈系列商品的台幣售價 ÷ 檔期設定的拆單試算匯率」換成原幣，
+  // 才能跟折扣金額（原幣）放在一起比較，決定「合併拿折扣」還是「拆開多拿贈品」比較划算。
+  const splitFxRate = Number(campaignRow?.split_calc_fx_rate) || 0;
+  const { data: giftSaleProducts } = await supabase
+    .from("products")
+    .select("price, linked_gift_style_id")
+    .not("linked_gift_style_id", "is", null);
+  const twdValueByStyleId = new Map<string, number>();
+  (giftSaleProducts || []).forEach((p: any) => {
+    if (!p.linked_gift_style_id) return;
+    const v = Number(p.price) || 0;
+    // 同一個款式可能有多筆商品紀錄，取最大值當估值
+    if (!twdValueByStyleId.has(p.linked_gift_style_id) || v > (twdValueByStyleId.get(p.linked_gift_style_id) || 0)) {
+      twdValueByStyleId.set(p.linked_gift_style_id, v);
+    }
+  });
+
+  // 依「指定的結帳平台」取每款上限；沒指定就取所有平台中最小的（最保守）
+  const preferredPlatformId = campaignRow?.checkout_gift_platform_id || null;
+  const giftRules: GiftValueRule[] = giftStyles
+    .map((s) => {
+      const twd = twdValueByStyleId.get(s.id) || 0;
+      const valueOriginal = splitFxRate > 0 ? twd / splitFxRate : 0;
+      const caps = (styleCapRows || []).filter((c: any) => c.gift_style_id === s.id);
+      const cap = preferredPlatformId
+        ? caps.find((c: any) => c.platform_id === preferredPlatformId)
+        : null;
+      const perStyleCap = cap
+        ? cap.per_style_cap
+        : caps.length > 0
+          ? Math.min(...caps.map((c: any) => c.per_style_cap))
+          : Number.MAX_SAFE_INTEGER;
+      return { thresholdAmount: s.thresholdAmount, perStyleCap, valueOriginal };
+    })
+    .filter((r) => r.valueOriginal > 0);
+
+  const topPlatformGiftCap = Number(platforms[0]?.order_gift_cap) || 0;
+  const groups = splitByDiscountTiers(pieces, tiers, giftRules, topPlatformGiftCap);
 
   let createdCount = 0;
   const platformUsage = new Map<string, number>();

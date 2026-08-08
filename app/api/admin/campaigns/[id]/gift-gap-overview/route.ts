@@ -33,6 +33,27 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     promisedByStyle.set(s.gift_style_id, (promisedByStyle.get(s.gift_style_id) || 0) + s.qty);
   });
 
+  // 「當商品賣出去的滿贈」也要算進保底：顧客是付錢買的沒錯，但店家一樣得跟廠商拿到那個實體贈品，
+  // 不算進缺口的話採購數量會少估。這些商品在 products 上有 linked_gift_style_id 標記。
+  const { data: giftProducts } = await supabase
+    .from("products")
+    .select("name, style, linked_gift_style_id")
+    .not("linked_gift_style_id", "is", null);
+  if (giftProducts && giftProducts.length > 0 && orderIds.length > 0) {
+    const styleIdByProductKey = new Map(
+      giftProducts.map((p: any) => [`${p.name}||${p.style || ""}`, p.linked_gift_style_id])
+    );
+    const { data: soldItems } = await supabase
+      .from("order_items")
+      .select("product_name, style, qty")
+      .in("order_id", orderIds);
+    (soldItems || []).forEach((it: any) => {
+      const styleId = styleIdByProductKey.get(`${it.product_name}||${it.style || ""}`);
+      if (!styleId) return;
+      promisedByStyle.set(styleId, (promisedByStyle.get(styleId) || 0) + it.qty);
+    });
+  }
+
   const { data: batches } = await supabase.from("vendor_purchase_batches").select("id").eq("campaign_id", params.id);
   const batchIds = (batches || []).map((b) => b.id);
   const { data: allocations } = batchIds.length

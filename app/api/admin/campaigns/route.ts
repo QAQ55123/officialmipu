@@ -50,6 +50,7 @@ export async function POST(req: Request) {
     cod_campaign_cap: body.codCampaignCap ?? null,
     gift_cod_campaign_cap: body.giftCodCampaignCap ?? null,
     checkout_gift_platform_id: body.checkoutGiftPlatformId ?? null,
+    split_calc_fx_rate: body.splitCalcFxRate ?? null,
     gift_base_unit: body.giftBaseUnit ?? 100,
     vendor_order_gift_cap: body.vendorOrderGiftCap ?? null,
   };

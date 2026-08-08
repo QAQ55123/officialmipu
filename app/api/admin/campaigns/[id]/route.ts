@@ -16,7 +16,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 }
 
 const ALLOWED_FIELDS = [
-  "name", "opens_at", "closes_at", "cod_campaign_cap", "gift_cod_campaign_cap", "checkout_gift_platform_id", "gift_base_unit", "vendor_order_gift_cap",
+  "name", "opens_at", "closes_at", "cod_campaign_cap", "gift_cod_campaign_cap", "checkout_gift_platform_id", "split_calc_fx_rate", "gift_base_unit", "vendor_order_gift_cap",
   "txn_bank_discount_gift_enabled", "txn_bank_discount_gift_rate",
   "txn_bank_discount_nogift_enabled", "txn_bank_discount_nogift_rate",
   "txn_bank_nodiscount_gift_enabled", "txn_bank_nodiscount_gift_rate",

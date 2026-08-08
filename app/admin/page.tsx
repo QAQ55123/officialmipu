@@ -64,7 +64,7 @@ export default function AdminPage() {
   });
   const emptyCampaignForm = {
     id: "", name: "", opensAt: "", closesAt: "",
-    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "",
+    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "", splitCalcFxRate: "",
     rates: emptyCampaignRates(),
   };
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -496,6 +496,7 @@ export default function AdminPage() {
       codCampaignCap: c.cod_campaign_cap != null ? String(c.cod_campaign_cap) : "",
       giftCodCampaignCap: c.gift_cod_campaign_cap != null ? String(c.gift_cod_campaign_cap) : "",
       checkoutGiftPlatformId: c.checkout_gift_platform_id || "",
+      splitCalcFxRate: c.split_calc_fx_rate != null ? String(c.split_calc_fx_rate) : "",
       giftBaseUnit: String(c.gift_base_unit ?? 100),
       vendorOrderGiftCap: c.vendor_order_gift_cap != null ? String(c.vendor_order_gift_cap) : "",
       rates,
@@ -524,6 +525,7 @@ export default function AdminPage() {
           cod_campaign_cap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
           gift_cod_campaign_cap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
           checkout_gift_platform_id: campaignForm.checkoutGiftPlatformId || null,
+          split_calc_fx_rate: campaignForm.splitCalcFxRate === "" ? null : Number(campaignForm.splitCalcFxRate),
           gift_base_unit: Number(campaignForm.giftBaseUnit) || 100,
           vendor_order_gift_cap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           ...rateFields,
@@ -536,6 +538,7 @@ export default function AdminPage() {
           codCampaignCap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
           giftCodCampaignCap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
           checkoutGiftPlatformId: campaignForm.checkoutGiftPlatformId || null,
+          splitCalcFxRate: campaignForm.splitCalcFxRate === "" ? null : Number(campaignForm.splitCalcFxRate),
           giftBaseUnit: Number(campaignForm.giftBaseUnit) || 100,
           vendorOrderGiftCap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           rates: rateFields,
@@ -709,6 +712,9 @@ export default function AdminPage() {
   const [orderLookupResult, setOrderLookupResult] = useState<any>(null);
   // 3.3節：挪用機制的主要入口在顧客訂單畫面——顯示每個品項的到貨狀態，未到貨的附上可挪用的候選來源
   const [orderArrivalItems, setOrderArrivalItems] = useState<any[]>([]);
+  // 2.8節：滿贈品項也可以被勾進出貨批次（運費固定0）
+  const [orderArrivalGifts, setOrderArrivalGifts] = useState<any[]>([]);
+  const [batchPickGiftQty, setBatchPickGiftQty] = useState<Record<string, string>>({});
   const [reassignMsg, setReassignMsg] = useState("");
   // 2.8節：出貨批次
   const [shippingBatches, setShippingBatches] = useState<any[]>([]);
@@ -727,15 +733,20 @@ export default function AdminPage() {
 
   async function createShippingBatch() {
     if (!orderLookupResult?.orderNo) return;
-    const items = Object.entries(batchPickQty)
-      .map(([orderItemId, qtyStr]) => ({ type: "item" as const, id: orderItemId, qty: Number(qtyStr) }))
-      .filter((x) => isFinite(x.qty) && x.qty > 0);
+    const items = [
+      ...Object.entries(batchPickQty)
+        .map(([orderItemId, qtyStr]) => ({ type: "item" as const, id: orderItemId, qty: Number(qtyStr) })),
+      // 滿贈品項也能歸進出貨批次，運費固定0（2.8節）
+      ...Object.entries(batchPickGiftQty)
+        .map(([giftSelectionId, qtyStr]) => ({ type: "gift" as const, id: giftSelectionId, qty: Number(qtyStr) })),
+    ].filter((x) => isFinite(x.qty) && x.qty > 0);
     if (items.length === 0) return setShippingMsg("請至少勾選一個品項並填入數量");
     setShippingMsg("");
     try {
       const d = await callJson(`/api/admin/orders/${orderLookupResult.orderNo}/shipping-batches`, "POST", { items });
       setShippingMsg(`已建立出貨批次，這批運費 NT$ ${d.customerShippingFee}`);
       setBatchPickQty({});
+      setBatchPickGiftQty({});
       loadShippingBatches(orderLookupResult.orderNo);
       loadOrderArrivalStatus(orderLookupResult.orderNo);
     } catch (e: any) {
@@ -767,8 +778,10 @@ export default function AdminPage() {
       const r = await fetch(`/api/admin/orders/${orderNo}/arrival-status`);
       const d = await r.json();
       setOrderArrivalItems(d.items || []);
+      setOrderArrivalGifts(d.gifts || []);
     } catch {
       setOrderArrivalItems([]);
+      setOrderArrivalGifts([]);
     }
   }
 
@@ -2480,6 +2493,10 @@ export default function AdminPage() {
               <div className="id-row"><span className="id-label">取付檔期總上限</span><input type="number" value={campaignForm.codCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, codCampaignCap: e.target.value }))} placeholder="留空＝不限" /></div>
               <div className="id-row"><span className="id-label">滿贈系列取付額度上限</span><input type="number" value={campaignForm.giftCodCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, giftCodCampaignCap: e.target.value }))} placeholder="留空＝不限，跟上面的一般商品取付上限分開累計" /></div>
               <div className="id-row">
+                <span className="id-label">拆單試算匯率</span>
+                <input type="number" step="0.01" value={campaignForm.splitCalcFxRate} onChange={(e) => setCampaignForm((f) => ({ ...f, splitCalcFxRate: e.target.value }))} placeholder="例如 4.5，用來把贈品的台幣售價換算成人民幣，跟折扣金額一起比較" />
+              </div>
+              <div className="id-row">
                 <span className="id-label">結帳頁滿贈上限依哪個平台</span>
                 <select value={campaignForm.checkoutGiftPlatformId} onChange={(e) => setCampaignForm((f) => ({ ...f, checkoutGiftPlatformId: e.target.value }))} style={{ flex: 1, padding: 8 }}>
                   <option value="">（未指定，顧客端不套用每款上限）</option>
@@ -3006,7 +3023,12 @@ export default function AdminPage() {
                 <button className="btn small secondary" onClick={() => { if (coverImageUrlInput.trim()) { setProductForm((f) => ({ ...f, coverImageUrl: toDirectImageUrl(coverImageUrlInput.trim()) })); setCoverImageUrlInput(""); } }}>使用</button>
               </div>
               {uploadingCoverImg && <div style={{ fontSize: 12, color: "#8A8779" }}>封面圖上傳中…</div>}
-              {productForm.coverImageUrl && <img src={productForm.coverImageUrl} alt="封面圖預覽" style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8 }} />}
+              {productForm.coverImageUrl && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <img src={productForm.coverImageUrl} alt="封面圖預覽" style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8 }} />
+                  <button className="btn small secondary" onClick={() => setProductForm((f) => ({ ...f, coverImageUrl: "" }))}>移除封面圖</button>
+                </div>
+              )}
             </div>
           </div>
           {!productForm.id && (
@@ -3277,6 +3299,26 @@ export default function AdminPage() {
                       ))}
                       <div style={{ textAlign: "right", fontWeight: 600, marginTop: 8 }}>合計 NT$ {orderLookupResult.total}</div>
 
+                      {/* 顧客選的滿贈，讓店家在後台直接確認（尤其是匯入的舊訂單要能核對） */}
+                      <div style={{ marginTop: 12, borderTop: "1px solid #EDE9DC", paddingTop: 10 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                          滿贈{orderLookupResult.wantsGift === false ? "（顧客未選擇滿贈）" : ""}
+                        </div>
+                        {(orderLookupResult.gifts || []).length === 0 ? (
+                          <div style={{ fontSize: 12, color: "#8A8779" }}>這張訂單沒有滿贈紀錄</div>
+                        ) : (
+                          orderLookupResult.gifts.map((g: any, i: number) => (
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>
+                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                {g.imageUrl && <img src={g.imageUrl} alt="" style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 4 }} />}
+                                {g.styleName}
+                              </span>
+                              <span>x{g.qty}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
                       {orderArrivalItems.length > 0 && (
                         <div style={{ marginTop: 12, borderTop: "1px solid #EDE9DC", paddingTop: 10 }}>
                           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>到貨狀態</div>
@@ -3312,7 +3354,7 @@ export default function AdminPage() {
                               勾選已到貨的品項建立出貨批次（可以只勾其中幾件），系統會算出這批的顧客運費加總。同一張訂單可以分好幾批出貨。
                             </p>
 
-                            {orderArrivalItems.filter((ai: any) => ai.batchableQty > 0).length > 0 ? (
+                            {(orderArrivalItems.filter((ai: any) => ai.batchableQty > 0).length > 0 || orderArrivalGifts.filter((g: any) => g.batchableQty > 0).length > 0) ? (
                               <>
                                 {orderArrivalItems.filter((ai: any) => ai.batchableQty > 0).map((ai: any) => (
                                   <div key={ai.orderItemId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "3px 0" }}>
@@ -3325,6 +3367,23 @@ export default function AdminPage() {
                                       style={{ width: 60, minWidth: 60, padding: 4 }}
                                       value={batchPickQty[ai.orderItemId] || ""}
                                       onChange={(e) => setBatchPickQty((prev) => ({ ...prev, [ai.orderItemId]: e.target.value }))}
+                                    />
+                                  </div>
+                                ))}
+                                {orderArrivalGifts.filter((g: any) => g.batchableQty > 0).map((g: any) => (
+                                  <div key={g.giftSelectionId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "3px 0" }}>
+                                    <span>
+                                      <span style={{ display: "inline-block", fontSize: 10, color: "#6B4E8E", background: "#ECE6F2", padding: "1px 6px", borderRadius: 999, marginRight: 5 }}>滿贈</span>
+                                      {g.styleName}　可出貨 {g.batchableQty} 件（運費0）
+                                    </span>
+                                    <input
+                                      type="number"
+                                      placeholder="0"
+                                      min={0}
+                                      max={g.batchableQty}
+                                      style={{ width: 60, minWidth: 60, padding: 4 }}
+                                      value={batchPickGiftQty[g.giftSelectionId] || ""}
+                                      onChange={(e) => setBatchPickGiftQty((prev) => ({ ...prev, [g.giftSelectionId]: e.target.value }))}
                                     />
                                   </div>
                                 ))}

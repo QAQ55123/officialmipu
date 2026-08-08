@@ -287,6 +287,9 @@ alter table campaigns add column if not exists fulfillment_status text; -- 已�
 alter table campaigns add column if not exists gift_cod_campaign_cap numeric;
 -- 2.7節：顧客結帳當下還不知道這批貨之後會下到哪個平台，由店家指定「結帳頁的滿贈上限要依哪個平台的每款上限計算」
 alter table campaigns add column if not exists checkout_gift_platform_id uuid;
+-- 3.1節：拆單要讓「贈品數＋折扣金額」最大化，但折扣是人民幣、贈品估值是台幣售價，
+-- 兩者要換算成同一幣值才能比較。店家在這裡填一個匯率當作拆單試算的基準。
+alter table campaigns add column if not exists split_calc_fx_rate numeric;
 alter table campaigns add column if not exists gift_cod_campaign_used numeric not null default 0;
 
 alter table gift_styles disable row level security;
