@@ -3292,9 +3292,16 @@ export default function AdminPage() {
                   {!editingOrderItems ? (
                     <>
                       {orderLookupResult.items.map((it: any, idx: number) => (
-                        <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, padding: "4px 0", borderBottom: "1px dashed #EDE9DC" }}>
-                          <span>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</span>
-                          <span>NT$ {it.subtotal}</span>
+                        <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, padding: "4px 0", borderBottom: "1px dashed #EDE9DC", gap: 8 }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                            {it.imageUrl ? (
+                              <img src={it.imageUrl} alt="" loading="lazy" style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, flexShrink: 0 }} />
+                            ) : (
+                              <span style={{ width: 32, height: 32, borderRadius: 4, background: "#F2E9D8", flexShrink: 0, display: "inline-block" }} />
+                            )}
+                            <span style={{ wordBreak: "break-word" }}>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</span>
+                          </span>
+                          <span style={{ flexShrink: 0 }}>NT$ {it.subtotal}</span>
                         </div>
                       ))}
                       <div style={{ textAlign: "right", fontWeight: 600, marginTop: 8 }}>合計 NT$ {orderLookupResult.total}</div>

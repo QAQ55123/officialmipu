@@ -83,6 +83,7 @@ export default function PurchaseBatchesPage() {
   const [assignQtyByItem, setAssignQtyByItem] = useState<Record<string, string>>({});
   const [assignTargetBatchByItem, setAssignTargetBatchByItem] = useState<Record<string, string>>({});
   const [assignSearchByItem, setAssignSearchByItem] = useState<Record<string, string>>({});
+  const [selectedBatchIds, setSelectedBatchIds] = useState<Set<string>>(new Set());
   const [draggedItem, setDraggedItem] = useState<{ orderItemId: string; qty: number; sourceBatchId: string; batchItemId: string } | null>(null);
   const [splitQtyByItem, setSplitQtyByItem] = useState<Record<string, string>>({});
   const [splitTargetByItem, setSplitTargetByItem] = useState<Record<string, string>>({});
@@ -197,7 +198,7 @@ export default function PurchaseBatchesPage() {
     setAutoSplitting(true);
     try {
       const d = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/auto-split`, "POST", {});
-      setMsg(`已自動建立 ${d.createdBatchCount} 張採購單（${d.platformSummary}），可以再手動微調`);
+      setMsg(`已自動建立 ${d.createdBatchCount} 張採購單（${d.platformSummary}）${d.assignedGiftCount ? `，並配置 ${d.assignedGiftCount} 個滿贈（依缺口由大到小分配，剩餘名額留給你自行決定）` : ""}，可以再手動微調`);
       loadPurchaseBatchesData();
     } catch (e: any) {
       setMsg(e.message || "自動分配失敗");
@@ -290,6 +291,57 @@ export default function PurchaseBatchesPage() {
     if (!confirm("確定要刪除這張採購單嗎？裡面的品項會回到未分配池。")) return;
     await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}`, "DELETE", {});
     loadPurchaseBatchesData();
+  }
+
+  async function resetAndAutoSplit() {
+    const purchasedCount = purchaseBatches.filter((b: any) => (b.vendorOrderNumbers || []).length > 0).length;
+    const deletableCount = purchaseBatches.length - purchasedCount;
+    if (deletableCount === 0) return setMsg("沒有可以重新分配的採購單（全部都已登記廠商訂單編號）");
+    if (!confirm(`會清空 ${deletableCount} 張尚未採購的採購單，把品項全部重新拆一次。\n已登記廠商訂單編號的 ${purchasedCount} 張不會被動到。\n確定要繼續嗎？`)) return;
+    setMsg("");
+    setAutoSplitting(true);
+    try {
+      const r = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/reset-split`, "POST", {});
+      const d = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/auto-split`, "POST", {});
+      setMsg(
+        `已清空 ${r.deletedCount} 張採購單並重新分配，建立 ${d.createdBatchCount} 張（${d.platformSummary}）` +
+        `${d.assignedGiftCount ? `，配置 ${d.assignedGiftCount} 個滿贈` : ""}` +
+        `${r.keptCount ? `；保留 ${r.keptCount} 張已採購的採購單` : ""}`
+      );
+      setSelectedBatchIds(new Set());
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "重新分配失敗");
+      loadPurchaseBatchesData();
+    } finally {
+      setAutoSplitting(false);
+    }
+  }
+
+  function toggleBatchSelect(batchId: string) {
+    setSelectedBatchIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(batchId)) next.delete(batchId);
+      else next.add(batchId);
+      return next;
+    });
+  }
+
+  async function deleteSelectedBatches() {
+    if (selectedBatchIds.size === 0) return;
+    if (!confirm(`確定要刪除選取的 ${selectedBatchIds.size} 張採購單嗎？裡面的品項會回到未分配池。`)) return;
+    setMsg("");
+    try {
+      for (const id of Array.from(selectedBatchIds)) {
+        await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${id}`, "DELETE", {});
+      }
+      setMsg(`已刪除 ${selectedBatchIds.size} 張採購單`);
+      setSelectedBatchIds(new Set());
+      loadPurchaseBatchesData();
+    } catch (e: any) {
+      setMsg(e.message || "刪除失敗");
+      loadPurchaseBatchesData();
+    }
   }
 
   async function setBatchGiftQty(batchId: string, giftStyleId: string, qty: number) {
@@ -505,6 +557,31 @@ export default function PurchaseBatchesPage() {
                 </button>
               </div>
 
+              {purchaseBatches.length > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedBatchIds.size === purchaseBatches.length && purchaseBatches.length > 0}
+                      onChange={(e) =>
+                        setSelectedBatchIds(e.target.checked ? new Set(purchaseBatches.map((b) => b.id)) : new Set())
+                      }
+                      style={{ width: 16, height: 16 }}
+                    />
+                    全選
+                  </label>
+                  {selectedBatchIds.size > 0 && (
+                    <button className="btn small danger" onClick={deleteSelectedBatches}>
+                      刪除選取的 {selectedBatchIds.size} 張
+                    </button>
+                  )}
+                  <button className="btn small secondary" onClick={resetAndAutoSplit} disabled={autoSplitting}>
+                    {autoSplitting ? "處理中…" : "全部重新分配"}
+                  </button>
+                  <span style={{ fontSize: 11, color: "#8A8779" }}>已填廠商訂單編號的採購單不會被動到</span>
+                </div>
+              )}
+
               {purchaseBatches.map((b, idx) => (
                 <div
                   key={b.id}
@@ -513,7 +590,20 @@ export default function PurchaseBatchesPage() {
                   style={{ border: draggedItem ? "2px dashed #33415C" : "1px solid var(--line)", borderRadius: 10, padding: 14, marginBottom: 14 }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-                    <span style={{ fontWeight: 600 }}>採購單{idx + 1}</span>
+                    <span style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedBatchIds.has(b.id)}
+                        onChange={() => toggleBatchSelect(b.id)}
+                        style={{ width: 16, height: 16 }}
+                      />
+                      採購單{idx + 1}
+                      {(b.vendorOrderNumbers || []).length > 0 ? (
+                        <span style={{ fontSize: 11, background: "#E8F0E0", color: "#3D6B1F", padding: "2px 8px", borderRadius: 999, fontWeight: 400 }}>已採購</span>
+                      ) : (
+                        <span style={{ fontSize: 11, background: "#F1EFE8", color: "#8A8779", padding: "2px 8px", borderRadius: 999, fontWeight: 400 }}>尚未採購</span>
+                      )}
+                    </span>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <select value={b.platform?.id || ""} onChange={(e) => changeBatchPlatform(b.id, e.target.value)} style={{ padding: 6 }}>
                         <option value="">（尚未指定平台）</option>
@@ -534,6 +624,15 @@ export default function PurchaseBatchesPage() {
                       </button>
                       <button className="btn small danger" onClick={() => deleteBatch(b.id)}>刪除採購單</button>
                     </div>
+                  </div>
+
+                  <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 8, padding: "6px 10px", background: "#F7F5EF", borderRadius: 8 }}>
+                    廠商訂單編號：
+                    {(b.vendorOrderNumbers || []).length > 0 ? (
+                      <span style={{ color: "#2C2C2A" }}>{b.vendorOrderNumbers.join("、")}</span>
+                    ) : (
+                      <span>尚未登記（到「到貨追蹤」頁面新增）</span>
+                    )}
                   </div>
 
                   {b.items.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有分配任何品項（可以把品項拖曳過來）</div>}
@@ -614,6 +713,9 @@ export default function PurchaseBatchesPage() {
 
                   <div style={{ fontSize: 13, marginTop: 8, color: "#5F5E5A" }}>
                     原幣小計 ￥{Math.round(b.subtotalOriginal).toLocaleString("zh-TW")}
+                    {b.discountableOriginal != null && b.discountableOriginal !== b.subtotalOriginal && (
+                      <span>　（可折金額 ￥{Math.round(b.discountableOriginal).toLocaleString("zh-TW")}，只算有滿減標記的商品）</span>
+                    )}
                     {b.matchedThresholdAmount != null && <span>　達門檻￥{b.matchedThresholdAmount}，折扣￥{b.matchedDiscountAmount}</span>}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>

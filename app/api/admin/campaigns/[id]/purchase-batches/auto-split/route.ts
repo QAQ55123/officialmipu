@@ -76,7 +76,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return total;
   }
 
-  function pickBestPlatform(amount: number): { id: string; name: string } {
+  function pickBestPlatform(amount: number): { id: string; name: string; order_gift_cap: number } {
     let best = platforms![0];
     let bestValue = -1;
     for (const p of platforms!) {
@@ -167,7 +167,46 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const topPlatformGiftCap = Number(platforms[0]?.order_gift_cap) || 0;
   const groups = splitByDiscountTiers(pieces, tiers, giftRules, topPlatformGiftCap);
 
+  // 3.3節：自動分配滿贈。先算出各款式的缺口（顧客保底需求 − 已經配置掉的），
+  // 缺最多的優先分配；缺口補完就停，剩餘名額留給店家自行決定（不自動配滿）。
+  const { data: campaignOrders } = await supabase.from("orders").select("id").eq("campaign_id", params.id);
+  const allOrderIds = (campaignOrders || []).map((o: any) => o.id);
+  const { data: giftSelections } = allOrderIds.length
+    ? await supabase.from("order_gift_selections").select("gift_style_id, qty").in("order_id", allOrderIds)
+    : { data: [] };
+  const promisedByStyle = new Map<string, number>();
+  (giftSelections || []).forEach((s: any) => {
+    if (!s.gift_style_id) return;
+    promisedByStyle.set(s.gift_style_id, (promisedByStyle.get(s.gift_style_id) || 0) + s.qty);
+  });
+  // 「當商品賣出去的滿贈」一樣要跟廠商拿貨，也要算進保底
+  const { data: giftSaleProductsForGap } = await supabase
+    .from("products")
+    .select("name, style, linked_gift_style_id")
+    .not("linked_gift_style_id", "is", null);
+  if (giftSaleProductsForGap && giftSaleProductsForGap.length > 0 && allOrderIds.length > 0) {
+    const styleIdByKey = new Map(giftSaleProductsForGap.map((p: any) => [`${p.name}||${p.style || ""}`, p.linked_gift_style_id]));
+    const { data: soldItems } = await supabase.from("order_items").select("product_name, style, qty").in("order_id", allOrderIds);
+    (soldItems || []).forEach((it: any) => {
+      const sid = styleIdByKey.get(`${it.product_name}||${it.style || ""}`);
+      if (!sid) return;
+      promisedByStyle.set(sid, (promisedByStyle.get(sid) || 0) + it.qty);
+    });
+  }
+  // 既有採購單已經配置掉的數量
+  const { data: existingBatches } = await supabase.from("vendor_purchase_batches").select("id").eq("campaign_id", params.id);
+  const existingBatchIds = (existingBatches || []).map((b: any) => b.id);
+  const { data: existingGifts } = existingBatchIds.length
+    ? await supabase.from("vendor_purchase_batch_gifts").select("gift_style_id, qty").in("batch_id", existingBatchIds)
+    : { data: [] };
+  const remainingGapByStyle = new Map<string, number>();
+  promisedByStyle.forEach((qty, styleId) => remainingGapByStyle.set(styleId, qty));
+  (existingGifts || []).forEach((g: any) => {
+    remainingGapByStyle.set(g.gift_style_id, (remainingGapByStyle.get(g.gift_style_id) || 0) - g.qty);
+  });
+
   let createdCount = 0;
+  let assignedGiftCount = 0;
   const platformUsage = new Map<string, number>();
   for (const g of groups) {
     const bestPlatform = pickBestPlatform(g.groupAmount);
@@ -189,8 +228,45 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     await supabase.from("vendor_purchase_batch_items").insert(itemRows);
     createdCount++;
     platformUsage.set(bestPlatform.name, (platformUsage.get(bestPlatform.name) || 0) + 1);
+
+    // 這張採購單能配多少滿贈：三層限制（該組總量、該門檻名額數、平台每款上限），
+    // 而且只配還有缺口的款式，缺最多的優先
+    const platformGiftCap = Number(bestPlatform.order_gift_cap) || 0;
+    if (platformGiftCap > 0) {
+      const slotsLeft = new Map<number, number>();
+      giftStyles.forEach((s) => {
+        if (s.thresholdAmount <= 0) return;
+        if (!slotsLeft.has(s.thresholdAmount)) slotsLeft.set(s.thresholdAmount, Math.floor(g.groupAmount / s.thresholdAmount));
+      });
+
+      let placedInBatch = 0;
+      const giftRowsToInsert: any[] = [];
+      // 依「目前還缺多少」由大到小排序，缺最多的先分配
+      const stylesByGap = [...giftStyles].sort(
+        (a, b) => (remainingGapByStyle.get(b.id) || 0) - (remainingGapByStyle.get(a.id) || 0)
+      );
+      for (const s of stylesByGap) {
+        if (placedInBatch >= platformGiftCap) break;
+        const gap = remainingGapByStyle.get(s.id) || 0;
+        if (gap <= 0) continue; // 這個款式已經不缺了，不再配（剩餘名額留給店家自己決定）
+        const slots = slotsLeft.get(s.thresholdAmount) ?? 0;
+        if (slots <= 0) continue;
+        const cap = (styleCapRows || []).find((c: any) => c.platform_id === bestPlatform.id && c.gift_style_id === s.id);
+        const perStyleCap = cap ? cap.per_style_cap : Number.MAX_SAFE_INTEGER;
+        const give = Math.min(gap, slots, perStyleCap, platformGiftCap - placedInBatch);
+        if (give <= 0) continue;
+        giftRowsToInsert.push({ batch_id: batch.id, gift_style_id: s.id, qty: give });
+        placedInBatch += give;
+        assignedGiftCount += give;
+        slotsLeft.set(s.thresholdAmount, slots - give);
+        remainingGapByStyle.set(s.id, gap - give);
+      }
+      if (giftRowsToInsert.length > 0) {
+        await supabase.from("vendor_purchase_batch_gifts").insert(giftRowsToInsert);
+      }
+    }
   }
 
   const platformSummary = Array.from(platformUsage.entries()).map(([name, count]) => `${name} x${count}張`).join("、");
-  return NextResponse.json({ ok: true, createdBatchCount: createdCount, platformSummary });
+  return NextResponse.json({ ok: true, createdBatchCount: createdCount, platformSummary, assignedGiftCount });
 }
