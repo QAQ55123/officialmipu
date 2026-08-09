@@ -1039,17 +1039,27 @@ export default function Home() {
           giftSelections,
         }),
       });
-      const d = await r.json();
+      // 後端如果拋出未處理的錯誤，回傳的會是 HTML 錯誤頁而不是 JSON，
+      // 直接 r.json() 會解析失敗掉進 catch，真正的錯誤原因就被「網路連線失敗」蓋掉了
+      const raw = await r.text();
+      let d: any = null;
+      try {
+        d = JSON.parse(raw);
+      } catch {
+        d = null;
+      }
       if (!r.ok) {
-        errors.push(d.error || "送出失敗");
-        setCheckoutError(d.error || "送出失敗");
+        const msg = d?.error || `送出失敗（伺服器回應 ${r.status}）${raw ? `：${raw.slice(0, 200)}` : ""}`;
+        errors.push(msg);
+        setCheckoutError(msg);
       } else {
         submitOk = true;
         succeededPlanIds.push(...planIds);
       }
-    } catch {
-      errors.push("網路連線失敗");
-      setCheckoutError("網路連線失敗");
+    } catch (e: any) {
+      const msg = e?.message ? `連線失敗：${e.message}` : "網路連線失敗";
+      errors.push(msg);
+      setCheckoutError(msg);
     }
 
     if (succeededPlanIds.length > 0) {
@@ -2001,7 +2011,7 @@ export default function Home() {
                                 )}
                                 <div>
                                   <div>
-                                    {it.seriesName && <span style={{ color: "var(--muted)" }}>{it.seriesName} / </span>}
+                                    {it.seriesName && <span>{it.seriesName} / </span>}
                                     {it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}
                                   </div>
                                   {it.hasDiscountFlagSnapshot && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>}
@@ -2015,10 +2025,10 @@ export default function Home() {
                           ))}
                           {o.wantsGift && o.giftSelections && o.giftSelections.length > 0 && (
                             <div style={{ margin: "8px 0" }}>
-                              <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600, marginBottom: 6 }}>滿贈</div>
+                              <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 600, marginBottom: 6 }}>滿贈</div>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                                 {o.giftSelections.map((g: any, i: number) => (
-                                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)" }}>
+                                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text)" }}>
                                     {g.imageUrl ? (
                                       <img src={sizedImageUrl(g.imageUrl, "thumb")} alt={g.styleName} loading="lazy" decoding="async" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 5 }} />
                                     ) : (

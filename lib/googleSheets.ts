@@ -130,8 +130,11 @@ export function buildFormatHeaderRequests(sheetId: number, columnCount: number):
       },
     },
     {
-      autoResizeDimensions: {
-        dimensions: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: columnCount },
+      // 固定欄寬 100px：自動依內容調整的話，滿贈那種長字串會把欄位撐得非常寬，整張表變得難看
+      updateDimensionProperties: {
+        range: { sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: columnCount },
+        properties: { pixelSize: 100 },
+        fields: "pixelSize",
       },
     },
   ];
