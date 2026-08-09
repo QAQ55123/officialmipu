@@ -6,6 +6,7 @@ import {
   buildClearRequest,
   buildWriteRequest,
   buildFormatHeaderRequests,
+  buildUnhideColumnsRequest,
   type BatchRequest,
 } from "@/lib/googleSheets";
 
@@ -242,6 +243,7 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<{ ta
         fields: "gridProperties.rowCount,gridProperties.columnCount",
       },
     },
+    buildUnhideColumnsRequest(sheetId, 0, 26),
     buildClearRequest(sheetId, clearRows, COLUMN_COUNT),
     buildWriteRequest(sheetId, 0, 0, data),
     ...buildFormatHeaderRequests(sheetId, COLUMN_COUNT),

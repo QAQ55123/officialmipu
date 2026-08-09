@@ -165,6 +165,19 @@ export function buildHideSheetRequest(sheetId: number, hidden: boolean): BatchRe
 }
 
 /** 建構「隱藏指定欄位範圍」的請求（不是隱藏整個分頁，只隱藏某幾欄，資料還在，只是打開試算表的人看不到） */
+/** 建構「取消隱藏欄位」的請求：舊版本曾經把價目表區塊設成隱藏欄，
+ *  屬性會留在試算表上，即使程式碼已經不再隱藏，打開分頁還是看不到那幾欄，
+ *  所以同步時主動把欄位設回顯示，舊分頁才會自動修正 */
+export function buildUnhideColumnsRequest(sheetId: number, startColIndex: number, endColIndex: number): BatchRequest {
+  return {
+    updateDimensionProperties: {
+      range: { sheetId, dimension: "COLUMNS", startIndex: startColIndex, endIndex: endColIndex },
+      properties: { hiddenByUser: false },
+      fields: "hiddenByUser",
+    },
+  };
+}
+
 export function buildHideColumnsRequest(sheetId: number, startColIndex: number, endColIndex: number): BatchRequest {
   return {
     updateDimensionProperties: {

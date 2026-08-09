@@ -2,7 +2,7 @@ import { getSupabaseAdmin } from "./supabase";
 import {
   getSheets, requireSheetId, requireCostSheetId,
   ensureSheetExistsCached, getValuesAndFormulas, batchGetValues, columnToLetter,
-  buildClearRequest, buildWriteRequest, buildBoldRangeRequest, buildHideSheetRequest, buildNumberFormatRequest,
+  buildClearRequest, buildWriteRequest, buildBoldRangeRequest, buildHideSheetRequest, buildNumberFormatRequest, buildUnhideColumnsRequest,
   runBatch, type BatchRequest, type SheetsClient, type SheetMetaCache,
 } from "./googleSheets";
 
@@ -84,6 +84,8 @@ async function buildOrderTabRequests(sheets: SheetsClient, mainSheetId: string, 
   const fullData: (string | number)[][] = [ORDER_HEADER, ...orderRows];
 
   return [
+    // 舊版本曾經把價目表區塊（A~D欄）設成隱藏，屬性會留在試算表上，這裡主動設回顯示
+    buildUnhideColumnsRequest(sheetId, 0, 26),
     buildClearRequest(sheetId, 100000, ORDER_HEADER.length),
     buildWriteRequest(sheetId, 0, 0, fullData),
     buildBoldRangeRequest(sheetId, 0, 1, 0, ORDER_HEADER.length),

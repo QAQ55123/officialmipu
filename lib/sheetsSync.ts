@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "./supabase";
 import { overwriteSheet, deleteSheetTabIfExists, requireSheetId } from "./googleSheets";
-import { syncOrderRealtimeToPlanTab, syncAllCampaignOrderTabs, syncCostWorkbook, syncOnePlanCostTab } from "./planSheetSync";
+import { syncOrderRealtimeToPlanTab, syncAllCampaignOrderTabs } from "./planSheetSync";
+import { syncCostSheetForCampaign } from "./costSheetSync";
 
 /** 訂單建立當下即時同步（呼叫端是客人下單流程，這裡「刻意」吞掉錯誤，
  *  Sheet 同步失敗不該讓客人沒辦法下單；真正的失敗原因會印在伺服器 log 裡，
@@ -13,7 +14,7 @@ export async function syncOrderToSheet(params: { campaignId: string; campaignNam
     return; // 訂單分頁都沒同步成功，成本表也不用試了（成本表是讀訂單分頁內容統計的）
   }
   try {
-    await syncOnePlanCostTab(params.campaignId, params.campaignName);
+    await syncCostSheetForCampaign(params.campaignId);
   } catch (e) {
     console.error("Google Sheet 成本表同步失敗：", e);
   }
@@ -25,9 +26,20 @@ export async function syncAllOrdersSheet() {
   await syncAllCampaignOrderTabs();
 }
 
-/** 刷新成本試算表（每企劃一分頁：商品成本表／運費計算／總覽／客戶應收運費），要在訂單分頁同步過之後執行 */
+/** 刷新成本試算表：每個檔期一個分頁（商品明細／收入／成本／總覽），
+ *  資料直接從資料庫統計，不依賴訂單分頁的內容 */
 export async function syncAllOrdersCostSheet() {
-  await syncCostWorkbook();
+  const supabase = getSupabaseAdmin();
+  const { data: campaigns } = await supabase.from("campaigns").select("id, name");
+  const failed: string[] = [];
+  for (const c of campaigns || []) {
+    try {
+      await syncCostSheetForCampaign(c.id);
+    } catch (e: any) {
+      failed.push(`${c.name}：${e?.message || "同步失敗"}`);
+    }
+  }
+  if (failed.length > 0) throw new Error(`部分檔期成本表同步失敗：${failed.join("；")}`);
 }
 
 /** 會員資料會一直被編輯，改用「整份重寫」保持跟資料庫一致 */
