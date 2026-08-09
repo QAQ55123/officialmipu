@@ -64,7 +64,7 @@ export default function AdminPage() {
   });
   const emptyCampaignForm = {
     id: "", name: "", opensAt: "", closesAt: "",
-    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "", splitCalcFxRate: "",
+    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "", splitCalcFxRate: "", shippingCostPerKg: "",
     rates: emptyCampaignRates(),
   };
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -497,6 +497,7 @@ export default function AdminPage() {
       giftCodCampaignCap: c.gift_cod_campaign_cap != null ? String(c.gift_cod_campaign_cap) : "",
       checkoutGiftPlatformId: c.checkout_gift_platform_id || "",
       splitCalcFxRate: c.split_calc_fx_rate != null ? String(c.split_calc_fx_rate) : "",
+      shippingCostPerKg: c.shipping_cost_per_kg != null ? String(c.shipping_cost_per_kg) : "",
       giftBaseUnit: String(c.gift_base_unit ?? 100),
       vendorOrderGiftCap: c.vendor_order_gift_cap != null ? String(c.vendor_order_gift_cap) : "",
       rates,
@@ -526,6 +527,7 @@ export default function AdminPage() {
           gift_cod_campaign_cap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
           checkout_gift_platform_id: campaignForm.checkoutGiftPlatformId || null,
           split_calc_fx_rate: campaignForm.splitCalcFxRate === "" ? null : Number(campaignForm.splitCalcFxRate),
+          shipping_cost_per_kg: campaignForm.shippingCostPerKg === "" ? null : Number(campaignForm.shippingCostPerKg),
           gift_base_unit: Number(campaignForm.giftBaseUnit) || 100,
           vendor_order_gift_cap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           ...rateFields,
@@ -539,6 +541,7 @@ export default function AdminPage() {
           giftCodCampaignCap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
           checkoutGiftPlatformId: campaignForm.checkoutGiftPlatformId || null,
           splitCalcFxRate: campaignForm.splitCalcFxRate === "" ? null : Number(campaignForm.splitCalcFxRate),
+          shippingCostPerKg: campaignForm.shippingCostPerKg === "" ? null : Number(campaignForm.shippingCostPerKg),
           giftBaseUnit: Number(campaignForm.giftBaseUnit) || 100,
           vendorOrderGiftCap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
           rates: rateFields,
@@ -2495,6 +2498,10 @@ export default function AdminPage() {
               <div className="id-row">
                 <span className="id-label">拆單試算匯率</span>
                 <input type="number" step="0.01" value={campaignForm.splitCalcFxRate} onChange={(e) => setCampaignForm((f) => ({ ...f, splitCalcFxRate: e.target.value }))} placeholder="例如 4.5，用來把贈品的台幣售價換算成人民幣，跟折扣金額一起比較" />
+              </div>
+              <div className="id-row">
+                <span className="id-label">每公斤運費（NT$）</span>
+                <input type="number" step="0.01" value={campaignForm.shippingCostPerKg} onChange={(e) => setCampaignForm((f) => ({ ...f, shippingCostPerKg: e.target.value }))} placeholder="成本表用：乘上所有物流單號的重量加總＝這期的運費成本" />
               </div>
               <div className="id-row">
                 <span className="id-label">結帳頁滿贈上限依哪個平台</span>

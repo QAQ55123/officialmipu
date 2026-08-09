@@ -290,6 +290,8 @@ alter table campaigns add column if not exists checkout_gift_platform_id uuid;
 -- 3.1節：拆單要讓「贈品數＋折扣金額」最大化，但折扣是人民幣、贈品估值是台幣售價，
 -- 兩者要換算成同一幣值才能比較。店家在這裡填一個匯率當作拆單試算的基準。
 alter table campaigns add column if not exists split_calc_fx_rate numeric;
+-- 成本表：這個檔期的每公斤運費（台幣），乘上所有物流單號的重量加總就是這期的運費成本
+alter table campaigns add column if not exists shipping_cost_per_kg numeric;
 alter table campaigns add column if not exists gift_cod_campaign_used numeric not null default 0;
 
 alter table gift_styles disable row level security;
@@ -476,6 +478,8 @@ create table if not exists vendor_shipments (
   tracking_number         text,
   created_at              timestamptz default now()
 );
+-- 成本表：這批貨的實際重量（公斤），乘上檔期設定的每公斤運費就是運費成本
+alter table vendor_shipments add column if not exists weight_kg numeric;
 create index if not exists idx_vendor_shipments_order_number on vendor_shipments (vendor_order_number_id);
 
 -- 物流單號底下裝了哪些品項：可能是一般商品品項(batch_item_id)、也可能是滿贈品項(batch_gift_id)，

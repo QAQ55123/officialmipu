@@ -25,7 +25,7 @@ export async function POST(req: Request, { params }: { params: { orderNumberId: 
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("vendor_shipments")
-    .insert({ vendor_order_number_id: params.orderNumberId, tracking_number: body.trackingNumber || null })
+    .insert({ vendor_order_number_id: params.orderNumberId, tracking_number: body.trackingNumber || null, weight_kg: body.weightKg === "" || body.weightKg == null ? null : Number(body.weightKg) })
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

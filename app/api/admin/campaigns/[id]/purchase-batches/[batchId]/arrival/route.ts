@@ -81,6 +81,7 @@ export async function GET(req: Request, { params }: { params: { id: string; batc
       .map((s: any) => ({
         id: s.id,
         trackingNumber: s.tracking_number,
+        weightKg: s.weight_kg != null ? Number(s.weight_kg) : null,
         items: (shipmentItems || [])
           .filter((si: any) => si.shipment_id === s.id)
           .map((si: any) => ({

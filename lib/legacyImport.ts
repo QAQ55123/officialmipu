@@ -318,11 +318,25 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
 
       // 一次結帳＝一張訂單：同一個分組代號可能橫跨好幾個系列，每個品項各自找到/建立自己的系列
       const planByItemIndex: any[] = [];
+      // 商品圖片：如果商品目錄裡已經有這筆商品，把它的圖片帶進訂單品項，
+      // 不然後台跟顧客端看訂單時只會顯示空的占位框
+      const imageByItemIndex: (string | null)[] = [];
       for (const it of g.items) {
         const itemPlan = await findOrCreateArchivedPlan(planCache, it.planName, g.orderDate, true);
         planByItemIndex.push(itemPlan);
-        const { data: existingProduct } = await supabase.from("products").select("id").eq("series_id", itemPlan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
-        if (!existingProduct) await supabase.from("products").insert({ series_id: itemPlan.id, name: it.name, style: it.style, price: it.unitPrice });
+        const { data: existingProduct } = await supabase
+          .from("products")
+          .select("id, image_url")
+          .eq("series_id", itemPlan.id)
+          .eq("name", it.name)
+          .eq("style", it.style)
+          .maybeSingle();
+        if (!existingProduct) {
+          await supabase.from("products").insert({ series_id: itemPlan.id, name: it.name, style: it.style, price: it.unitPrice });
+          imageByItemIndex.push(null);
+        } else {
+          imageByItemIndex.push(existingProduct.image_url || null);
+        }
       }
       // 只有整張訂單都屬於同一個系列時，才在 orders 層級記系列
       const uniquePlanIds = Array.from(new Set(planByItemIndex.map((p) => p.id)));
@@ -353,6 +367,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         unit_price_original: it.unitPriceOriginal,
         fx_rate: it.fxRate,
         has_discount_flag_snapshot: it.hasDiscountFlag,
+        image_url: imageByItemIndex[idx] || null,
       }));
       const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
       if (itemsErr) throw new Error(itemsErr.message);

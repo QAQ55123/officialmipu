@@ -297,6 +297,20 @@ export default function PurchaseBatchesPage() {
     loadPurchaseBatchesData();
   }
 
+  const [syncingCostSheet, setSyncingCostSheet] = useState(false);
+  async function syncCostSheet() {
+    setMsg("");
+    setSyncingCostSheet(true);
+    try {
+      const d = await callJson(`/api/admin/campaigns/${campaignId}/cost-sheet`, "POST", {});
+      setMsg(`成本表已同步到 Google 試算表的「${d.tabName}」分頁（你自己填的匯率、每公斤運費、其他成本都會保留）`);
+    } catch (e: any) {
+      setMsg(e.message || "同步失敗");
+    } finally {
+      setSyncingCostSheet(false);
+    }
+  }
+
   async function resetAndAutoSplit() {
     const purchasedCount = purchaseBatches.filter((b: any) => (b.vendorOrderNumbers || []).length > 0).length;
     const deletableCount = purchaseBatches.length - purchasedCount;
@@ -440,6 +454,15 @@ export default function PurchaseBatchesPage() {
     }
   }
 
+  async function updateShipmentWeight(shipmentId: string, weightKg: string) {
+    try {
+      await callJson(`/api/admin/shipments/${shipmentId}`, "PATCH", { weightKg });
+      if (activeBatchForArrival) loadArrivalTree(activeBatchForArrival.id);
+    } catch (e: any) {
+      setMsg(e.message || "更新重量失敗");
+    }
+  }
+
   async function deleteShipment(shipmentId: string) {
     if (!activeBatchForArrival) return;
     if (!confirm("確定要刪除這個物流單號嗎？")) return;
@@ -535,6 +558,9 @@ export default function PurchaseBatchesPage() {
                 <button className="btn small" onClick={createPurchaseBatch}>新增採購單</button>
                 <button className="btn small secondary" onClick={autoSplit} disabled={autoSplitting}>
                   {autoSplitting ? "自動分配中…" : "自動分配未分配品項"}
+                </button>
+                <button className="btn small secondary" onClick={syncCostSheet} disabled={syncingCostSheet}>
+                  {syncingCostSheet ? "同步中…" : "同步成本表"}
                 </button>
               </div>
 
@@ -956,7 +982,19 @@ export default function PurchaseBatchesPage() {
                           </span>
                         )}
                       </span>
-                      <button className="btn small danger" onClick={() => deleteShipment(s.id)}>刪除</button>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 12, color: "#8A8779" }}>重量</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          defaultValue={s.weightKg ?? ""}
+                          onBlur={(e) => updateShipmentWeight(s.id, e.target.value)}
+                          placeholder="KG"
+                          style={{ width: 70, minWidth: 70, padding: 4, fontSize: 12 }}
+                        />
+                        <span style={{ fontSize: 12, color: "#8A8779" }}>KG</span>
+                        <button className="btn small danger" onClick={() => deleteShipment(s.id)}>刪除</button>
+                      </span>
                     </div>
                     {s.items.map((it: any) => (
                       <div key={it.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "3px 0" }}>
