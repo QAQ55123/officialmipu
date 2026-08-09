@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "./supabase";
 import { overwriteSheet, deleteSheetTabIfExists, requireSheetId } from "./googleSheets";
 import { syncOrderRealtimeToPlanTab, syncAllCampaignOrderTabs } from "./planSheetSync";
-import { syncCostSheetForCampaign } from "./costSheetSync";
+import { syncCostSheetForCampaign, syncCostSummary, type CostTabRefs } from "./costSheetSync";
 
 /** 訂單建立當下即時同步（呼叫端是客人下單流程，這裡「刻意」吞掉錯誤，
  *  Sheet 同步失敗不該讓客人沒辦法下單；真正的失敗原因會印在伺服器 log 裡，
@@ -15,6 +15,8 @@ export async function syncOrderToSheet(params: { campaignId: string; campaignNam
   }
   try {
     await syncCostSheetForCampaign(params.campaignId);
+    // 總覽是跨檔期彙總，任何一個檔期的成本表變了都要重算一次
+    await syncAllCostSummaryOnly();
   } catch (e) {
     console.error("Google Sheet 成本表同步失敗：", e);
   }
@@ -26,18 +28,40 @@ export async function syncAllOrdersSheet() {
   await syncAllCampaignOrderTabs();
 }
 
+/** 只重算「總覽」分頁：重新掃一次所有檔期的成本表位置，不重寫各檔期的內容 */
+async function syncAllCostSummaryOnly() {
+  const supabase = getSupabaseAdmin();
+  const { data: campaigns } = await supabase.from("campaigns").select("id, name");
+  const refs: CostTabRefs[] = [];
+  for (const c of campaigns || []) {
+    try {
+      refs.push(await syncCostSheetForCampaign(c.id));
+    } catch {
+      // 某個檔期失敗就跳過，總覽仍然更新其他檔期
+    }
+  }
+  await syncCostSummary(refs);
+}
+
 /** 刷新成本試算表：每個檔期一個分頁（商品明細／收入／成本／總覽），
  *  資料直接從資料庫統計，不依賴訂單分頁的內容 */
 export async function syncAllOrdersCostSheet() {
   const supabase = getSupabaseAdmin();
   const { data: campaigns } = await supabase.from("campaigns").select("id, name");
   const failed: string[] = [];
+  const refs: CostTabRefs[] = [];
   for (const c of campaigns || []) {
     try {
-      await syncCostSheetForCampaign(c.id);
+      refs.push(await syncCostSheetForCampaign(c.id));
     } catch (e: any) {
       failed.push(`${c.name}：${e?.message || "同步失敗"}`);
     }
+  }
+  // 各檔期成本表寫完之後，再更新「總覽」分頁（它用跨分頁公式引用各檔期的數字）
+  try {
+    await syncCostSummary(refs);
+  } catch (e: any) {
+    failed.push(`總覽：${e?.message || "同步失敗"}`);
   }
   if (failed.length > 0) throw new Error(`部分檔期成本表同步失敗：${failed.join("；")}`);
 }

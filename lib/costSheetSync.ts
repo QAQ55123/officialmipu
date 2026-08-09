@@ -25,7 +25,16 @@ import {
 /** 這些列的標籤是系統產生的，讀回舊值時用來辨識哪些是店家手填的欄位 */
 const MANUAL_LABELS = ["匯率", "每公斤運費(NT$)", "其他成本"];
 
-export async function syncCostSheetForCampaign(campaignId: string): Promise<{ tabName: string }> {
+export interface CostTabRefs {
+  tabName: string;
+  incomeRow: number;   // 總收入所在行
+  costRow: number;     // 總成本所在行
+  profitRow: number;   // 淨利潤所在行
+  custStartRow: number; // 客戶明細第一列
+  custCount: number;    // 客戶筆數
+}
+
+export async function syncCostSheetForCampaign(campaignId: string): Promise<CostTabRefs> {
   const supabase = getSupabaseAdmin();
 
   const { data: campaign } = await supabase
@@ -268,5 +277,68 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<{ ta
   ];
   await sheets.spreadsheets.batchUpdate({ spreadsheetId: costId, requestBody: { requests } });
 
-  return { tabName };
+  return {
+    tabName,
+    incomeRow: totalIncomeRow,
+    costRow: totalCostRow,
+    profitRow: netProfitRow,
+    custStartRow: firstCustomerRow || 0,
+    custCount: customerRowNumbers.length,
+  };
+}
+
+/**
+ * 「總覽」分頁：把所有檔期的收入／成本／淨利潤彙總成一張表，
+ * 每一格都用跨分頁公式引用各檔期的成本表，所以檔期成本表更新後總覽會自動跟著變。
+ */
+export async function syncCostSummary(refs: CostTabRefs[]): Promise<void> {
+  const costId = requireCostSheetId();
+  // 總覽固定放在第一個分頁，打開試算表就先看到
+  const { sheets, sheetId } = await ensureSheetExists(costId, "總覽", 0);
+
+  const header = ["檔期", "銷售(收入)", "進貨成本", "淨利潤", "已收款金額", "未收款金額", "淨利潤率"];
+  const data: (string | number)[][] = [header];
+
+  refs.forEach((r, i) => {
+    const row = i + 2;
+    const ref = `'${r.tabName.replace(/'/g, "''")}'!`;
+    const custEndRow = r.custStartRow + r.custCount - 1;
+    // 已收＝客戶明細的F欄、未收＝G欄（客戶明細欄位：A客戶 B訂單編號 C商品小計 D應收運費 E應收總額 F已收 G尚欠）
+    const paidF = r.custCount > 0 ? `=SUM(${ref}F${r.custStartRow}:F${custEndRow})` : 0;
+    const owingF = r.custCount > 0 ? `=SUM(${ref}G${r.custStartRow}:G${custEndRow})` : 0;
+    data.push([
+      r.tabName,
+      `=${ref}C${r.incomeRow}`,
+      `=${ref}C${r.costRow}`,
+      `=${ref}C${r.profitRow}`,
+      paidF,
+      owingF,
+      `=IF(B${row}=0,"",D${row}/B${row})`,
+    ]);
+  });
+
+  const n = refs.length;
+  if (n > 0) {
+    const first = 2;
+    const last = 1 + n;
+    const totalRow = n + 3;
+    data.push(["", "", "", "", "", "", ""]);
+    data.push([
+      "合計",
+      `=SUM(B${first}:B${last})`,
+      `=SUM(C${first}:C${last})`,
+      `=SUM(D${first}:D${last})`,
+      `=SUM(E${first}:E${last})`,
+      `=SUM(F${first}:F${last})`,
+      `=IF(B${totalRow}=0,"",D${totalRow}/B${totalRow})`,
+    ]);
+  }
+
+  const requests: BatchRequest[] = [
+    buildUnhideColumnsRequest(sheetId, 0, 26),
+    buildClearRequest(sheetId, Math.max(data.length + 50, 200), 7),
+    buildWriteRequest(sheetId, 0, 0, data),
+    ...buildFormatHeaderRequests(sheetId, 7),
+  ];
+  await sheets.spreadsheets.batchUpdate({ spreadsheetId: costId, requestBody: { requests } });
 }
