@@ -289,6 +289,8 @@ export async function GET(req: Request) {
       cancelRequested: !!o.cancel_requested_at,
       fulfillmentStatus: o.campaigns?.fulfillment_status || null,
       items: (o.order_items || []).map((it: any) => ({
+        // 一次結帳＝一張訂單、可跨系列，系列記在品項層級
+        seriesName: it.series_name_snapshot || null,
         name: it.product_name,
         style: it.style,
         qty: it.qty,

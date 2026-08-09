@@ -7,7 +7,7 @@ import {
 } from "./googleSheets";
 
 // 一次結帳＝一張訂單、可跨系列，所以要標系列才分得出來是哪個系列的商品
-const ORDER_HEADER = ["訂單編號", "來源", "暱稱", "FB個人網址", "系列", "商品名稱", "款式", "數量", "單價", "小計", "訂單時間", "交易方式", "付款狀態"];
+const ORDER_HEADER = ["訂單編號", "來源", "暱稱", "FB個人網址", "系列", "商品名稱", "款式", "數量", "單價", "小計", "訂單時間", "交易方式", "付款狀態", "滿贈"];
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -46,7 +46,7 @@ async function getAllCampaigns(): Promise<CampaignRow[]> {
 
 async function getCampaignOrders(campaignId: string) {
   const supabase = getSupabaseAdmin();
-  const { data } = await supabase.from("orders").select("*, order_items(*)").eq("campaign_id", campaignId).order("created_at", { ascending: true });
+  const { data } = await supabase.from("orders").select("*, order_items(*), order_gift_selections(style_name_snapshot, qty)").eq("campaign_id", campaignId).order("created_at", { ascending: true });
   return data || [];
 }
 
@@ -69,13 +69,18 @@ async function buildOrderTabRequests(sheets: SheetsClient, mainSheetId: string, 
   const orderRows: (string | number)[][] = [];
   orders.forEach((o: any) => {
     const paidAmount = Number(o.paid_amount) || 0;
-    (o.order_items || []).forEach((it: any) => {
+    // 滿贈是「一張訂單」層級的，只寫在該訂單第一個品項那一列，其餘留空避免重複
+    const giftText = (o.order_gift_selections || [])
+      .map((g: any) => `${g.style_name_snapshot} x${g.qty}`)
+      .join("、");
+    (o.order_items || []).forEach((it: any, itemIdx: number) => {
       orderRows.push([
         o.order_no, "", o.username, o.profile_url,
         it.series_name_snapshot || o.series_name_snapshot || "",
         it.product_name, it.style || "",
         it.qty, Number(it.unit_price) || 0, Number(it.subtotal) || 0,
         new Date(o.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }), o.payment, paidAmount > 0 ? paidAmount : "",
+        itemIdx === 0 ? giftText : "",
       ]);
     });
   });

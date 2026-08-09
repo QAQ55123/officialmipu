@@ -2000,7 +2000,10 @@ export default function Home() {
                                   <div className="hist-item-img hist-item-img-empty" />
                                 )}
                                 <div>
-                                  <div>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</div>
+                                  <div>
+                                    {it.seriesName && <span style={{ color: "var(--muted)" }}>{it.seriesName} / </span>}
+                                    {it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}
+                                  </div>
                                   {it.hasDiscountFlagSnapshot && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginTop: 2 }}>滿減商品</span>}
                                   {it.unitPriceOriginal != null && it.fxRate != null && (
                                     <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>￥{fmtOriginal(it.unitPriceOriginal)} × 匯率 {it.fxRate}</div>

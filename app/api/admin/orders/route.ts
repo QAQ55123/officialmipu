@@ -44,6 +44,8 @@ export async function GET(req: Request) {
       paidAmount: Number(order.paid_amount) || 0,
       createdAt: order.created_at,
       items: (order.order_items || []).map((it: any) => ({
+        // 一次結帳＝一張訂單、可跨系列，所以系列記在品項層級（orders 那層只在單一系列時才有值）
+        seriesName: it.series_name_snapshot || null,
         name: it.product_name,
         style: it.style,
         qty: it.qty,

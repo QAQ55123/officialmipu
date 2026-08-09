@@ -3306,7 +3306,7 @@ export default function AdminPage() {
                             ) : (
                               <span style={{ width: 32, height: 32, borderRadius: 4, background: "#F2E9D8", flexShrink: 0, display: "inline-block" }} />
                             )}
-                            <span style={{ wordBreak: "break-word" }}>{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</span>
+                            <span style={{ wordBreak: "break-word" }}>{it.seriesName ? `${it.seriesName} / ` : ""}{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</span>
                           </span>
                           <span style={{ flexShrink: 0 }}>NT$ {it.subtotal}</span>
                         </div>

@@ -40,13 +40,13 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<{ ta
   // ── 收入面：這個檔期所有訂單的商品明細 ──────────────────────────
   const { data: orders } = await supabase
     .from("orders")
-    .select("id, order_no, username, order_items(product_name, style, qty, unit_price, subtotal, unit_price_original, series_name_snapshot)")
+    .select("id, order_no, username, paid_amount, order_items(product_name, style, qty, unit_price, subtotal, unit_price_original, series_name_snapshot), order_gift_selections(style_name_snapshot, qty)")
     .eq("campaign_id", campaignId);
 
   const orderIds = (orders || []).map((o: any) => o.id);
 
   // 把相同商品/款式合併成一列（成本表看的是整期的量，不是逐筆訂單）
-  type ProductRow = { series: string; name: string; style: string; price: number; qty: number };
+  type ProductRow = { series: string; name: string; style: string; qty: number };
   const productMap = new Map<string, ProductRow>();
   (orders || []).forEach((o: any) => {
     (o.order_items || []).forEach((it: any) => {
@@ -59,7 +59,6 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<{ ta
           series: it.series_name_snapshot || "",
           name: it.product_name,
           style: it.style || "",
-          price: Number(it.unit_price) || 0,
           qty: it.qty,
         });
       }
@@ -69,12 +68,13 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<{ ta
 
   // ── 顧客運費：出貨批次算出來的顧客運費加總 ──────────────────────
   const { data: shippingBatches } = orderIds.length
-    ? await supabase.from("shipping_batches").select("customer_shipping_fee").in("order_id", orderIds)
+    ? await supabase.from("shipping_batches").select("order_id, customer_shipping_fee").in("order_id", orderIds)
     : { data: [] };
-  const customerShippingTotal = (shippingBatches || []).reduce(
-    (s: number, b: any) => s + (Number(b.customer_shipping_fee) || 0),
-    0
-  );
+  // 同一張訂單可能分好幾個出貨批次，運費要加總起來
+  const shippingFeeByOrder = new Map<string, number>();
+  (shippingBatches || []).forEach((b: any) => {
+    shippingFeeByOrder.set(b.order_id, (shippingFeeByOrder.get(b.order_id) || 0) + (Number(b.customer_shipping_fee) || 0));
+  });
 
   // ── 成本面：採購單「實收」加總（原幣）──────────────────────────
   const { data: batches } = await supabase
@@ -164,71 +164,89 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<{ ta
 
   // ── 組表格內容 ──────────────────────────────────────────────
   const data: (string | number)[][] = [];
+  /** 加一列，回傳它在 Google Sheets 上的行號（從1開始）。
+   *  之前用「陣列索引」當行號導致所有公式差1行、總覽算不出資料，改成寫入時當場記錄。 */
+  const addRow = (row: (string | number)[]) => {
+    data.push(row);
+    return data.length; // data.length 就是這一列的行號（第1列 → length=1）
+  };
+  const pad = (arr: (string | number)[]) => {
+    const r = [...arr];
+    while (r.length < 8) r.push("");
+    return r;
+  };
 
-  // 商品明細
-  data.push(["系列", "商品", "款式", "售價(NT$)", "數量", "小計(NT$)", "", ""]);
-  products.forEach((p, i) => {
-    const row = 2 + i;
-    data.push([p.series, p.name, p.style, p.price, p.qty, `=D${row}*E${row}`, "", ""]);
+  // ── 商品統計：這期總共要跟廠商買幾件（金額看下面的客戶明細）──
+  addRow(pad(["【商品統計】"]));
+  addRow(pad(["系列", "商品", "款式", "數量"]));
+  products.forEach((p) => addRow(pad([p.series, p.name, p.style, p.qty])));
+  addRow(pad([]));
+
+  // ── 客戶明細：規格書3.3節要求「顧客姓名獨立成一欄，跟該筆訂單的滿贈選擇並列」──
+  addRow(pad(["【客戶明細】"]));
+  addRow(pad(["客戶", "訂單編號", "商品小計", "應收運費", "應收總額", "已收", "尚欠", "滿贈選擇"]));
+  const customerRowNumbers: number[] = [];
+  (orders || []).forEach((o: any) => {
+    const itemsSubtotal = (o.order_items || []).reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0);
+    const shippingFee = shippingFeeByOrder.get(o.id) || 0;
+    const paid = Number(o.paid_amount) || 0;
+    const giftText = (o.order_gift_selections || [])
+      .map((g: any) => `${g.style_name_snapshot} x${g.qty}`)
+      .join("、");
+    const r = addRow(pad([o.username, o.order_no, itemsSubtotal, shippingFee, "", paid, "", giftText]));
+    customerRowNumbers.push(r);
+    // 應收總額＝商品小計＋應收運費；尚欠＝應收總額−已收
+    data[r - 1][4] = `=C${r}+D${r}`;
+    data[r - 1][6] = `=E${r}-F${r}`;
   });
-  const lastProductRow = products.length + 1;
-  data.push(["", "", "", "", "", "", "", ""]);
+  const firstCustomerRow = customerRowNumbers[0];
+  const lastCustomerRow = customerRowNumbers[customerRowNumbers.length - 1];
+  addRow(pad([]));
 
-  // 收入面
-  const incomeStart = products.length + 3;
-  data.push(["【收入】", "", "", "", "", "", "", ""]);
-  data.push(["商品收入", "", products.length > 0 ? `=SUM(F2:F${lastProductRow})` : 0, "", "", "", "", ""]);
-  data.push(["顧客運費", "", customerShippingTotal, "", "", "", "", ""]);
-  const incomeProductRow = incomeStart + 1;
-  const incomeShippingRow = incomeStart + 2;
-  data.push(["總收入", "", `=C${incomeProductRow}+C${incomeShippingRow}`, "", "", "", "", ""]);
-  data.push(["", "", "", "", "", "", "", ""]);
+  // ── 收入 ──
+  addRow(pad(["【收入】"]));
+  const incomeProductRow = addRow(
+    pad(["商品收入", "", firstCustomerRow ? `=SUM(C${firstCustomerRow}:C${lastCustomerRow})` : 0])
+  );
+  const incomeShippingRow = addRow(
+    pad(["顧客運費", "", firstCustomerRow ? `=SUM(D${firstCustomerRow}:D${lastCustomerRow})` : 0])
+  );
+  const totalIncomeRow = addRow(pad(["總收入", "", `=C${incomeProductRow}+C${incomeShippingRow}`]));
+  addRow(pad([]));
 
-  // 成本面
-  const costStart = incomeStart + 5;
-  data.push(["【成本】", "", "", "", "", "", "", ""]);
-  data.push(["匯率", "", fxRateCell, "← 這格自己填（系統不覆蓋）", "", "", "", ""]);
-  const fxRow = costStart + 1;
-  data.push(["採購實收合計(￥)", "", purchaseNetTotal, "所有採購單的實收加總（已含折扣與額外調整）", "", "", "", ""]);
-  const purchaseRow = costStart + 2;
-  data.push(["進貨成本(NT$)", "", `=CEILING(C${purchaseRow}*C${fxRow})`, "", "", "", "", ""]);
-  data.push(["額外採購(￥)", "", extraPurchaseTotal, "", "", "", "", ""]);
-  const extraRow = costStart + 4;
-  data.push(["額外採購成本(NT$)", "", `=CEILING(C${extraRow}*C${fxRow})`, "", "", "", "", ""]);
-  data.push(["總重量(KG)", "", totalWeightKg, "所有物流單號的重量加總", "", "", "", ""]);
-  const weightRow = costStart + 6;
-  data.push(["每公斤運費(NT$)", "", perKgCell, "← 這格自己填（系統不覆蓋）", "", "", "", ""]);
-  const perKgRow = costStart + 7;
-  data.push(["運費成本(NT$)", "", `=C${weightRow}*C${perKgRow}`, "", "", "", "", ""]);
-  data.push(["其他成本", "", otherCostCell, "← 這格自己填（系統不覆蓋）", "", "", "", ""]);
-  const purchaseCostRow = costStart + 3;
-  const extraCostRow = costStart + 5;
-  const shippingCostRow = costStart + 8;
-  const otherRow = costStart + 9;
-  data.push([
-    "總成本(NT$)",
-    "",
-    `=C${purchaseCostRow}+C${extraCostRow}+C${shippingCostRow}+IF(C${otherRow}="",0,C${otherRow})`,
-    "",
-    "",
-    "",
-    "",
-    "",
-  ]);
-  data.push(["", "", "", "", "", "", "", ""]);
+  // ── 成本 ──
+  addRow(pad(["【成本】"]));
+  const fxRow = addRow(pad(["匯率", "", fxRateCell, "← 這格自己填（系統不覆蓋）"]));
+  const purchaseRow = addRow(pad(["採購實收合計(￥)", "", purchaseNetTotal, "所有採購單的實收加總（已含折扣與額外調整）"]));
+  const purchaseCostRow = addRow(pad(["進貨成本(NT$)", "", `=CEILING(C${purchaseRow}*C${fxRow})`]));
+  const extraRow = addRow(pad(["額外採購(￥)", "", extraPurchaseTotal]));
+  const extraCostRow = addRow(pad(["額外採購成本(NT$)", "", `=CEILING(C${extraRow}*C${fxRow})`]));
+  const weightRow = addRow(pad(["總重量(KG)", "", totalWeightKg, "所有物流單號的重量加總"]));
+  const perKgRow = addRow(pad(["每公斤運費(NT$)", "", perKgCell, "← 這格自己填（系統不覆蓋）"]));
+  const shippingCostRow = addRow(pad(["運費成本(NT$)", "", `=C${weightRow}*C${perKgRow}`]));
+  const otherRow = addRow(pad(["其他成本", "", otherCostCell, "← 這格自己填（系統不覆蓋）"]));
+  const totalCostRow = addRow(
+    pad([
+      "總成本(NT$)",
+      "",
+      `=C${purchaseCostRow}+C${extraCostRow}+C${shippingCostRow}+IF(C${otherRow}="",0,C${otherRow})`,
+    ])
+  );
+  addRow(pad([]));
 
-  // 總覽
-  const totalIncomeRow = incomeStart + 3;
-  const totalCostRow = costStart + 10;
-  data.push(["【總覽】", "", "", "", "", "", "", ""]);
-  data.push(["淨利潤(NT$)", "", `=C${totalIncomeRow}-C${totalCostRow}`, "", "", "", "", ""]);
+  // ── 總覽 ──
+  addRow(pad(["【總覽】"]));
+  addRow(pad(["總收入(NT$)", "", `=C${totalIncomeRow}`]));
+  addRow(pad(["總成本(NT$)", "", `=C${totalCostRow}`]));
+  const netProfitRow = addRow(pad(["淨利潤(NT$)", "", `=C${totalIncomeRow}-C${totalCostRow}`]));
+  addRow(pad(["淨利潤率", "", `=IF(C${totalIncomeRow}=0,"",C${netProfitRow}/C${totalIncomeRow})`]));
 
-  // 額外採購明細（放在最後，方便核對）
+  // ── 額外採購明細（方便核對）──
   if (extraRows.length > 0) {
-    data.push(["", "", "", "", "", "", "", ""]);
-    data.push(["【額外採購明細】", "", "", "", "", "", "", ""]);
-    data.push(["滿贈款式", "數量", "成本(￥)", "", "", "", "", ""]);
-    extraRows.forEach((r) => data.push([r.styleName, r.qty, r.subtotal, "", "", "", "", ""]));
+    addRow(pad([]));
+    addRow(pad(["【額外採購明細】"]));
+    addRow(pad(["滿贈款式", "數量", "成本(￥)"]));
+    extraRows.forEach((r) => addRow(pad([r.styleName, r.qty, r.subtotal])));
   }
 
   // 清空範圍要貼合實際欄數（新分頁預設只有 A~Z 共26欄，用預設值容易超出範圍報錯），
