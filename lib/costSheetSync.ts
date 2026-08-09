@@ -202,11 +202,12 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
     const giftText = (o.order_gift_selections || [])
       .map((g: any) => `${g.style_name_snapshot} x${g.qty}`)
       .join("、");
-    const r = addRow(pad([o.username, o.order_no, itemsSubtotal, shippingFee, "", paid, "", giftText]));
+    // 台幣金額一律無條件進位（規格書2.6節：匯率換算的結果進位），不能出現小數
+    const r = addRow(pad([o.username, o.order_no, Math.ceil(itemsSubtotal), Math.ceil(shippingFee), "", Math.ceil(paid), "", giftText]));
     customerRowNumbers.push(r);
-    // 應收總額＝商品小計＋應收運費；尚欠＝應收總額−已收
-    data[r - 1][4] = `=C${r}+D${r}`;
-    data[r - 1][6] = `=E${r}-F${r}`;
+    // 應收總額＝商品小計＋應收運費；尚欠＝應收總額−已收（兩者都進位，避免公式算出小數）
+    data[r - 1][4] = `=CEILING(C${r}+D${r})`;
+    data[r - 1][6] = `=CEILING(E${r}-F${r})`;
   });
   const firstCustomerRow = customerRowNumbers[0];
   const lastCustomerRow = customerRowNumbers[customerRowNumbers.length - 1];
@@ -215,12 +216,12 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   // ── 收入 ──
   addRow(pad(["【收入】"]));
   const incomeProductRow = addRow(
-    pad(["商品收入", "", firstCustomerRow ? `=SUM(C${firstCustomerRow}:C${lastCustomerRow})` : 0])
+    pad(["商品收入", "", firstCustomerRow ? `=CEILING(SUM(C${firstCustomerRow}:C${lastCustomerRow}))` : 0])
   );
   const incomeShippingRow = addRow(
-    pad(["顧客運費", "", firstCustomerRow ? `=SUM(D${firstCustomerRow}:D${lastCustomerRow})` : 0])
+    pad(["顧客運費", "", firstCustomerRow ? `=CEILING(SUM(D${firstCustomerRow}:D${lastCustomerRow}))` : 0])
   );
-  const totalIncomeRow = addRow(pad(["總收入", "", `=C${incomeProductRow}+C${incomeShippingRow}`]));
+  const totalIncomeRow = addRow(pad(["總收入", "", `=CEILING(C${incomeProductRow}+C${incomeShippingRow})`]));
   addRow(pad([]));
 
   // ── 成本 ──
@@ -232,13 +233,13 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   const extraCostRow = addRow(pad(["額外採購成本(NT$)", "", `=CEILING(C${extraRow}*C${fxRow})`]));
   const weightRow = addRow(pad(["總重量(KG)", "", totalWeightKg, "所有物流單號的重量加總"]));
   const perKgRow = addRow(pad(["每公斤運費(NT$)", "", perKgCell, "← 這格自己填（系統不覆蓋）"]));
-  const shippingCostRow = addRow(pad(["運費成本(NT$)", "", `=C${weightRow}*C${perKgRow}`]));
+  const shippingCostRow = addRow(pad(["運費成本(NT$)", "", `=CEILING(C${weightRow}*C${perKgRow})`]));
   const otherRow = addRow(pad(["其他成本", "", otherCostCell, "← 這格自己填（系統不覆蓋）"]));
   const totalCostRow = addRow(
     pad([
       "總成本(NT$)",
       "",
-      `=C${purchaseCostRow}+C${extraCostRow}+C${shippingCostRow}+IF(C${otherRow}="",0,C${otherRow})`,
+      `=CEILING(C${purchaseCostRow}+C${extraCostRow}+C${shippingCostRow}+IF(C${otherRow}="",0,C${otherRow}))`,
     ])
   );
   addRow(pad([]));

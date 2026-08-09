@@ -362,7 +362,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       }
       const itemRows = g.items.map((it, idx) => ({
         order_id: order.id, product_name: it.name, style: it.style, qty: it.qty,
-        unit_price: it.unitPrice, subtotal: it.qty * it.unitPrice,
+        unit_price: it.unitPrice, subtotal: Math.ceil(it.qty * it.unitPrice),
         series_id: planByItemIndex[idx]?.id || null, series_name_snapshot: it.planName,
         unit_price_original: it.unitPriceOriginal,
         fx_rate: it.fxRate,
@@ -528,7 +528,7 @@ export async function importLegacySheetTab(sheetId: string, tabName: string, com
       }
       const itemRows = g.items.map((it) => ({
         order_id: order.id, product_name: it.name, style: it.style, qty: it.qty, unit_price: it.unitPrice,
-        subtotal: it.qty * it.unitPrice, image_url: catalogImageByKey.get(`${it.name}__${it.style}`) || null,
+        subtotal: Math.ceil(it.qty * it.unitPrice), image_url: catalogImageByKey.get(`${it.name}__${it.style}`) || null,
       }));
       if (itemRows.length) {
         const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
