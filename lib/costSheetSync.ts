@@ -230,10 +230,21 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<{ ta
     extraRows.forEach((r) => data.push([r.styleName, r.qty, r.subtotal, "", "", "", "", ""]));
   }
 
+  // 清空範圍要貼合實際欄數（新分頁預設只有 A~Z 共26欄，用預設值容易超出範圍報錯），
+  // 列數取「舊資料可能的長度」與「這次要寫的長度」的較大值，確保舊內容被清乾淨
+  const COLUMN_COUNT = 8;
+  const clearRows = Math.max(data.length + 50, 200);
   const requests: BatchRequest[] = [
-    buildClearRequest(sheetId),
+    // 先確保分頁夠大：新分頁預設 1000 列 x 26 欄，資料多的時候要先擴充，不然寫入會超出範圍
+    {
+      updateSheetProperties: {
+        properties: { sheetId, gridProperties: { rowCount: Math.max(clearRows, 1000), columnCount: Math.max(COLUMN_COUNT, 26) } },
+        fields: "gridProperties.rowCount,gridProperties.columnCount",
+      },
+    },
+    buildClearRequest(sheetId, clearRows, COLUMN_COUNT),
     buildWriteRequest(sheetId, 0, 0, data),
-    ...buildFormatHeaderRequests(sheetId, 8),
+    ...buildFormatHeaderRequests(sheetId, COLUMN_COUNT),
   ];
   await sheets.spreadsheets.batchUpdate({ spreadsheetId: costId, requestBody: { requests } });
 

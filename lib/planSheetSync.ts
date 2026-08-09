@@ -2,12 +2,12 @@ import { getSupabaseAdmin } from "./supabase";
 import {
   getSheets, requireSheetId, requireCostSheetId,
   ensureSheetExistsCached, getValuesAndFormulas, batchGetValues, columnToLetter,
-  buildClearRequest, buildWriteRequest, buildBoldRangeRequest, buildHideSheetRequest, buildHideColumnsRequest, buildNumberFormatRequest,
+  buildClearRequest, buildWriteRequest, buildBoldRangeRequest, buildHideSheetRequest, buildNumberFormatRequest,
   runBatch, type BatchRequest, type SheetsClient, type SheetMetaCache,
 } from "./googleSheets";
 
-const ORDER_HEADER = ["訂單編號", "來源", "暱稱", "FB個人網址", "商品名稱", "款式", "數量", "單價", "小計", "訂單時間", "交易方式", "付款狀態"];
-const CATALOG_HEADER = ["商品名稱", "款式", "單價", "圖片"];
+// 一次結帳＝一張訂單、可跨系列，所以要標系列才分得出來是哪個系列的商品
+const ORDER_HEADER = ["訂單編號", "來源", "暱稱", "FB個人網址", "系列", "商品名稱", "款式", "數量", "單價", "小計", "訂單時間", "交易方式", "付款狀態"];
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -66,42 +66,27 @@ async function buildOrderTabRequests(sheets: SheetsClient, mainSheetId: string, 
   const orders = await getCampaignOrders(campaignId);
 
   // 從訂單品項推導出這個檔期實際用到的商品目錄（同名同款式只留一筆，金額用最後出現的那筆）
-  const catalogMap = new Map<string, { name: string; style: string; price: number; imageUrl: string }>();
-  orders.forEach((o: any) => {
-    (o.order_items || []).forEach((it: any) => {
-      const key = `${it.product_name}||${it.style || ""}`;
-      catalogMap.set(key, { name: it.product_name, style: it.style || "", price: Number(it.unit_price) || 0, imageUrl: it.image_url || "" });
-    });
-  });
-  const catalogRows = Array.from(catalogMap.values()).map((p) => [p.name, p.style, p.price, p.imageUrl]);
-  const catalogBlock = [CATALOG_HEADER, ...catalogRows];
-
   const orderRows: (string | number)[][] = [];
   orders.forEach((o: any) => {
     const paidAmount = Number(o.paid_amount) || 0;
     (o.order_items || []).forEach((it: any) => {
       orderRows.push([
-        o.order_no, "", o.username, o.profile_url, it.product_name, it.style || "",
+        o.order_no, "", o.username, o.profile_url,
+        it.series_name_snapshot || o.series_name_snapshot || "",
+        it.product_name, it.style || "",
         it.qty, Number(it.unit_price) || 0, Number(it.subtotal) || 0,
         new Date(o.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }), o.payment, paidAmount > 0 ? paidAmount : "",
       ]);
     });
   });
 
-  const fullData: (string | number)[][] = [
-    ...catalogBlock,
-    ["", "", "", "", "", "", "", "", "", "", "", ""],
-    ORDER_HEADER,
-    ...orderRows,
-  ];
+  // 打開分頁就要直接看到訂單，不再在上面放價目表區塊（也就不需要隱藏欄位了）
+  const fullData: (string | number)[][] = [ORDER_HEADER, ...orderRows];
 
   return [
-    buildClearRequest(sheetId, 100000, 12),
+    buildClearRequest(sheetId, 100000, ORDER_HEADER.length),
     buildWriteRequest(sheetId, 0, 0, fullData),
-    buildBoldRangeRequest(sheetId, 0, 1, 0, CATALOG_HEADER.length),
-    buildBoldRangeRequest(sheetId, catalogBlock.length + 1, catalogBlock.length + 2, 0, ORDER_HEADER.length),
-    // 依你確認的做法：價目表區塊（A~D欄）設成隱藏欄位，資料還在，只是打開Sheet的人看不到
-    buildHideColumnsRequest(sheetId, 0, CATALOG_HEADER.length),
+    buildBoldRangeRequest(sheetId, 0, 1, 0, ORDER_HEADER.length),
   ];
 }
 
