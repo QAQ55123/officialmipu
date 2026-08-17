@@ -935,13 +935,15 @@ export default function PurchaseBatchesPage() {
                   <span style={{ fontSize: 13, minWidth: 220 }}>{it.label}　剩 {it.remaining} 件</span>
                   <input
                     type="number"
+                    className="admin-input"
                     placeholder="數量"
-                    style={{ width: 60, minWidth: 60 }}
+                    style={{ width: 80 }}
                     value={assignShipQtyByPoolItem[key] || ""}
                     onChange={(e) => setAssignShipQtyByPoolItem((prev) => ({ ...prev, [key]: e.target.value }))}
                   />
                   <select
-                    style={{ padding: 6 }}
+                    className="admin-input"
+                    style={{ minWidth: 200 }}
                     value={assignShipTargetByPoolItem[key] || ""}
                     onChange={(e) => setAssignShipTargetByPoolItem((prev) => ({ ...prev, [key]: e.target.value }))}
                   >
@@ -957,7 +959,7 @@ export default function PurchaseBatchesPage() {
           </div>
 
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <input type="text" value={newOrderNumber} onChange={(e) => setNewOrderNumber(e.target.value)} placeholder="廠商訂單編號" style={{ padding: 8 }} />
+            <input type="text" className="admin-input" value={newOrderNumber} onChange={(e) => setNewOrderNumber(e.target.value)} placeholder="廠商訂單編號" style={{ minWidth: 220 }} />
             <button className="btn small" onClick={addOrderNumber}>新增廠商訂單編號</button>
           </div>
 
@@ -987,10 +989,11 @@ export default function PurchaseBatchesPage() {
                         <input
                           type="number"
                           step="0.01"
+                          className="admin-input"
                           defaultValue={s.weightKg ?? ""}
                           onBlur={(e) => updateShipmentWeight(s.id, e.target.value)}
                           placeholder="KG"
-                          style={{ width: 70, minWidth: 70, padding: 4, fontSize: 12 }}
+                          style={{ width: 90 }}
                         />
                         <span style={{ fontSize: 12, color: "#8A8779" }}>KG</span>
                         <button className="btn small danger" onClick={() => deleteShipment(s.id)}>刪除</button>
@@ -1015,8 +1018,9 @@ export default function PurchaseBatchesPage() {
               <div style={{ display: "flex", gap: 8, marginLeft: 14, marginTop: 8 }}>
                 <input
                   type="text"
+                  className="admin-input"
                   placeholder="物流單號（選填）"
-                  style={{ padding: 6 }}
+                  style={{ minWidth: 220 }}
                   value={newTrackingByOrderNumber[on.id] || ""}
                   onChange={(e) => setNewTrackingByOrderNumber((prev) => ({ ...prev, [on.id]: e.target.value }))}
                 />

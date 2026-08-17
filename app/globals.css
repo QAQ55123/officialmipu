@@ -56,6 +56,13 @@ html, body {
   flex: 1; min-width: 200px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
   font-size: 15px; background: var(--card); color: var(--text); box-sizing: border-box;
 }
+/* 後台的小型輸入框：跟 .id-row 的輸入框同一套外觀（邊框／圓角／內距／字級），
+   但寬度交給呼叫端自訂，適合「多個小欄位排成一列」的情境（例如到貨追蹤） */
+.admin-input {
+  padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px;
+  font-size: 15px; background: var(--card); color: var(--text); box-sizing: border-box;
+}
+
 .source-btns { display: flex; gap: 8px; }
 .src-btn { border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 8px; padding: 7px 18px; font-size: 15px; cursor: pointer; }
 .src-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
