@@ -2040,7 +2040,40 @@ export default function Home() {
                               </div>
                             </div>
                           )}
-                          <div className="hist-total">交易方式：{o.payment}　合計 NT$ {fmt(o.total)}</div>
+                          {/* 2.8節：運費依「出貨批次」計算，同一張訂單分批到貨就會有好幾批、各自算運費 */}
+                          {o.shippingBatches && o.shippingBatches.length > 0 && (
+                            <div style={{ margin: "8px 0" }}>
+                              <div style={{ fontSize: 12, color: "var(--text)", fontWeight: 600, marginBottom: 6 }}>出貨與運費</div>
+                              {o.shippingBatches.map((b: any) => (
+                                <div key={b.batchNo} style={{ fontSize: 13, padding: "4px 0", borderBottom: "1px dashed var(--line)" }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                                    <span>第 {b.batchNo} 批</span>
+                                    <span>運費 NT$ {fmt(b.shippingFee)}</span>
+                                  </div>
+                                  {/* 一行一個品項：擠成一段的話品項一多就很難讀 */}
+                                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, paddingLeft: 8 }}>
+                                    {b.items.map((bi: any, i: number) => (
+                                      <div key={i} style={{ padding: "2px 0", display: "flex", alignItems: "center", gap: 5 }}>
+                                        {bi.isGift && (
+                                          <span style={{ display: "inline-block", fontSize: 11, color: "#3C3489", background: "#EEEDFE", padding: "1px 8px", borderRadius: 999, flexShrink: 0 }}>
+                                            滿贈
+                                          </span>
+                                        )}
+                                        <span>{bi.name}{bi.style ? `（${bi.style}）` : ""} x{bi.qty}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                              <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6, textAlign: "right" }}>
+                                運費合計 NT$ {fmt(o.totalShippingFee || 0)}
+                              </div>
+                            </div>
+                          )}
+                          <div className="hist-total">
+                            交易方式：{o.payment}　商品合計 NT$ {fmt(o.total)}
+                            {o.totalShippingFee > 0 && `　＋運費 NT$ ${fmt(o.totalShippingFee)}　總計 NT$ ${fmt(o.total + o.totalShippingFee)}`}
+                          </div>
                           {o.paidAmount > 0 && (
                             <div className="hist-paid-confirm">
                               ✓ 已確認收到您的款項 NT$ {fmt(o.paidAmount)}

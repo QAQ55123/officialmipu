@@ -508,7 +508,22 @@ export default function PurchaseBatchesPage() {
 
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 16px 80px" }}>
-      <button className="btn secondary" style={{ marginBottom: 16 }} onClick={() => router.push("/admin")}>← 返回後台</button>
+      {/* 在到貨追蹤子頁面時，這顆要返回採購單列表（不是跳出去回後台）——
+          原本不管在哪個狀態都是回後台，在子頁面很容易誤按 */}
+      <button
+        className="btn secondary"
+        style={{ marginBottom: 16 }}
+        onClick={() => {
+          if (activeBatchForArrival) {
+            setActiveBatchForArrival(null);
+            loadPurchaseBatchesData();
+          } else {
+            router.push("/admin");
+          }
+        }}
+      >
+        {activeBatchForArrival ? "← 返回採購單列表" : "← 返回後台"}
+      </button>
       <h2 style={{ marginBottom: 4 }}>拆單：{campaign?.name}</h2>
 
       {(() => {

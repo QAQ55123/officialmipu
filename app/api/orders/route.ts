@@ -270,7 +270,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("*, series(name, image_url, is_legacy_archive), campaigns(fulfillment_status), order_items(*), order_gift_selections(*)")
+    .select("*, series(name, image_url, is_legacy_archive), campaigns(fulfillment_status), order_items(*), order_gift_selections(*), shipping_batches(id, customer_shipping_fee, created_at, shipping_batch_items(qty, order_item_id, order_gift_selection_id))")
     .ilike("username", username)
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -288,6 +288,23 @@ export async function GET(req: Request) {
       createdAt: o.created_at,
       cancelRequested: !!o.cancel_requested_at,
       fulfillmentStatus: o.campaigns?.fulfillment_status || null,
+      // 2.8節：同一張訂單可能分好幾次出貨，每一批各自算運費，顧客要看得到每批出了什麼、運費多少
+      shippingBatches: (o.shipping_batches || [])
+        .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+        .map((b: any, idx: number) => ({
+          batchNo: idx + 1,
+          shippingFee: Number(b.customer_shipping_fee) || 0,
+          createdAt: b.created_at,
+          items: (b.shipping_batch_items || []).map((bi: any) => {
+            if (bi.order_gift_selection_id) {
+              const g = (o.order_gift_selections || []).find((x: any) => x.id === bi.order_gift_selection_id);
+              return { name: g?.style_name_snapshot || "滿贈", style: "", qty: bi.qty, isGift: true };
+            }
+            const it = (o.order_items || []).find((x: any) => x.id === bi.order_item_id);
+            return { name: it?.product_name || "", style: it?.style || "", qty: bi.qty, isGift: false };
+          }),
+        })),
+      totalShippingFee: (o.shipping_batches || []).reduce((s: number, b: any) => s + (Number(b.customer_shipping_fee) || 0), 0),
       items: (o.order_items || []).map((it: any) => ({
         // 一次結帳＝一張訂單、可跨系列，系列記在品項層級
         seriesName: it.series_name_snapshot || null,
