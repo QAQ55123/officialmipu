@@ -11,7 +11,7 @@ type Plan = {
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
-type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; subSeriesId?: string | null };
+type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; };
 type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
@@ -216,8 +216,6 @@ export default function Home() {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [activePlan, setActivePlan] = useState<Plan | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
-  // 這個系列底下的子分類（商品很多時用來分組，沒建就是空陣列）
-  const [subSeries, setSubSeries] = useState<{ id: string; name: string }[]>([]);
   const [cart, setCart] = useState<Record<string, number>>({}); // key: name||style（目前正在瀏覽的系列、還沒加入購物車前的暫存）
 
   const [globalCart, setGlobalCart] = useState<GlobalCartEntry[]>(() => {
@@ -397,7 +395,6 @@ export default function Home() {
     const d = await r.json();
     setActivePlan(d.plan);
     setProducts(d.products || []);
-    setSubSeries(d.subSeries || []);
     setCart({});
     setSelectedProductName(null);
     setSelectedStyleByProduct({});
@@ -1338,15 +1335,30 @@ export default function Home() {
               </div>
               {hasChildren && expanded && (
                 <div>
-                  {children.map((child) => (
-                    <div
-                      key={child.id}
-                      className={`subcategory-item ${selectedCategoryId === child.id ? "active" : ""}`}
-                      onClick={() => { selectCategory(child.id); onAfterSelect?.(); }}
-                    >
-                      {child.name}
-                    </div>
-                  ))}
+                  {children.map((child) => {
+                    // 分類支援三層：第二層底下如果還有分類，縮排再深一階列出來
+                    const grandChildren = categories.filter((c) => c.parentId === child.id);
+                    return (
+                      <div key={child.id}>
+                        <div
+                          className={`subcategory-item ${selectedCategoryId === child.id ? "active" : ""}`}
+                          onClick={() => { selectCategory(child.id); onAfterSelect?.(); }}
+                        >
+                          {child.name}
+                        </div>
+                        {grandChildren.map((gc) => (
+                          <div
+                            key={gc.id}
+                            className={`subcategory-item ${selectedCategoryId === gc.id ? "active" : ""}`}
+                            style={{ paddingLeft: 36 }}
+                            onClick={() => { selectCategory(gc.id); onAfterSelect?.(); }}
+                          >
+                            {gc.name}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1850,9 +1862,8 @@ export default function Home() {
                         </div>
 
                         <div className="product-info-v3-label">商品</div>
-                        {(() => {
-                          // 商品很多時可以在後台建「子分類」分組；沒建的話就照舊全部列出來
-                          const renderPill = (pname: string) => (
+                        <div className="style-pills">
+                          {productNames.map((pname) => (
                             <button
                               key={pname}
                               className={`style-pill ${activeProductName === pname ? "active" : ""}`}
@@ -1869,41 +1880,8 @@ export default function Home() {
                               {pname}
                               {productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>}
                             </button>
-                          );
-
-                          if (subSeries.length === 0) {
-                            return <div className="style-pills">{productNames.map(renderPill)}</div>;
-                          }
-
-                          // 每個商品名稱屬於哪個子分類（拿該商品第一個款式的歸屬就好）
-                          const subIdOf = (pname: string) => grouped[pname]?.[0]?.subSeriesId || null;
-                          const ungrouped = productNames.filter((n) => !subIdOf(n));
-
-                          return (
-                            <>
-                              {subSeries.map((sub) => {
-                                const names = productNames.filter((n) => subIdOf(n) === sub.id);
-                                if (names.length === 0) return null;
-                                return (
-                                  <div key={sub.id} style={{ marginBottom: 12 }}>
-                                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 6, paddingBottom: 4, borderBottom: "1px solid var(--line)" }}>
-                                      {sub.name}
-                                    </div>
-                                    <div className="style-pills">{names.map(renderPill)}</div>
-                                  </div>
-                                );
-                              })}
-                              {ungrouped.length > 0 && (
-                                <div style={{ marginBottom: 12 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 6, paddingBottom: 4, borderBottom: "1px solid var(--line)" }}>
-                                    其他
-                                  </div>
-                                  <div className="style-pills">{ungrouped.map(renderPill)}</div>
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
+                          ))}
+                        </div>
 
                         {current.hasDiscountFlag && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginBottom: 8 }}>滿減商品</span>}
 

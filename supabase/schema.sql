@@ -53,11 +53,7 @@ create table if not exists series (
   sort_order    int default 0,
   created_at    timestamptz default now()
 );
--- 系列與商品之間的「子分類」：商品很多的時候可以再分組，不用的話留空即可（商品照樣直接掛在系列上）。
--- 子分類本身也是一筆 series，用 parent_id 指向所屬的系列。
-alter table series add column if not exists parent_id uuid references series(id) on delete cascade;
 create index if not exists idx_series_category on series (category_id);
-create index if not exists idx_series_parent on series (parent_id);
 
 -- 商品（原本每個系列分頁裡的價目表）
 create table if not exists products (

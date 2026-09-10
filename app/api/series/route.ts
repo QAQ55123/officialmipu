@@ -15,18 +15,25 @@ export async function GET(req: Request) {
     .from("series")
     .select("id, name, image_url, visible_to, sort_order, category_id, categories(id, name, parent_id)")
     .eq("is_visible", true)
-    // 子分類是「系列底下的商品分組」，不是獨立的系列，不該出現在系列卡片列表
-    .is("parent_id", null)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
 
   // 分類篩選：選到上層分類時，要包含它底下所有子分類的系列
   if (categoryId) {
+    // 分類有三層：點第一層要連第二層、第三層底下的系列都撈出來
     const { data: allCats } = await supabase.from("categories").select("id, parent_id");
     const ids = [categoryId];
-    (allCats || []).forEach((c) => {
-      if (c.parent_id === categoryId) ids.push(c.id);
-    });
+    let frontier = [categoryId];
+    while (frontier.length > 0) {
+      const next: string[] = [];
+      (allCats || []).forEach((c) => {
+        if (c.parent_id && frontier.includes(c.parent_id) && !ids.includes(c.id)) {
+          ids.push(c.id);
+          next.push(c.id);
+        }
+      });
+      frontier = next;
+    }
     query = query.in("category_id", ids);
   }
 

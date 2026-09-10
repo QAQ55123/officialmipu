@@ -8,12 +8,11 @@ type SeriesAdmin = {
   id: string; name: string; imageUrl: string | null;
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
-  parentId?: string | null; // 有值＝這是某個系列底下的子分類
 };
 type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
-const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true, parentId: "" };
+const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
 const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null, coverImageUrl: "", altSiteBankPrice: "", altSiteCodPrice: "" };
 
 export default function AdminPage() {
@@ -46,6 +45,8 @@ export default function AdminPage() {
   // ---- 分類 ----
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryForm, setCategoryForm] = useState(emptyCategoryForm);
+  // 上層分類用兩段式下拉：這個記的是第一段選了哪個第一層分類
+  const [categoryLevel1Id, setCategoryLevel1Id] = useState("");
   const [categoryMsg, setCategoryMsg] = useState("");
 
   // ---- 系列 ----
@@ -1078,6 +1079,9 @@ export default function AdminPage() {
 
   function editCategory(c: Category) {
     setCategoryForm({ id: c.id, name: c.name, parentId: c.parent_id || "", isGiftCategory: !!c.isGiftCategory });
+    // 編輯第三層分類時，第一段下拉要回填它的「祖父」分類，選單才顯示得正確
+    const parent = c.parent_id ? categories.find((x) => x.id === c.parent_id) : null;
+    setCategoryLevel1Id(parent ? (parent.parent_id || parent.id) : "");
     categoryFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -1091,6 +1095,7 @@ export default function AdminPage() {
         await callJson("/api/admin/categories", "POST", { name: categoryForm.name, parentId: categoryForm.parentId || null, isGiftCategory: categoryForm.isGiftCategory });
       }
       setCategoryForm(emptyCategoryForm);
+      setCategoryLevel1Id("");
       setCategoryMsg("已儲存");
       loadCategories();
     } catch (e: any) {
@@ -1176,7 +1181,6 @@ export default function AdminPage() {
       categoryId: p.categoryId || "",
       promoImages: p.promoImages || [],
       isVisible: p.isVisible !== false,
-      parentId: p.parentId || "",
     });
     planFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -1191,8 +1195,6 @@ export default function AdminPage() {
       categoryId: planForm.categoryId || null,
       promoImages: planForm.promoImages,
       isVisible: planForm.isVisible,
-      // 選了上層系列＝這是子分類（商品很多時用來分組），留空就是一般系列
-      parentId: planForm.parentId || null,
     };
     try {
       let d: any;
@@ -2211,15 +2213,38 @@ export default function AdminPage() {
           <span className="id-label">名稱</span>
           <input type="text" value={categoryForm.name} onChange={(e) => setCategoryForm((f) => ({ ...f, name: e.target.value }))} placeholder="例如：食品、米菓" />
         </div>
+        {/* 分類支援三層。用兩段式下拉而不是把所有層級塞進同一個選單——
+            分類一多，混在一起的選單會長到很難選 */}
         <div className="id-row">
           <span className="id-label">上層分類</span>
-          <select value={categoryForm.parentId} onChange={(e) => setCategoryForm((f) => ({ ...f, parentId: e.target.value }))} style={{ flex: 1, padding: 8 }}>
-            <option value="">（無，這是頂層分類）</option>
+          <select
+            value={categoryLevel1Id}
+            onChange={(e) => {
+              setCategoryLevel1Id(e.target.value);
+              // 換了第一層，原本選的第二層就不適用了
+              setCategoryForm((f) => ({ ...f, parentId: e.target.value }));
+            }}
+          >
+            <option value="">（無，這是第一層分類）</option>
             {topCategories.filter((c) => c.id !== categoryForm.id).map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </div>
+        {categoryLevel1Id && childrenOf(categoryLevel1Id).filter((c) => c.id !== categoryForm.id).length > 0 && (
+          <div className="id-row">
+            <span className="id-label">再選第二層</span>
+            <select
+              value={categoryForm.parentId === categoryLevel1Id ? "" : categoryForm.parentId}
+              onChange={(e) => setCategoryForm((f) => ({ ...f, parentId: e.target.value || categoryLevel1Id }))}
+            >
+              <option value="">（直接放在「{topCategories.find((c) => c.id === categoryLevel1Id)?.name}」底下）</option>
+              {childrenOf(categoryLevel1Id).filter((c) => c.id !== categoryForm.id).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="id-row">
           <span className="id-label">是否為滿贈分類</span>
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#33415C" }}>
@@ -2229,7 +2254,7 @@ export default function AdminPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn" onClick={saveCategory}>{categoryForm.id ? "儲存修改" : "新增分類"}</button>
-          {categoryForm.id && <button className="btn secondary" onClick={() => setCategoryForm(emptyCategoryForm)}>取消編輯</button>}
+          {categoryForm.id && <button className="btn secondary" onClick={() => { setCategoryForm(emptyCategoryForm); setCategoryLevel1Id(""); }}>取消編輯</button>}
         </div>
         <div style={{ fontSize: 13, marginTop: 6 }}>{categoryMsg}</div>
 
@@ -2282,6 +2307,25 @@ export default function AdminPage() {
                   </span>
                 </div>
               ))}
+              {/* 第三層分類：掛在第二層底下，縮排再深一階 */}
+              {childrenOf(c.id).map((sub) =>
+                childrenOf(sub.id).map((third) => (
+                  <div
+                    key={third.id}
+                    draggable
+                    onDragStart={() => setDraggedCategoryId(third.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleCategoryDrop(third.id)}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#8A8779", paddingLeft: 36, marginTop: 4, cursor: "grab", opacity: draggedCategoryId === third.id ? 0.4 : 1 }}
+                  >
+                    <span><span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>└ {third.name}</span>
+                    <span>
+                      <button className="btn small secondary" onClick={() => editCategory(third)} style={{ marginRight: 6 }}>編輯</button>
+                      <button className="btn small danger" onClick={() => deleteCategory(third.id)}>刪除</button>
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           ))}
           {topCategories.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有分類</div>}
@@ -2312,20 +2356,6 @@ export default function AdminPage() {
             ))}
           </select>
         </div>
-        <div className="id-row">
-          <span className="id-label">上層系列</span>
-          <select value={planForm.parentId} onChange={(e) => setPlanForm((f) => ({ ...f, parentId: e.target.value }))} style={{ flex: 1, padding: 8 }}>
-            <option value="">（不是子分類）</option>
-            {plans
-              .filter((p) => !p.parentId && p.id !== planForm.id)
-              .map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-          </select>
-        </div>
-        <p style={{ fontSize: 12, color: "#8A8779", margin: "-4px 0 12px 94px" }}>
-          選了上層系列＝這是那個系列底下的「子分類」，用來把商品分組（商品很多的時候才需要）。留空就是一般系列。
-        </p>
 
         {!planForm.id && categories.find((c) => c.id === planForm.categoryId)?.isGiftCategory && (
           <div style={{ border: "1px solid #6B4E8E", background: "#ECE6F2", borderRadius: 10, padding: 14, marginBottom: 12 }}>
