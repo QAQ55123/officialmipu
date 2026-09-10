@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   const finalUsername = String(username || "").trim();
   if (!finalUsername) return NextResponse.json({ error: "請先登入身分" }, { status: 400 });
   if (!["匯款", "取付"].includes(payment)) {
-    return NextResponse.json({ error: "請先選擇交易方式（匯款 / 取付）" }, { status: 400 });
+    return NextResponse.json({ error: "請先選擇交易方式" }, { status: 400 });
   }
   const finalWantsGift = wantsGift !== false;
 
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     }
     if (blockedNames.length > 0) {
       return NextResponse.json(
-        { error: `以下商品不開放取付，請改用匯款或從購物車移除：${blockedNames.join("、")}` },
+        { error: `以下商品不開放取付，請改用匯款/無卡或從購物車移除：${blockedNames.join("、")}` },
         { status: 400 }
       );
     }
@@ -140,7 +140,7 @@ export async function POST(req: Request) {
       const used = Number(campaign.cod_campaign_used) || 0;
       if (used + regularTotal > cap) {
         return NextResponse.json(
-          { error: `取付金額已超過本檔期設定的金額 NT$${fmtMoney(cap)}，請改用匯款` },
+          { error: `取付金額已超過本檔期設定的金額 NT$${fmtMoney(cap)}，請改用匯款/無卡` },
           { status: 400 }
         );
       }
@@ -151,7 +151,7 @@ export async function POST(req: Request) {
       const giftUsed = Number(campaign.gift_cod_campaign_used) || 0;
       if (giftUsed + giftConvTotal > giftCap) {
         return NextResponse.json(
-          { error: `贈品／滿贈系列商品的取付金額已超過本檔期設定的金額 NT$${fmtMoney(giftCap)}，請改用匯款` },
+          { error: `贈品／滿贈系列商品的取付金額已超過本檔期設定的金額 NT$${fmtMoney(giftCap)}，請改用匯款/無卡` },
           { status: 400 }
         );
       }

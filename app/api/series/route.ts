@@ -15,6 +15,8 @@ export async function GET(req: Request) {
     .from("series")
     .select("id, name, image_url, visible_to, sort_order, category_id, categories(id, name, parent_id)")
     .eq("is_visible", true)
+    // 子分類是「系列底下的商品分組」，不是獨立的系列，不該出現在系列卡片列表
+    .is("parent_id", null)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
 

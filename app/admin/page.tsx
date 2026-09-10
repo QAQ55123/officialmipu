@@ -1,17 +1,19 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { toDirectImageUrl } from "@/lib/imageUrl";
+import { paymentLabel } from "@/lib/util";
 
 type Category = { id: string; name: string; parent_id: string | null; created_at?: string; sort_order?: number; isGiftCategory?: boolean };
 type SeriesAdmin = {
   id: string; name: string; imageUrl: string | null;
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
+  parentId?: string | null; // 有值＝這是某個系列底下的子分類
 };
 type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
-const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
+const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true, parentId: "" };
 const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null, coverImageUrl: "", altSiteBankPrice: "", altSiteCodPrice: "" };
 
 export default function AdminPage() {
@@ -1174,6 +1176,7 @@ export default function AdminPage() {
       categoryId: p.categoryId || "",
       promoImages: p.promoImages || [],
       isVisible: p.isVisible !== false,
+      parentId: p.parentId || "",
     });
     planFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -1188,6 +1191,8 @@ export default function AdminPage() {
       categoryId: planForm.categoryId || null,
       promoImages: planForm.promoImages,
       isVisible: planForm.isVisible,
+      // 選了上層系列＝這是子分類（商品很多時用來分組），留空就是一般系列
+      parentId: planForm.parentId || null,
     };
     try {
       let d: any;
@@ -1386,7 +1391,7 @@ export default function AdminPage() {
             imageUrl: row.imageUrl || null,
             hasDiscountFlag: row.hasDiscountFlag,
             codAllowed: row.codAllowed,
-            shippingFee: row.shippingFee || "0",
+            shippingFee: productForm.shippingFee || "0",
             coverImageUrl: productForm.coverImageUrl || null,
             altSiteBankPrice: productForm.altSiteBankPrice,
             altSiteCodPrice: productForm.altSiteCodPrice,
@@ -2307,6 +2312,20 @@ export default function AdminPage() {
             ))}
           </select>
         </div>
+        <div className="id-row">
+          <span className="id-label">上層系列</span>
+          <select value={planForm.parentId} onChange={(e) => setPlanForm((f) => ({ ...f, parentId: e.target.value }))} style={{ flex: 1, padding: 8 }}>
+            <option value="">（不是子分類）</option>
+            {plans
+              .filter((p) => !p.parentId && p.id !== planForm.id)
+              .map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+          </select>
+        </div>
+        <p style={{ fontSize: 12, color: "#8A8779", margin: "-4px 0 12px 94px" }}>
+          選了上層系列＝這是那個系列底下的「子分類」，用來把商品分組（商品很多的時候才需要）。留空就是一般系列。
+        </p>
 
         {!planForm.id && categories.find((c) => c.id === planForm.categoryId)?.isGiftCategory && (
           <div style={{ border: "1px solid #6B4E8E", background: "#ECE6F2", borderRadius: 10, padding: 14, marginBottom: 12 }}>
@@ -3102,7 +3121,7 @@ export default function AdminPage() {
               <div style={{ border: "1px solid #6B4E8E", background: "#ECE6F2", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ fontSize: 12, color: "#4A3560" }}>獨立網頁專用價格（只有滿贈分類的商品才需要填，一般商品留空即可）</div>
                 <div className="id-row">
-                  <span className="id-label">匯款價（NT$）</span>
+                  <span className="id-label">匯款/無卡價（NT$）</span>
                   <input type="number" value={productForm.altSiteBankPrice} onChange={(e) => setProductForm((f) => ({ ...f, altSiteBankPrice: e.target.value }))} placeholder="留空＝不適用" />
                 </div>
                 <div className="id-row">
@@ -3114,6 +3133,9 @@ export default function AdminPage() {
                 <span className="id-label">運費金額（NT$）</span>
                 <input type="number" value={productForm.shippingFee} onChange={(e) => setProductForm((f) => ({ ...f, shippingFee: e.target.value }))} />
               </div>
+              <p style={{ fontSize: 11, color: "#9A9787", margin: "-4px 0 12px 94px" }}>
+                運費是「商品」層級的，填一次就會套用到這個商品底下的所有款式
+              </p>
               <div className="id-row">
                 <span className="id-label">是否滿減(v)</span>
                 <input type="checkbox" checked={productForm.hasDiscountFlag} onChange={(e) => setProductForm((f) => ({ ...f, hasDiscountFlag: e.target.checked }))} />
@@ -3159,15 +3181,6 @@ export default function AdminPage() {
                             value={row.price}
                             onChange={(e) => updateProductRow(i, "price", e.target.value)}
                             style={{ width: 60, minWidth: 60, padding: "9px 6px", border: "1px solid var(--line)", borderRadius: 8, fontSize: 14, background: "var(--card)", color: "var(--text)", boxSizing: "border-box" }}
-                          />
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 10, color: "#9A9787", marginBottom: 2 }}>運費(NT$)</div>
-                          <input
-                            type="number"
-                            value={row.shippingFee}
-                            onChange={(e) => updateProductRow(i, "shippingFee", e.target.value)}
-                            style={{ width: 50, minWidth: 50, padding: "9px 6px", border: "1px solid var(--line)", borderRadius: 8, fontSize: 14, background: "var(--card)", color: "var(--text)", boxSizing: "border-box" }}
                           />
                         </div>
                         {i === productRows.length - 1 ? (
@@ -3291,7 +3304,7 @@ export default function AdminPage() {
                 <div style={{ borderTop: "1px solid #EDE9DC", paddingTop: 10, marginTop: 4 }}>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{orderLookupResult.planName}</div>
                   <div style={{ fontSize: 13, color: "#8A8779", margin: "4px 0" }}>
-                    帳號：{orderLookupResult.username}　交易方式：{orderLookupResult.payment}
+                    帳號：{orderLookupResult.username}　交易方式：{paymentLabel(orderLookupResult.payment)}
                   </div>
                   <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 8 }}>
                     {new Date(orderLookupResult.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
@@ -3513,7 +3526,7 @@ export default function AdminPage() {
                 <div key={r.orderNo} style={{ padding: "8px 0", borderBottom: "1px dashed #EDE9DC" }}>
                   <div style={{ fontSize: 14, fontWeight: 600 }}>{r.planName}　<span style={{ fontWeight: 400, color: "#8A8779", fontSize: 12 }}>訂單編號 {r.orderNo}</span></div>
                   <div style={{ fontSize: 12, color: "#8A8779", margin: "4px 0" }}>
-                    帳號：{r.username}　交易方式：{r.payment}　合計 NT$ {r.total}
+                    帳號：{r.username}　交易方式：{paymentLabel(r.payment)}　合計 NT$ {r.total}
                   </div>
                   <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 8 }}>
                     申請時間：{new Date(r.cancelRequestedAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
@@ -3787,7 +3800,7 @@ export default function AdminPage() {
             <div key={o.orderNo} style={{ padding: "8px 0", borderBottom: "1px dashed #EDE9DC" }}>
               <div style={{ fontSize: 14, fontWeight: 600 }}>{o.planName}　<span style={{ fontWeight: 400, color: "#8A8779", fontSize: 12 }}>訂單編號 {o.orderNo}</span></div>
               <div style={{ fontSize: 12, color: "#8A8779", margin: "4px 0" }}>
-                原暱稱：{o.username}　交易方式：{o.payment}　合計 NT$ {o.total}　{new Date(o.createdAt).toLocaleDateString("zh-TW", { timeZone: "Asia/Taipei" })}
+                原暱稱：{o.username}　交易方式：{paymentLabel(o.payment)}　合計 NT$ {o.total}　{new Date(o.createdAt).toLocaleDateString("zh-TW", { timeZone: "Asia/Taipei" })}
               </div>
               {o.items.map((it: any, idx: number) => (
                 <div key={idx} style={{ fontSize: 13, color: "#33415C" }}>・{it.name}{it.style ? `（${it.style}）` : ""} x{it.qty}</div>
@@ -3835,7 +3848,7 @@ export default function AdminPage() {
                     style={{ marginTop: 3 }}
                   />
                   <span>
-                    訂單 {o.orderNo}　帳號：{o.username}{o.legacyUnmatched ? "（未配對身份）" : ""}　{o.payment}　
+                    訂單 {o.orderNo}　帳號：{o.username}{o.legacyUnmatched ? "（未配對身份）" : ""}　{paymentLabel(o.payment)}　
                     {new Date(o.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
                     <br />
                     <span style={{ color: "#8A8779" }}>
@@ -3862,7 +3875,7 @@ export default function AdminPage() {
         <div className="auth-card">
           <h3>結帳頁說明欄</h3>
           <p style={{ fontSize: 12, color: "#8A8779", margin: 0 }}>
-            顯示在結帳頁面最上方（返回購物車上面），留空就不顯示。可以用來放取付/匯款相關的提醒事項。
+            顯示在結帳頁面最上方（返回購物車上面），留空就不顯示。可以用來放取付、匯款/無卡相關的提醒事項。
           </p>
           <textarea
             value={checkoutNoticeInput}

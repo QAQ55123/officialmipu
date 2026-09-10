@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { sizedImageUrl } from "@/lib/imageUrl";
 import { Menu, Search, UserCircle, ShoppingCart, X, ChevronDown, ChevronRight, Heart, Bell } from "lucide-react";
 import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
+import { paymentLabel } from "@/lib/util";
 
 type Category = { id: string; name: string; parentId: string | null };
 type Plan = {
@@ -10,7 +11,7 @@ type Plan = {
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
-type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null };
+type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; subSeriesId?: string | null };
 type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
@@ -215,6 +216,8 @@ export default function Home() {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set());
   const [activePlan, setActivePlan] = useState<Plan | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  // 這個系列底下的子分類（商品很多時用來分組，沒建就是空陣列）
+  const [subSeries, setSubSeries] = useState<{ id: string; name: string }[]>([]);
   const [cart, setCart] = useState<Record<string, number>>({}); // key: name||style（目前正在瀏覽的系列、還沒加入購物車前的暫存）
 
   const [globalCart, setGlobalCart] = useState<GlobalCartEntry[]>(() => {
@@ -394,6 +397,7 @@ export default function Home() {
     const d = await r.json();
     setActivePlan(d.plan);
     setProducts(d.products || []);
+    setSubSeries(d.subSeries || []);
     setCart({});
     setSelectedProductName(null);
     setSelectedStyleByProduct({});
@@ -1825,7 +1829,7 @@ export default function Home() {
                           {isAltSite && hasAltSitePrice(current) ? (
                             <span className="product-price-v3" style={{ display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
                               <span>
-                                <span style={{ fontSize: "0.5em", color: "var(--muted)", marginRight: 4 }}>匯款</span>
+                                <span style={{ fontSize: "0.5em", color: "var(--muted)", marginRight: 4 }}>匯款/無卡</span>
                                 <span style={{ fontSize: "0.7em" }}>NT$</span>{fmt(current.altSiteBankPrice ?? 0)}
                               </span>
                               <span style={{ color: "var(--text)" }}>
@@ -1846,8 +1850,9 @@ export default function Home() {
                         </div>
 
                         <div className="product-info-v3-label">商品</div>
-                        <div className="style-pills">
-                          {productNames.map((pname) => (
+                        {(() => {
+                          // 商品很多時可以在後台建「子分類」分組；沒建的話就照舊全部列出來
+                          const renderPill = (pname: string) => (
                             <button
                               key={pname}
                               className={`style-pill ${activeProductName === pname ? "active" : ""}`}
@@ -1864,8 +1869,41 @@ export default function Home() {
                               {pname}
                               {productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>}
                             </button>
-                          ))}
-                        </div>
+                          );
+
+                          if (subSeries.length === 0) {
+                            return <div className="style-pills">{productNames.map(renderPill)}</div>;
+                          }
+
+                          // 每個商品名稱屬於哪個子分類（拿該商品第一個款式的歸屬就好）
+                          const subIdOf = (pname: string) => grouped[pname]?.[0]?.subSeriesId || null;
+                          const ungrouped = productNames.filter((n) => !subIdOf(n));
+
+                          return (
+                            <>
+                              {subSeries.map((sub) => {
+                                const names = productNames.filter((n) => subIdOf(n) === sub.id);
+                                if (names.length === 0) return null;
+                                return (
+                                  <div key={sub.id} style={{ marginBottom: 12 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 6, paddingBottom: 4, borderBottom: "1px solid var(--line)" }}>
+                                      {sub.name}
+                                    </div>
+                                    <div className="style-pills">{names.map(renderPill)}</div>
+                                  </div>
+                                );
+                              })}
+                              {ungrouped.length > 0 && (
+                                <div style={{ marginBottom: 12 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 6, paddingBottom: 4, borderBottom: "1px solid var(--line)" }}>
+                                    其他
+                                  </div>
+                                  <div className="style-pills">{ungrouped.map(renderPill)}</div>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
 
                         {current.hasDiscountFlag && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginBottom: 8 }}>滿減商品</span>}
 
@@ -2071,7 +2109,7 @@ export default function Home() {
                             </div>
                           )}
                           <div className="hist-total">
-                            交易方式：{o.payment}　商品合計 NT$ {fmt(o.total)}
+                            交易方式：{paymentLabel(o.payment)}　商品合計 NT$ {fmt(o.total)}
                             {o.totalShippingFee > 0 && `　＋運費 NT$ ${fmt(o.totalShippingFee)}　總計 NT$ ${fmt(o.total + o.totalShippingFee)}`}
                           </div>
                           {o.paidAmount > 0 && (
@@ -2232,7 +2270,7 @@ export default function Home() {
                                 )}
                                 {showAltPrice ? (
                                   <span className="cart-item-unit-price">
-                                    匯款 NT$ {fmt(e.altSiteBankPrice ?? 0)} ／ 取付 NT$ {fmt(e.altSiteCodPrice ?? 0)} 每件
+                                    匯款/無卡 NT$ {fmt(e.altSiteBankPrice ?? 0)} ／ 取付 NT$ {fmt(e.altSiteCodPrice ?? 0)} 每件
                                   </span>
                                 ) : (
                                   <span className="cart-item-unit-price">{currencySymbol} {currencySymbol === "￥" ? fmtOriginal(e.price) : fmt(e.price)} / 件</span>
@@ -2271,7 +2309,7 @@ export default function Home() {
                       <div className="cart-group-footer">
                         {groupHasAltPrice ? (
                           <div style={{ fontSize: 13 }}>
-                            <div><span style={{ color: "var(--muted)" }}>小計（匯款）</span> <span style={{ fontWeight: 700 }}>NT$ {fmt(groupAltBankTotal)}</span></div>
+                            <div><span style={{ color: "var(--muted)" }}>小計（匯款/無卡）</span> <span style={{ fontWeight: 700 }}>NT$ {fmt(groupAltBankTotal)}</span></div>
                             <div style={{ marginTop: 2 }}><span style={{ color: "var(--muted)" }}>小計（取付）</span> <span style={{ fontWeight: 700 }}>NT$ {fmt(groupAltCodTotal)}</span></div>
                           </div>
                         ) : (
@@ -2524,15 +2562,15 @@ export default function Home() {
                                       setCheckoutError("");
                                     }}
                                   >
-                                    {p}
+                                    {paymentLabel(p)}
                                   </button>
                                 ))}
                               </div>
                               {codDisabled && (
                                 <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
                                   {hasGiftItems && !giftCodAvailable
-                                    ? "贈品／滿贈系列商品的取付金額已超過本檔期設定的金額，請改用匯款"
-                                    : "取付金額已超過本檔期設定的金額，請改用匯款"}
+                                    ? "贈品／滿贈系列商品的取付金額已超過本檔期設定的金額，請改用匯款/無卡"
+                                    : "取付金額已超過本檔期設定的金額，請改用匯款/無卡"}
                                 </div>
                               )}
 

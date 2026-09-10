@@ -488,13 +488,39 @@ export default function PurchaseBatchesPage() {
 
   async function toggleArrived(itemId: string, arrived: boolean) {
     if (!activeBatchForArrival) return;
-    const d = await callJson(`/api/admin/shipment-items/${itemId}`, "PATCH", { arrived });
-    if (d.matchedBackorders) {
-      const desc = d.matchedBackorders.map((m: any) => `${m.username} x${m.qty}`).join("、");
-      setMsg(`已自動優先配對欠貨：${desc}`);
+    // 勾勾先立刻打上去，不等後端回應——寫入本身很快，慢的是後面的重抓，
+    // 讓畫面先反應，勾一連串品項時就不會每勾一個就卡一下
+    setArrivalTree((prev) =>
+      prev.map((on: any) => ({
+        ...on,
+        shipments: (on.shipments || []).map((s: any) => ({
+          ...s,
+          items: (s.items || []).map((it: any) => (it.id === itemId ? { ...it, arrived } : it)),
+        })),
+      }))
+    );
+    try {
+      const d = await callJson(`/api/admin/shipment-items/${itemId}`, "PATCH", { arrived });
+      if (d.matchedBackorders) {
+        const desc = d.matchedBackorders.map((m: any) => `${m.username} x${m.qty}`).join("、");
+        setMsg(`已自動優先配對欠貨：${desc}`);
+        // 有配對到欠貨才需要重抓（欠貨清單變了），一般情況不用
+        loadArrivalTree(activeBatchForArrival.id);
+      }
+      // 採購單列表的「到貨中 3/5」進度，返回列表時本來就會重抓一次，這裡不用再抓一遍
+    } catch (e: any) {
+      // 寫入失敗就把勾勾退回原狀，不然畫面會跟資料庫不一致
+      setArrivalTree((prev) =>
+        prev.map((on: any) => ({
+          ...on,
+          shipments: (on.shipments || []).map((s: any) => ({
+            ...s,
+            items: (s.items || []).map((it: any) => (it.id === itemId ? { ...it, arrived: !arrived } : it)),
+          })),
+        }))
+      );
+      setMsg(e.message || "更新到貨狀態失敗");
     }
-    loadArrivalTree(activeBatchForArrival.id);
-    loadPurchaseBatchesData();
   }
 
   async function removeShipmentItem(itemId: string) {

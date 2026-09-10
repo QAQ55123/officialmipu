@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "./supabase";
+import { paymentLabel } from "./util";
 import {
   getSheets, requireSheetId, requireCostSheetId,
   ensureSheetExistsCached, getValuesAndFormulas, batchGetValues, columnToLetter,
@@ -79,7 +80,7 @@ async function buildOrderTabRequests(sheets: SheetsClient, mainSheetId: string, 
         it.series_name_snapshot || o.series_name_snapshot || "",
         it.product_name, it.style || "",
         it.qty, Number(it.unit_price) || 0, Number(it.subtotal) || 0,
-        new Date(o.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }), o.payment, paidAmount > 0 ? paidAmount : "",
+        new Date(o.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }), paymentLabel(o.payment), paidAmount > 0 ? paidAmount : "",
         itemIdx === 0 ? giftText : "",
       ]);
     });

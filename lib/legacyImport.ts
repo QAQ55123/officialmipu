@@ -218,7 +218,8 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
     const style = norm(r["款式"]);
     const qty = Number(r["數量"]);
     const unitPrice = Number(r["單價"]) || 0;
-    const payment = norm(r["交易方式"]);
+    // 顯示文字是「匯款/無卡」，範本兩種寫法都接受，存進資料庫統一用「匯款」
+    const payment = norm(r["交易方式"]) === "匯款/無卡" ? "匯款" : norm(r["交易方式"]);
     const paidAmount = Number(r["已收金額"] || 0);
     const orderDate = parseFlexibleDate(r["下單日期"]);
     const originalOrderNo = norm(r["原始訂單編號"]); // 選填，舊系統原本的訂單編號，有填的話會保留（不足9碼補0）
@@ -253,7 +254,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         return;
       }
       if (!["匯款", "取付"].includes(payment)) {
-        rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
+        rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款/無卡」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
         return;
       }
     }

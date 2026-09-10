@@ -36,3 +36,12 @@ export function genOrderNo(): string {
 export function fmtMoney(n: number): string {
   return new Intl.NumberFormat("zh-TW").format(Math.round(n));
 }
+
+/**
+ * 交易方式的顯示文字：資料庫存的是「匯款」，但要顯示給人看的是「匯款/無卡」。
+ * 只轉換顯示，不動資料庫的值（判斷邏輯、匯入驗證都還是用「匯款」）。
+ */
+export function paymentLabel(payment: string | null | undefined): string {
+  if (payment === "匯款") return "匯款/無卡";
+  return payment || "";
+}

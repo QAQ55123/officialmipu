@@ -95,6 +95,7 @@ export async function POST(req: Request) {
     const insertRows: any[] = [];
     // 封面圖是「系列 + 商品名稱」層級共用的，最後統一同步
     const coverImageByKey = new Map<string, { seriesId: string; name: string; coverUrl: string }>();
+    const shippingFeeByProduct = new Map<string, { seriesId: string; name: string; fee: number }>();
     const createdSeriesNames = new Set<string>();
 
     for (let idx = 0; idx < rows.length; idx++) {
@@ -141,6 +142,10 @@ export async function POST(req: Request) {
 
       const hasDiscountFlag = discountRaw === "v";
       const coverKey = `${seriesId}||${name}`;
+      // 運費是「商品」層級的，同名商品共用；取第一個有填的值
+      if (!shippingFeeByProduct.has(coverKey)) {
+        shippingFeeByProduct.set(coverKey, { seriesId, name, fee: shippingFee });
+      }
       if (coverImageUrlRaw && !coverImageByKey.has(coverKey)) {
         coverImageByKey.set(coverKey, { seriesId, name, coverUrl: toDirectImageUrl(coverImageUrlRaw) });
       }
@@ -193,6 +198,11 @@ export async function POST(req: Request) {
     // 封面圖統一同步到每個「系列＋商品名稱」底下的所有款式列
     for (const { seriesId, name, coverUrl } of coverImageByKey.values()) {
       await supabase.from("products").update({ cover_image_url: coverUrl }).eq("series_id", seriesId).eq("name", name);
+    }
+
+    // 運費同理：同一個商品名稱底下的所有款式共用同一個運費
+    for (const { seriesId, name, fee } of shippingFeeByProduct.values()) {
+      await supabase.from("products").update({ shipping_fee: fee }).eq("series_id", seriesId).eq("name", name);
     }
 
     return NextResponse.json({

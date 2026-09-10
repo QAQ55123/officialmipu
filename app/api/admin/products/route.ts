@@ -88,6 +88,11 @@ export async function POST(req: Request) {
     await supabase.from("products").update({ cover_image_url: body.coverImageUrl || null }).eq("series_id", body.seriesId).eq("name", name);
   }
 
+  // 運費也是「商品」層級的：同一個商品名稱底下的所有款式共用同一個運費
+  if (body.shippingFee !== undefined) {
+    await supabase.from("products").update({ shipping_fee: Number(body.shippingFee) || 0 }).eq("series_id", body.seriesId).eq("name", name);
+  }
+
   syncProductsSheet().catch(() => {});
   return NextResponse.json({ ok: true, product: data });
 }
@@ -124,6 +129,11 @@ export async function PUT(req: Request) {
   // 封面圖是「商品名稱」層級共用的，同名的其他款式列也要一起同步
   if (body.coverImageUrl !== undefined && oldProduct) {
     await supabase.from("products").update({ cover_image_url: body.coverImageUrl || null }).eq("series_id", oldProduct.series_id).eq("name", body.name || oldProduct.name);
+  }
+
+  // 運費同步到同名商品的所有款式
+  if (body.shippingFee !== undefined && oldProduct) {
+    await supabase.from("products").update({ shipping_fee: Number(body.shippingFee) || 0 }).eq("series_id", oldProduct.series_id).eq("name", body.name || oldProduct.name);
   }
 
   const newImageUrl = body.imageUrl || null;
