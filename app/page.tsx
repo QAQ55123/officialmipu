@@ -1342,20 +1342,28 @@ export default function Home() {
                       <div key={child.id}>
                         <div
                           className={`subcategory-item ${selectedCategoryId === child.id ? "active" : ""}`}
+                          style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
                           onClick={() => { selectCategory(child.id); onAfterSelect?.(); }}
                         >
-                          {child.name}
+                          <span>{child.name}</span>
+                          {/* 第二層底下有第三層時，也要能收合，不然第三層永遠攤開很占空間 */}
+                          {grandChildren.length > 0 && (
+                            <span onClick={(e) => { e.stopPropagation(); toggleExpand(child.id); }} style={{ display: "flex", padding: 6, margin: -6 }}>
+                              {expandedIds.has(child.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                            </span>
+                          )}
                         </div>
-                        {grandChildren.map((gc) => (
-                          <div
-                            key={gc.id}
-                            className={`subcategory-item ${selectedCategoryId === gc.id ? "active" : ""}`}
-                            style={{ paddingLeft: 36 }}
-                            onClick={() => { selectCategory(gc.id); onAfterSelect?.(); }}
-                          >
-                            {gc.name}
-                          </div>
-                        ))}
+                        {expandedIds.has(child.id) &&
+                          grandChildren.map((gc) => (
+                            <div
+                              key={gc.id}
+                              className={`subcategory-item ${selectedCategoryId === gc.id ? "active" : ""}`}
+                              style={{ paddingLeft: 36 }}
+                              onClick={() => { selectCategory(gc.id); onAfterSelect?.(); }}
+                            >
+                              {gc.name}
+                            </div>
+                          ))}
                       </div>
                     );
                   })}

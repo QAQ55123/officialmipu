@@ -2291,41 +2291,41 @@ export default function AdminPage() {
                   <button className="btn small danger" onClick={() => deleteCategory(c.id)}>刪除</button>
                 </span>
               </div>
+              {/* 第三層要緊跟在自己的上層後面，所以在第二層的迴圈「裡面」渲染，
+                  不能拆成兩個獨立迴圈（那樣所有第三層會擠在最後面） */}
               {childrenOf(c.id).map((sub) => (
-                <div
-                  key={sub.id}
-                  draggable
-                  onDragStart={() => setDraggedCategoryId(sub.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleCategoryDrop(sub.id)}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#6B6858", paddingLeft: 16, marginTop: 4, cursor: "grab", opacity: draggedCategoryId === sub.id ? 0.4 : 1 }}
-                >
-                  <span><span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>└ {sub.name}</span>
-                  <span>
-                    <button className="btn small secondary" onClick={() => editCategory(sub)} style={{ marginRight: 6 }}>編輯</button>
-                    <button className="btn small danger" onClick={() => deleteCategory(sub.id)}>刪除</button>
-                  </span>
-                </div>
-              ))}
-              {/* 第三層分類：掛在第二層底下，縮排再深一階 */}
-              {childrenOf(c.id).map((sub) =>
-                childrenOf(sub.id).map((third) => (
+                <div key={sub.id}>
                   <div
-                    key={third.id}
                     draggable
-                    onDragStart={() => setDraggedCategoryId(third.id)}
+                    onDragStart={() => setDraggedCategoryId(sub.id)}
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => handleCategoryDrop(third.id)}
-                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#8A8779", paddingLeft: 36, marginTop: 4, cursor: "grab", opacity: draggedCategoryId === third.id ? 0.4 : 1 }}
+                    onDrop={() => handleCategoryDrop(sub.id)}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#6B6858", paddingLeft: 16, marginTop: 4, cursor: "grab", opacity: draggedCategoryId === sub.id ? 0.4 : 1 }}
                   >
-                    <span><span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>└ {third.name}</span>
+                    <span><span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>└ {sub.name}</span>
                     <span>
-                      <button className="btn small secondary" onClick={() => editCategory(third)} style={{ marginRight: 6 }}>編輯</button>
-                      <button className="btn small danger" onClick={() => deleteCategory(third.id)}>刪除</button>
+                      <button className="btn small secondary" onClick={() => editCategory(sub)} style={{ marginRight: 6 }}>編輯</button>
+                      <button className="btn small danger" onClick={() => deleteCategory(sub.id)}>刪除</button>
                     </span>
                   </div>
-                ))
-              )}
+                  {childrenOf(sub.id).map((third) => (
+                    <div
+                      key={third.id}
+                      draggable
+                      onDragStart={() => setDraggedCategoryId(third.id)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => handleCategoryDrop(third.id)}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, color: "#8A8779", paddingLeft: 36, marginTop: 4, cursor: "grab", opacity: draggedCategoryId === third.id ? 0.4 : 1 }}
+                    >
+                      <span><span style={{ color: "#B0AC9C", marginRight: 6 }} title="拖曳排序">⠿</span>└ {third.name}</span>
+                      <span>
+                        <button className="btn small secondary" onClick={() => editCategory(third)} style={{ marginRight: 6 }}>編輯</button>
+                        <button className="btn small danger" onClick={() => deleteCategory(third.id)}>刪除</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
             </div>
           ))}
           {topCategories.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有分類</div>}
