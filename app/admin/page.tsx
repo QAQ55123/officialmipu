@@ -2349,9 +2349,13 @@ export default function AdminPage() {
             {topCategories.map((c) => (
               <optgroup key={c.id} label={c.name}>
                 <option value={c.id}>{c.name}</option>
-                {childrenOf(c.id).map((sub) => (
-                  <option key={sub.id} value={sub.id}>　└ {sub.name}</option>
-                ))}
+                {/* 分類有三層，第二層底下的第三層也要列出來，不然系列掛不上去 */}
+                {childrenOf(c.id).map((sub) => [
+                  <option key={sub.id} value={sub.id}>　└ {sub.name}</option>,
+                  ...childrenOf(sub.id).map((third) => (
+                    <option key={third.id} value={third.id}>　　└ {third.name}</option>
+                  )),
+                ])}
               </optgroup>
             ))}
           </select>
@@ -2494,9 +2498,13 @@ export default function AdminPage() {
                   {topCategories.map((c) => (
                     <optgroup key={c.id} label={c.name}>
                       <option value={c.id}>{c.name}</option>
-                      {childrenOf(c.id).map((sub) => (
-                        <option key={sub.id} value={sub.id}>　└ {sub.name}</option>
-                      ))}
+                      {/* 分類有三層，第三層也要能選 */}
+                      {childrenOf(c.id).map((sub) => [
+                        <option key={sub.id} value={sub.id}>　└ {sub.name}</option>,
+                        ...childrenOf(sub.id).map((third) => (
+                          <option key={third.id} value={third.id}>　　└ {third.name}</option>
+                        )),
+                      ])}
                     </optgroup>
                   ))}
                 </select>
