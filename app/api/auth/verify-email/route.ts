@@ -11,9 +11,12 @@ import { isExpired, getSiteUrl } from "@/lib/tokens";
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const token = searchParams.get("token") || "";
+  // 從 /gift 註冊的顧客，驗證完要回到 /gift
+  const returnTo = searchParams.get("returnTo") || "";
   const site = getSiteUrl();
   if (!token) return NextResponse.redirect(`${site}/email-verified?status=invalid`);
-  return NextResponse.redirect(`${site}/email-verified?token=${encodeURIComponent(token)}`);
+  const rt = returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "";
+  return NextResponse.redirect(`${site}/email-verified?token=${encodeURIComponent(token)}${rt}`);
 }
 
 /** POST：使用者在確認頁按下按鈕後才真正執行驗證 */

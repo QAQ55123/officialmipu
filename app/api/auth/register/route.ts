@@ -55,7 +55,9 @@ export async function POST(req: Request) {
   // 寄驗證信（就算寄信失敗也不擋註冊流程，只是要讓前端知道信有沒有真的寄出去）
   let verifyEmailSent = true;
   try {
-    const link = `${getSiteUrl()}/api/auth/verify-email?token=${verifyToken}`;
+    // 從 /gift 註冊的顧客，驗證完要回到 /gift，不然會被丟到主站
+    const returnTo = body.isAltSite ? "/gift?openLogin=1" : "/?openLogin=1";
+    const link = `${getSiteUrl()}/api/auth/verify-email?token=${verifyToken}&returnTo=${encodeURIComponent(returnTo)}`;
     const { html, text } = verifyEmailContent(username, link);
     await sendEmail(email, "請驗證你的米舖-官方周邊代購帳號信箱", html, text);
   } catch (e) {

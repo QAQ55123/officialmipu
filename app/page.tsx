@@ -461,6 +461,8 @@ export default function Home() {
           confirmPassword: regConfirmPassword,
           profileUrl: regProfileUrl.trim(),
           email: regEmail.trim(),
+          // 從 /gift 註冊的話，驗證完要回到 /gift
+          isAltSite,
         }),
       });
       const d = await r.json();
@@ -1869,6 +1871,13 @@ export default function Home() {
                           </button>
                         </div>
 
+                        {/* 滿減標籤是標註「這個商品」的，放在商品按鈕跟款式中間會像是在標註款式 */}
+                        {current.hasDiscountFlag && (
+                          <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginBottom: 10 }}>
+                            滿減商品
+                          </span>
+                        )}
+
                         <div className="product-info-v3-label">商品</div>
                         <div className="style-pills">
                           {productNames.map((pname) => (
@@ -1891,7 +1900,6 @@ export default function Home() {
                           ))}
                         </div>
 
-                        {current.hasDiscountFlag && <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999, marginBottom: 8 }}>滿減商品</span>}
 
                         <div className="product-info-v3-label">款式</div>
                         <div className="style-pills">
