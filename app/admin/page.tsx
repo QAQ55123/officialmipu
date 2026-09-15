@@ -8,11 +8,12 @@ type SeriesAdmin = {
   id: string; name: string; imageUrl: string | null;
   visibleTo: string[]; categoryId: string | null; categoryName: string | null;
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
+  categoryIds?: string[]; // 這個系列掛在哪些分類底下（可以多個）
 };
 type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
-const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", promoImages: [] as string[], isVisible: true };
+const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", categoryIds: [] as string[], promoImages: [] as string[], isVisible: true };
 const emptyProductForm = { id: "", name: "", style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0", linkedGiftStyleId: null as string | null, coverImageUrl: "", altSiteBankPrice: "", altSiteCodPrice: "" };
 
 export default function AdminPage() {
@@ -700,6 +701,9 @@ export default function AdminPage() {
   const [uploadingRowImg, setUploadingRowImg] = useState<number | null>(null);
   const [productRowImageUrlInputs, setProductRowImageUrlInputs] = useState<Record<number, string>>({});
   const [draggedProductId, setDraggedProductId] = useState<string | null>(null);
+  // 商品清單直接編輯：改了哪幾筆的哪些欄位，按「儲存全部」才一起送出
+  const [productEdits, setProductEdits] = useState<Record<string, { price?: string; shippingFee?: string }>>({});
+  const [savingProductEdits, setSavingProductEdits] = useState(false);
   const [draggedCategoryId, setDraggedCategoryId] = useState<string | null>(null);
   const [draggedPlanId, setDraggedPlanId] = useState<string | null>(null);
   const [productMsg, setProductMsg] = useState("");
@@ -1179,6 +1183,7 @@ export default function AdminPage() {
       imageUrl: p.imageUrl || "",
       visibleTo: p.visibleTo || [],
       categoryId: p.categoryId || "",
+      categoryIds: p.categoryIds && p.categoryIds.length > 0 ? p.categoryIds : (p.categoryId ? [p.categoryId] : []),
       promoImages: p.promoImages || [],
       isVisible: p.isVisible !== false,
     });
@@ -1193,6 +1198,7 @@ export default function AdminPage() {
       imageUrl: planForm.imageUrl || null,
       visibleTo: planForm.visibleTo,
       categoryId: planForm.categoryId || null,
+      categoryIds: planForm.categoryIds,
       promoImages: planForm.promoImages,
       isVisible: planForm.isVisible,
     };
@@ -1313,6 +1319,46 @@ export default function AdminPage() {
     setProductRows([{ style: "", price: "0", imageUrl: "", hasDiscountFlag: true, codAllowed: true, shippingFee: "0" }]);
     setActiveSection("products");
     await Promise.all([loadProducts(p.id), loadAllProductsForCopy()]);
+  }
+
+  function setProductEdit(id: string, field: "price" | "shippingFee", value: string) {
+    setProductEdits((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  }
+
+  /** 把清單上改過的欄位一次送出（一筆一筆呼叫 API，失敗的會列出來） */
+  async function saveProductEdits() {
+    const ids = Object.keys(productEdits);
+    if (ids.length === 0) return;
+    setSavingProductEdits(true);
+    setProductMsg("儲存中…");
+    const failed: string[] = [];
+    for (const id of ids) {
+      const p = products.find((x) => x.id === id);
+      if (!p) continue;
+      const edit = productEdits[id];
+      try {
+        await callJson("/api/admin/products", "PUT", {
+          id,
+          name: p.name,
+          style: p.style,
+          price: edit.price !== undefined ? edit.price : String(p.price),
+          imageUrl: p.imageUrl,
+          hasDiscountFlag: !!p.hasDiscountFlag,
+          codAllowed: p.codAllowed !== false,
+          shippingFee: edit.shippingFee !== undefined ? edit.shippingFee : String(p.shippingFee ?? 0),
+          linkedGiftStyleId: p.linkedGiftStyleId ?? null,
+          coverImageUrl: p.coverImageUrl || null,
+          altSiteBankPrice: p.altSiteBankPrice,
+          altSiteCodPrice: p.altSiteCodPrice,
+        });
+      } catch (e: any) {
+        failed.push(`${p.name}${p.style ? `（${p.style}）` : ""}：${e.message}`);
+      }
+    }
+    setSavingProductEdits(false);
+    setProductEdits({});
+    setProductMsg(failed.length > 0 ? `部分儲存失敗：${failed.join("；")}` : `已儲存 ${ids.length} 筆`);
+    if (activePlanForProducts) loadProducts(activePlanForProducts.id);
   }
 
   function editProduct(p: ProductAdmin) {
@@ -2342,23 +2388,51 @@ export default function AdminPage() {
           <span className="id-label">名稱</span>
           <input type="text" value={planForm.name} onChange={(e) => setPlanForm((f) => ({ ...f, name: e.target.value }))} placeholder="系列名稱" />
         </div>
-        <div className="id-row">
-          <span className="id-label">分類</span>
-          <select value={planForm.categoryId} onChange={(e) => setPlanForm((f) => ({ ...f, categoryId: e.target.value }))} style={{ flex: 1, padding: 8 }}>
-            <option value="">（未分類）</option>
-            {topCategories.map((c) => (
-              <optgroup key={c.id} label={c.name}>
-                <option value={c.id}>{c.name}</option>
-                {/* 分類有三層，第二層底下的第三層也要列出來，不然系列掛不上去 */}
-                {childrenOf(c.id).map((sub) => [
-                  <option key={sub.id} value={sub.id}>　└ {sub.name}</option>,
-                  ...childrenOf(sub.id).map((third) => (
-                    <option key={third.id} value={third.id}>　　└ {third.name}</option>
-                  )),
-                ])}
-              </optgroup>
-            ))}
-          </select>
+        {/* 一個系列可以同時掛在多個分類底下（例如既是「徽章」、又因為有新品而放進「新品」）。
+            第一個勾選的當作主分類，顧客直接用網址進來時麵包屑會用它 */}
+        <div className="id-row" style={{ alignItems: "flex-start" }}>
+          <span className="id-label" style={{ paddingTop: 8 }}>分類</span>
+          <div style={{ flex: 1, minWidth: 200, border: "1px solid var(--line)", borderRadius: 8, padding: 10, maxHeight: 260, overflowY: "auto", background: "var(--card)" }}>
+            {topCategories.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有建立任何分類</div>}
+            {topCategories.map((c) => {
+              const renderOne = (cat: Category, depth: number) => {
+                const checked = planForm.categoryIds.includes(cat.id);
+                return (
+                  <label key={cat.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, padding: "3px 0", paddingLeft: depth * 18, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) =>
+                        setPlanForm((f) => {
+                          const next = e.target.checked
+                            ? [...f.categoryIds, cat.id]
+                            : f.categoryIds.filter((x) => x !== cat.id);
+                          // 主分類＝第一個勾選的
+                          return { ...f, categoryIds: next, categoryId: next[0] || "" };
+                        })
+                      }
+                      style={{ width: 15, height: 15 }}
+                    />
+                    <span>{cat.name}</span>
+                    {planForm.categoryIds[0] === cat.id && (
+                      <span style={{ fontSize: 10, color: "#3D6B1F", background: "#E8F0E0", padding: "1px 6px", borderRadius: 999 }}>主分類</span>
+                    )}
+                  </label>
+                );
+              };
+              return (
+                <div key={c.id}>
+                  {renderOne(c, 0)}
+                  {childrenOf(c.id).map((sub) => (
+                    <div key={sub.id}>
+                      {renderOne(sub, 1)}
+                      {childrenOf(sub.id).map((third) => renderOne(third, 2))}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {!planForm.id && categories.find((c) => c.id === planForm.categoryId)?.isGiftCategory && (
@@ -3029,6 +3103,17 @@ export default function AdminPage() {
           {activeSection === "products" && activePlanForProducts && (
         <div className="auth-card">
           <h3>商品管理：{activePlanForProducts.name}</h3>
+          {Object.keys(productEdits).length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, padding: "8px 12px", background: "#FFF8E5", borderRadius: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13 }}>已修改 {Object.keys(productEdits).length} 筆尚未儲存</span>
+              <button className="btn small" onClick={saveProductEdits} disabled={savingProductEdits}>
+                {savingProductEdits ? "儲存中…" : "儲存全部"}
+              </button>
+              <button className="btn small secondary" onClick={() => setProductEdits({})} disabled={savingProductEdits}>
+                放棄修改
+              </button>
+            </div>
+          )}
           <div style={{ marginBottom: 12 }}>
             {Object.entries(
               products.reduce<Record<string, ProductAdmin[]>>((acc, p) => {
@@ -3053,7 +3138,25 @@ export default function AdminPage() {
                       {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 6 }} />}
                       <div>
                         <div style={{ fontSize: 14 }}>{p.style || "單一款式"}</div>
-                        <div style={{ fontSize: 12, color: "#8A8779" }}>{p.linkedGiftStyleId ? "NT$" : "￥"} {p.price}</div>
+                        {/* 金額／運費可以直接在清單上改，改完按下面的「儲存全部」一次送出 */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 12, color: "#8A8779" }}>{p.linkedGiftStyleId ? "NT$" : "￥"}</span>
+                          <input
+                            type="number"
+                            value={productEdits[p.id]?.price ?? String(p.price)}
+                            onChange={(e) => setProductEdit(p.id, "price", e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ width: 76, padding: "4px 6px", border: "1px solid var(--line)", borderRadius: 6, fontSize: 13, background: productEdits[p.id]?.price !== undefined ? "#FFF8E5" : "var(--card)" }}
+                          />
+                          <span style={{ fontSize: 12, color: "#8A8779", marginLeft: 4 }}>運費 NT$</span>
+                          <input
+                            type="number"
+                            value={productEdits[p.id]?.shippingFee ?? String(p.shippingFee ?? 0)}
+                            onChange={(e) => setProductEdit(p.id, "shippingFee", e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ width: 66, padding: "4px 6px", border: "1px solid var(--line)", borderRadius: 6, fontSize: 13, background: productEdits[p.id]?.shippingFee !== undefined ? "#FFF8E5" : "var(--card)" }}
+                          />
+                        </div>
                       </div>
                     </div>
                     <span style={{ display: "flex", gap: 6, flexShrink: 0 }}>

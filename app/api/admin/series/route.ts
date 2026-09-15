@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("series")
-    .select("*, categories(id, name, parent_id)")
+    .select("*, categories(id, name, parent_id), series_categories(category_id)")
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -31,6 +31,8 @@ export async function GET(req: Request) {
       visibleTo: p.visible_to,
       categoryId: p.category_id,
       categoryName: p.categories?.name || null,
+      // 系列可以同時掛在多個分類底下；category_id 是主分類（麵包屑沒有來源資訊時用它）
+      categoryIds: (p.series_categories || []).map((sc: any) => sc.category_id),
       promoImages: p.promo_images || [],
       sortOrder: p.sort_order,
       isVisible: p.is_visible !== false,
@@ -70,6 +72,14 @@ export async function POST(req: Request) {
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // 多分類關聯：前端傳 categoryIds（複選），沒傳的話就用主分類
+  const catIds: string[] = Array.isArray(body.categoryIds) && body.categoryIds.length > 0
+    ? body.categoryIds
+    : (body.categoryId ? [body.categoryId] : []);
+  if (catIds.length > 0) {
+    await supabase.from("series_categories").insert(catIds.map((cid) => ({ series_id: data.id, category_id: cid })));
+  }
   syncPlansSheet().catch(() => {});
 
   return NextResponse.json({ ok: true, plan: data });
@@ -101,6 +111,16 @@ export async function PUT(req: Request) {
     })
     .eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // 多分類關聯：整批覆蓋（先刪光再寫入現在選的）
+  if (Array.isArray(body.categoryIds)) {
+    await supabase.from("series_categories").delete().eq("series_id", body.id);
+    if (body.categoryIds.length > 0) {
+      await supabase.from("series_categories").insert(
+        body.categoryIds.map((cid: string) => ({ series_id: body.id, category_id: cid }))
+      );
+    }
+  }
 
   if (oldSeries) {
     const newImageUrl = body.imageUrl || null;

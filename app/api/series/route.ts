@@ -34,7 +34,11 @@ export async function GET(req: Request) {
       });
       frontier = next;
     }
-    query = query.in("category_id", ids);
+    // 系列可以掛在多個分類底下，所以要從關聯表反查有哪些系列屬於這些分類
+    const { data: links } = await supabase.from("series_categories").select("series_id").in("category_id", ids);
+    const seriesIds = Array.from(new Set((links || []).map((l: any) => l.series_id)));
+    if (seriesIds.length === 0) return NextResponse.json({ plans: [] });
+    query = query.in("id", seriesIds);
   }
 
   // 搜尋：系列名稱符合，或底下有商品名稱符合

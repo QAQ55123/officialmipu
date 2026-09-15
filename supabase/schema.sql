@@ -55,6 +55,20 @@ create table if not exists series (
 );
 create index if not exists idx_series_category on series (category_id);
 
+-- 系列可以同時掛在多個分類底下（例如某個系列既屬於「徽章」、又因為有新品而放進「新品」）。
+-- series.category_id 保留當作「主分類」，麵包屑在沒有來源資訊時會用它。
+create table if not exists series_categories (
+  series_id   uuid not null references series(id) on delete cascade,
+  category_id uuid not null references categories(id) on delete cascade,
+  primary key (series_id, category_id)
+);
+create index if not exists idx_series_categories_category on series_categories (category_id);
+
+-- 把現有的 series.category_id 搬進關聯表，既有設定不會消失
+insert into series_categories (series_id, category_id)
+select id, category_id from series where category_id is not null
+on conflict do nothing;
+
 -- 商品（原本每個系列分頁裡的價目表）
 create table if not exists products (
   id            uuid primary key default gen_random_uuid(),

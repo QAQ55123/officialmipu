@@ -1266,9 +1266,13 @@ export default function Home() {
   }
 
   // ---- 麵包屑 ----
-  // 在系列詳細頁時，路徑要用「這個系列實際歸屬的分類」，而不是使用者是從哪個篩選點進來的
+  // 一個系列可以掛在多個分類底下，所以路徑要跟著「顧客從哪個分類點進來」顯示：
+  // 從「徽章」點進去就顯示徽章、從「新品」點進去就顯示新品。
+  // 直接用網址進來或從「全部」進來時沒有來源資訊，退回用系列的主分類。
   const chain =
-    view === "order" && activePlan ? getCategoryChain(activePlan.categoryId ?? null) : getCategoryChain(selectedCategoryId);
+    view === "order" && activePlan
+      ? getCategoryChain(selectedCategoryId || activePlan.categoryId || null)
+      : getCategoryChain(selectedCategoryId);
   const breadcrumbParts: { label: string; onClick?: () => void }[] = [
     { label: "全部", onClick: () => goHome() },
   ];
@@ -2580,7 +2584,7 @@ export default function Home() {
                                           checked={wantsGift}
                                           onChange={(e2) => { setCheckoutWantsGift(e2.target.checked); if (e2.target.checked) fetchCheckoutGiftQuota(entries, checkoutGiftPicks); }}
                                         />
-                                        要選擇滿贈
+                                        要滿贈
                                       </label>
                                       {wantsGift && giftLoading && !quota && (
                                   <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>正在計算可選數量…</div>

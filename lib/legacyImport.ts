@@ -253,6 +253,11 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         rowErrors.push(`第 ${rowNo} 列：缺少檔期名稱，已略過（檔期名稱是必填，訂單要能對應到現有的檔期）`);
         return;
       }
+      // 單價可以留空，但那樣就必須有原幣單價＋匯率，系統才算得出台幣金額
+      if (!unitPrice && (unitPriceOriginal == null || fxRate == null)) {
+        rowErrors.push(`第 ${rowNo} 列：「單價」留空時，必須填「原幣單價」和「匯率」讓系統換算，已略過`);
+        return;
+      }
       if (!["匯款", "取付"].includes(payment)) {
         rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款/無卡」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
         return;
@@ -361,9 +366,31 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
             : orderErr.message
         );
       }
+      // 台幣金額的算法（2.6節）：實務上是「整張訂單的原幣總額 × 匯率」再無條件進位，
+      // 不是逐件各自換算，所以 Excel 的「單價」欄可以留空，只要填原幣單價跟匯率就好。
+      // 分攤回各品項時，每項先無條件進位，多出來的差額從最後一項扣掉，確保加總等於訂單總額。
+      const needAutoPrice = g.items.every((it) => !it.unitPrice) && g.items.every((it) => it.unitPriceOriginal != null);
+      const twdByItem: number[] = [];
+      if (needAutoPrice) {
+        const rate = g.items.find((it) => it.fxRate != null)?.fxRate || 0;
+        const originalTotal = g.items.reduce((s, it) => s + (it.unitPriceOriginal || 0) * it.qty, 0);
+        const orderTwdTotal = Math.ceil(originalTotal * rate);
+        let allocated = 0;
+        g.items.forEach((it, i) => {
+          if (i === g.items.length - 1) {
+            twdByItem.push(orderTwdTotal - allocated); // 最後一項吸收差額
+          } else {
+            const v = Math.ceil((it.unitPriceOriginal || 0) * it.qty * rate);
+            twdByItem.push(v);
+            allocated += v;
+          }
+        });
+      }
+
       const itemRows = g.items.map((it, idx) => ({
         order_id: order.id, product_name: it.name, style: it.style, qty: it.qty,
-        unit_price: it.unitPrice, subtotal: Math.ceil(it.qty * it.unitPrice),
+        unit_price: needAutoPrice ? Math.ceil(twdByItem[idx] / it.qty) : it.unitPrice,
+        subtotal: needAutoPrice ? twdByItem[idx] : Math.ceil(it.qty * it.unitPrice),
         series_id: planByItemIndex[idx]?.id || null, series_name_snapshot: it.planName,
         unit_price_original: it.unitPriceOriginal,
         fx_rate: it.fxRate,
