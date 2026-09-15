@@ -13,7 +13,7 @@ export async function GET(req: Request) {
 
   let query = supabase
     .from("series")
-    .select("id, name, image_url, visible_to, sort_order, category_id, categories(id, name, parent_id)")
+    .select("id, name, image_url, visible_to, sort_order, category_id, categories!series_category_id_fkey(id, name, parent_id)")
     .eq("is_visible", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: false });
@@ -64,7 +64,7 @@ export async function GET(req: Request) {
     if (missingIds.length > 0) {
       const { data: extra } = await supabase
         .from("series")
-        .select("id, name, image_url, visible_to, sort_order, category_id, categories(id, name, parent_id)")
+        .select("id, name, image_url, visible_to, sort_order, category_id, categories!series_category_id_fkey(id, name, parent_id)")
         .eq("is_visible", true)
         .in("id", missingIds);
       rows = rows.concat(extra || []);

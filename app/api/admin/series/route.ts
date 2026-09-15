@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("series")
-    .select("*, categories(id, name, parent_id), series_categories(category_id)")
+    .select("*, categories!series_category_id_fkey(id, name, parent_id), series_categories(category_id)")
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

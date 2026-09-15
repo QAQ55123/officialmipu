@@ -10,7 +10,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const { data: series, error: seriesErr } = await supabase
     .from("series")
-    .select("*, categories(id, name, parent_id)")
+    .select("*, categories!series_category_id_fkey(id, name, parent_id)")
     .eq("id", params.id)
     .single();
   if (seriesErr || !series) return NextResponse.json({ error: "找不到系列" }, { status: 404 });

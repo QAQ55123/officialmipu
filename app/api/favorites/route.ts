@@ -21,7 +21,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabase
     .from("favorites")
-    .select("series_id, series(id, name, image_url, category_id, categories(name))")
+    .select("series_id, series(id, name, image_url, category_id, categories!series_category_id_fkey(name))")
     .eq("member_id", memberId)
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
