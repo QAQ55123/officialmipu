@@ -85,7 +85,7 @@ export async function syncMembersSheet() {
 /** 系列資料同上，整份重寫 */
 export async function syncPlansSheet() {
   const supabase = getSupabaseAdmin();
-  const { data } = await supabase.from("series").select("*, categories(name)").order("sort_order", { ascending: true });
+  const { data } = await supabase.from("series").select("*, categories!series_category_id_fkey(name)").order("sort_order", { ascending: true });
   const rows = (data || []).map((p) => [
     p.name,
     p.categories?.name || "（未分類）",
