@@ -788,6 +788,43 @@ export default function AdminPage() {
     loadOrderArrivalStatus(orderLookupResult.orderNo);
   }
 
+  /** 訂單編輯用：載入全部系列清單（只有名稱，商品等選了系列才載入） */
+  async function notifyShipment(batchId: string) {
+    const shopUrl = (notifyShopUrl[batchId] || "").trim();
+    if (!shopUrl) return setShippingMsg("請先填寫賣場網址");
+    setNotifyingBatchId(batchId);
+    setShippingMsg("");
+    try {
+      const d = await callJson(`/api/admin/shipping-batches/${batchId}/notify`, "POST", { shopUrl });
+      setShippingMsg(`已寄出到貨通知給 ${d.sentTo}`);
+      setNotifyShopUrl((prev) => ({ ...prev, [batchId]: "" }));
+    } catch (e: any) {
+      setShippingMsg(e.message || "寄送失敗");
+    } finally {
+      setNotifyingBatchId(null);
+    }
+  }
+
+  async function loadAllSeriesForEdit() {
+    try {
+      const r = await fetch("/api/admin/series", { cache: "no-store" });
+      const d = await r.json();
+      setAllSeriesForEdit((d.plans || []).map((p: any) => ({ id: p.id, name: p.name })));
+    } catch {}
+  }
+
+  /** 選了某個系列之後，載入它底下的商品 */
+  async function loadProductsForEditRow(rowIndex: number, seriesId: string) {
+    try {
+      const r = await fetch(`/api/admin/products?seriesId=${seriesId}`, { cache: "no-store" });
+      const d = await r.json();
+      setEditRowSeries((prev) => ({
+        ...prev,
+        [rowIndex]: { ...(prev[rowIndex] || { search: "" }), seriesId, products: d.products || [] },
+      }));
+    } catch {}
+  }
+
   async function loadOrderArrivalStatus(orderNo: string) {
     setReassignMsg("");
     try {
@@ -817,6 +854,12 @@ export default function AdminPage() {
   const [orderPlanProducts, setOrderPlanProducts] = useState<ProductAdmin[]>([]);
   const [editingOrderItems, setEditingOrderItems] = useState(false);
   const [editItemRows, setEditItemRows] = useState<{ name: string; style: string; qty: string }[]>([]);
+  // 出貨通知：每個批次各自記賣場網址（每個檔期的賣貨便連結不一樣，每次都要當場填）
+  const [notifyShopUrl, setNotifyShopUrl] = useState<Record<string, string>>({});
+  const [notifyingBatchId, setNotifyingBatchId] = useState<string | null>(null);
+  // 訂單編輯要能跨系列加商品：每一列各自選系列（可搜尋），選了才載入那個系列的商品
+  const [editRowSeries, setEditRowSeries] = useState<Record<number, { seriesId: string; search: string; products: ProductAdmin[] }>>({});
+  const [allSeriesForEdit, setAllSeriesForEdit] = useState<{ id: string; name: string }[]>([]);
   const [savingOrderItems, setSavingOrderItems] = useState(false);
   const [cancelRequests, setCancelRequests] = useState<any[]>([]);
 
@@ -3608,6 +3651,20 @@ export default function AdminPage() {
                                   </div>
                                 ))}
                                 <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>顧客運費合計 NT$ {sb.customerShippingFee}</div>
+                                {/* 到貨通知：貨到了通知顧客去賣貨便下單。賣場網址每個檔期不一樣，每次當場填 */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                                  <input
+                                    type="text"
+                                    className="admin-input"
+                                    placeholder="賣場網址"
+                                    value={notifyShopUrl[sb.id] || ""}
+                                    onChange={(e) => setNotifyShopUrl((prev) => ({ ...prev, [sb.id]: e.target.value }))}
+                                    style={{ flex: 1, minWidth: 180 }}
+                                  />
+                                  <button className="btn small" onClick={() => notifyShipment(sb.id)} disabled={notifyingBatchId === sb.id}>
+                                    {notifyingBatchId === sb.id ? "寄送中…" : "通知顧客"}
+                                  </button>
+                                </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                                   <span style={{ fontSize: 11, color: "#8A8779" }}>內部物流成本（不轉嫁顧客）</span>
                                   <input
@@ -3623,7 +3680,7 @@ export default function AdminPage() {
                         </div>
                       )}
                       {currentRole === "owner" && orderLookupResult.seriesId && (
-                        <button className="btn small secondary" onClick={() => setEditingOrderItems(true)} style={{ marginTop: 8 }}>編輯商品／款式</button>
+                        <button className="btn small secondary" onClick={() => { setEditingOrderItems(true); loadAllSeriesForEdit(); }} style={{ marginTop: 8 }}>編輯商品／款式</button>
                       )}
                       {currentRole === "owner" && !orderLookupResult.seriesId && (
                         <div style={{ fontSize: 12, color: "#8A8779", marginTop: 8 }}>這張訂單沒有對應的系列了，沒辦法編輯商品內容（系列可能已被刪除）。</div>
@@ -3635,24 +3692,68 @@ export default function AdminPage() {
                         每一列選一個商品／款式跟數量，價格會用系列目前的商品目錄重新計算（不是沿用舊價格）。
                       </p>
                       {editItemRows.map((row, i) => {
-                        const uniqueNames = Array.from(new Set(orderPlanProducts.map((p) => p.name)));
-                        const stylesForName = orderPlanProducts.filter((p) => p.name === row.name);
+                        // 三段式：先搜系列 → 選商品 → 選款式。不然上千筆商品塞在同一個下拉裡根本沒辦法找
+                        const rowState = editRowSeries[i];
+                        // 沒選過系列時，用這一列原本的商品去猜它屬於哪個系列（訂單本來就有的品項）
+                        const fallbackProducts = orderPlanProducts;
+                        const availableProducts = rowState?.products ?? fallbackProducts;
+                        const uniqueNames = Array.from(new Set(availableProducts.map((p) => p.name)));
+                        const stylesForName = availableProducts.filter((p) => p.name === row.name);
+                        const search = rowState?.search ?? "";
+                        const matchedSeries = search.trim()
+                          ? allSeriesForEdit.filter((s) => s.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 12)
+                          : [];
                         return (
-                          <div key={i} className="id-row" style={{ marginBottom: 8, flexWrap: "nowrap" }}>
+                          <div key={i} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px dashed #EDE9DC" }}>
+                          <div className="id-row" style={{ marginBottom: 6, flexWrap: "nowrap" }}>
+                            <input
+                              type="text"
+                              className="admin-input"
+                              placeholder="搜尋系列名稱（要換系列才需要）"
+                              value={search}
+                              onChange={(e) =>
+                                setEditRowSeries((prev) => ({
+                                  ...prev,
+                                  [i]: { ...(prev[i] || { seriesId: "", products: [] }), search: e.target.value },
+                                }))
+                              }
+                              style={{ flex: 1, minWidth: 0 }}
+                            />
+                            {rowState?.seriesId && (
+                              <span style={{ fontSize: 12, color: "#3D6B1F", flexShrink: 0 }}>
+                                已選：{allSeriesForEdit.find((s) => s.id === rowState.seriesId)?.name}
+                              </span>
+                            )}
+                          </div>
+                          {matchedSeries.length > 0 && (
+                            <div style={{ border: "1px solid var(--line)", borderRadius: 8, marginBottom: 6, maxHeight: 160, overflowY: "auto" }}>
+                              {matchedSeries.map((s) => (
+                                <div
+                                  key={s.id}
+                                  onClick={() => {
+                                    loadProductsForEditRow(i, s.id);
+                                    setEditRowSeries((prev) => ({ ...prev, [i]: { ...(prev[i] || { products: [] }), seriesId: s.id, search: "" } }));
+                                  }}
+                                  style={{ padding: "7px 10px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #F3F1EA" }}
+                                >
+                                  {s.name}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="id-row" style={{ flexWrap: "nowrap" }}>
                             <select
                               value={row.name}
                               onChange={(e) => {
                                 const newName = e.target.value;
-                                const firstStyle = orderPlanProducts.find((p) => p.name === newName)?.style || "";
+                                const firstStyle = availableProducts.find((p) => p.name === newName)?.style || "";
                                 setEditItemRows((rows) => rows.map((r, ri) => (ri === i ? { ...r, name: newName, style: firstStyle } : r)));
                               }}
                               style={{ flex: 2, minWidth: 0 }}
                             >
-                              {uniqueNames.length === 0 && <option value={row.name}>{row.name}（系列商品目錄找不到，請改選）</option>}
-                              {uniqueNames.map((n) => {
-                                const sname = orderPlanProducts.find((p) => p.name === n)?.seriesName;
-                                return <option key={n} value={n}>{sname ? `${sname} / ${n}` : n}</option>;
-                              })}
+                              {uniqueNames.length === 0 && <option value={row.name}>{row.name}（請先搜尋並選擇系列）</option>}
+                              {!uniqueNames.includes(row.name) && row.name && <option value={row.name}>{row.name}</option>}
+                              {uniqueNames.map((n) => <option key={n} value={n}>{n}</option>)}
                             </select>
                             <select
                               value={row.style}
@@ -3670,6 +3771,7 @@ export default function AdminPage() {
                               style={{ flex: "0 0 70px", minWidth: 70 }}
                             />
                             <button className="btn small secondary" onClick={() => removeEditItemRow(i)} disabled={editItemRows.length <= 1} style={{ flexShrink: 0 }}>刪除</button>
+                          </div>
                           </div>
                         );
                       })}

@@ -362,13 +362,24 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       const productInfo: { priceOriginal: number; hasDiscountFlag: boolean }[] = [];
       for (let i = 0; i < g.items.length; i++) {
         const it = g.items[i];
-        const { data: prod } = await supabase
-          .from("products")
-          .select("price, has_discount_flag")
-          .eq("series_id", planByItemIndex[i].id)
-          .eq("name", it.name)
-          .eq("style", it.style)
+        // 匯入會另外建一個「封存系列」放這些舊商品，但價格要去正常系列的商品目錄撈
+        // （用系列名稱去找，不能用封存系列的 id，那底下的商品是匯入當場建的、價格是0）
+        const { data: realSeries } = await supabase
+          .from("series")
+          .select("id")
+          .eq("name", it.planName)
+          .eq("is_legacy_archive", false)
+          .limit(1)
           .maybeSingle();
+        const { data: prod } = realSeries
+          ? await supabase
+              .from("products")
+              .select("price, has_discount_flag")
+              .eq("series_id", realSeries.id)
+              .eq("name", it.name)
+              .eq("style", it.style)
+              .maybeSingle()
+          : { data: null };
         productInfo.push({
           priceOriginal: Number(prod?.price) || 0,
           hasDiscountFlag: !!prod?.has_discount_flag,

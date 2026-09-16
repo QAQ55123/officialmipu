@@ -59,3 +59,48 @@ export function resetPasswordContent(username: string, link: string): { html: st
     `如果這封信剛好被歸類到垃圾郵件匣，請改標記為「不是垃圾郵件」，方便你以後能正常收到我們的通知。`;
   return { html, text };
 }
+
+/**
+ * 出貨通知信：貨到了，通知顧客去賣貨便下單付款。
+ * 這個系統只負責統計誰訂了什麼、貨到了沒，真正的收款出貨是在賣貨便上做的，
+ * 所以信裡不寫金額，只放品項清單跟賣場連結（網址本身不顯示，只有「賣場」兩個字是連結）。
+ */
+export function shipmentNoticeContent(
+  campaignName: string,
+  items: { name: string; style: string; qty: number; isGift: boolean }[],
+  shopUrl: string
+): { html: string; text: string } {
+  const itemLines = items
+    .map((it) => `${it.isGift ? "[滿贈] " : ""}${it.name}${it.style ? `（${it.style}）` : ""} x${it.qty}`)
+    .join("\n");
+
+  const itemHtml = items
+    .map(
+      (it) =>
+        `<div style="padding:3px 0;">${it.isGift ? '<span style="display:inline-block;font-size:12px;color:#3C3489;background:#EEEDFE;padding:1px 8px;border-radius:999px;margin-right:6px;">滿贈</span>' : ""}${it.name}${it.style ? `（${it.style}）` : ""} x${it.qty}</div>`
+    )
+    .join("");
+
+  const html = `
+    <div style="font-family:sans-serif;font-size:15px;color:#2C2C2A;line-height:1.7;">
+      <p>親愛的顧客您好：</p>
+      <p>您在「${campaignName}」訂購的商品已經到貨、開放賣場囉！</p>
+      <div style="margin:14px 0;padding:12px 16px;background:#F7F5EF;border-radius:8px;">${itemHtml}</div>
+      <p>請前往<a href="${shopUrl}" style="color:#D85A30;">賣場</a>下單，謝謝。</p>
+      <p>謝謝您的訂購！</p>
+    </div>
+  `;
+
+  const text = `親愛的顧客您好：
+
+您在「${campaignName}」訂購的商品已經到貨、開放賣場囉！
+
+${itemLines}
+
+請前往賣場下單，謝謝。
+${shopUrl}
+
+謝謝您的訂購！`;
+
+  return { html, text };
+}
