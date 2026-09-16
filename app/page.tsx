@@ -95,7 +95,8 @@ export default function Home() {
   const [currentCampaign, setCurrentCampaign] = useState<any | null>(null); // 完整檔期資料，含8種匯率、滿贈基礎設定
   async function refreshCampaignStatus() {
     try {
-      const r = await fetch("/api/campaigns/current");
+      // 不加 no-store 的話瀏覽器會拿舊的回應，檔期狀態一直是舊的
+      const r = await fetch("/api/campaigns/current", { cache: "no-store" });
       const d = await r.json();
       setCampaignOpen(!!d.isOpen);
       const cap = d.campaign?.cod_campaign_cap ?? null;
@@ -515,7 +516,7 @@ export default function Home() {
     if (!legacyNickname.trim()) return setLegacyMsg("請輸入暱稱");
     setLegacySubmitting(true);
     try {
-      const r = await fetch(`/api/auth/legacy-lookup?nickname=${encodeURIComponent(legacyNickname.trim())}`);
+      const r = await fetch(`/api/auth/legacy-lookup?nickname=${encodeURIComponent(legacyNickname.trim())}`, { cache: "no-store" });
       const d = await r.json();
       if (!r.ok) return setLegacyMsg(d.error || "查詢失敗");
       if (d.alreadyRegistered) { setLegacyStep("alreadyRegistered"); return; }
@@ -606,7 +607,7 @@ export default function Home() {
     if (!linkNickname.trim()) return setLinkMsg("請輸入暱稱");
     setLinkSubmitting(true);
     try {
-      const r = await fetch(`/api/auth/legacy-lookup?nickname=${encodeURIComponent(linkNickname.trim())}`);
+      const r = await fetch(`/api/auth/legacy-lookup?nickname=${encodeURIComponent(linkNickname.trim())}`, { cache: "no-store" });
       const d = await r.json();
       if (!r.ok) return setLinkMsg(d.error || "查詢失敗");
       if (d.alreadyRegistered) { setLinkMsg("這個暱稱已經對應到另一個帳號了，如果那是你本人的另一組帳號，這邊沒辦法自動合併，麻煩聯絡管理者協助處理。"); return; }
