@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { resolveTxnRate, ceilToTwd } from "@/lib/txnRate";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export async function PATCH(req: Request) {
   if (items.length === 0) return NextResponse.json({ error: "訂單至少要有一項商品" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: order } = await supabase.from("orders").select("id, series_id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id, series_id, campaign_id, payment, wants_gift, campaigns(*)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
   // 跨系列訂單的 orders.series_id 是空的（系列改記在品項層級），不能因此擋掉編輯
 
@@ -45,7 +46,7 @@ export async function PATCH(req: Request) {
   }
   const { data: catalog } = await supabase
     .from("products")
-    .select("name, style, price, image_url, series_id")
+    .select("name, style, price, image_url, series_id, has_discount_flag")
     .in("series_id", seriesIds);
   // key 要帶系列，不同系列可能有同名商品
   const catalogMap = new Map((catalog || []).map((p) => [`${p.series_id}|${p.name}|${p.style || ""}`, p]));
@@ -54,7 +55,7 @@ export async function PATCH(req: Request) {
   const { data: seriesRows } = await supabase.from("series").select("id, name").in("id", seriesIds);
   const seriesNameById = new Map((seriesRows || []).map((s: any) => [s.id, s.name]));
 
-  const newItemRows: { order_id: string; product_name: string; style: string; qty: number; unit_price: number; subtotal: number; image_url: string | null; series_id: string; series_name_snapshot: string }[] = [];
+  const newItemRows: { order_id: string; product_name: string; style: string; qty: number; unit_price: number; subtotal: number; image_url: string | null; series_id: string; series_name_snapshot: string; unit_price_original: number; fx_rate: number | null; has_discount_flag_snapshot: boolean }[] = [];
   for (const it of items) {
     const name = String(it.name || "").trim();
     const style = String(it.style || "").trim();
@@ -68,7 +69,22 @@ export async function PATCH(req: Request) {
       const sname = seriesNameById.get(rowSeriesId) || "(未指定系列)";
       return NextResponse.json({ error: `系列「${sname}」的商品目錄裡找不到「${name}${style ? `（${style}）` : ""}」，請確認名稱/款式是否正確` }, { status: 400 });
     }
-    const unitPrice = Number(product.price) || 0;
+    // products.price 是人民幣原幣，要依「檔期＋交易方式＋有無滿減＋有無滿贈」抓匯率換成台幣，
+    // 不能直接當成台幣存（原本就是這樣寫的，編輯過的訂單金額會整個錯掉）
+    const priceOriginal = Number(product.price) || 0;
+    const { rate } = resolveTxnRate(
+      (order as any).campaigns || {},
+      order.payment === "取付" ? "cod" : "bank",
+      !!product.has_discount_flag,
+      !!order.wants_gift
+    );
+    if (rate == null) {
+      return NextResponse.json(
+        { error: `「${name}」對應的交易方式與滿贈組合沒有設定匯率，請先到檔期設定補上` },
+        { status: 400 }
+      );
+    }
+    const unitPrice = ceilToTwd(priceOriginal, rate);
     newItemRows.push({
       order_id: order.id,
       product_name: name,
@@ -79,6 +95,9 @@ export async function PATCH(req: Request) {
       image_url: product.image_url,
       series_id: rowSeriesId,
       series_name_snapshot: seriesNameById.get(rowSeriesId) || "",
+      unit_price_original: priceOriginal,
+      fx_rate: rate,
+      has_discount_flag_snapshot: !!product.has_discount_flag,
     });
   }
 
