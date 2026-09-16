@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { refundCodQuota } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +96,9 @@ export async function POST(req: Request) {
   }
 
   await supabase.from("order_items").delete().in("order_id", ids);
+  // 刪掉之前先把每張訂單的取付額度還回去
+  for (const oid of ids) await refundCodQuota(supabase, oid);
+
   const { error } = await supabase.from("orders").delete().in("id", ids);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

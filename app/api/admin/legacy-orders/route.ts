@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { refundCodQuota } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -112,6 +113,9 @@ export async function DELETE(req: Request) {
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
 
   await supabase.from("order_items").delete().eq("order_id", order.id);
+  // 刪掉之前先把取付額度還回去
+  await refundCodQuota(supabase, order.id);
+
   const { error } = await supabase.from("orders").delete().eq("id", order.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

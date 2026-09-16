@@ -49,6 +49,8 @@ export async function POST(req: Request) {
     closes_at: closesAt,
     cod_campaign_cap: body.codCampaignCap ?? null,
     gift_cod_campaign_cap: body.giftCodCampaignCap ?? null,
+    per_user_cod_cap: body.perUserCodCap ?? null,
+    per_user_gift_cod_cap: body.perUserGiftCodCap ?? null,
     checkout_gift_platform_id: body.checkoutGiftPlatformId ?? null,
     split_calc_fx_rate: body.splitCalcFxRate ?? null,
     shipping_cost_per_kg: body.shippingCostPerKg ?? null,

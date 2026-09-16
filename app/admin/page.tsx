@@ -10,7 +10,7 @@ type SeriesAdmin = {
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
   categoryIds?: string[]; // 這個系列掛在哪些分類底下（可以多個）
 };
-type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null };
+type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; seriesName?: string };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", categoryIds: [] as string[], promoImages: [] as string[], isVisible: true };
@@ -68,7 +68,7 @@ export default function AdminPage() {
   });
   const emptyCampaignForm = {
     id: "", name: "", opensAt: "", closesAt: "",
-    codCampaignCap: "", giftCodCampaignCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "", splitCalcFxRate: "", shippingCostPerKg: "",
+    codCampaignCap: "", giftCodCampaignCap: "", perUserCodCap: "", perUserGiftCodCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "", splitCalcFxRate: "", shippingCostPerKg: "",
     rates: emptyCampaignRates(),
   };
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -499,6 +499,8 @@ export default function AdminPage() {
       opensAt: toTaipeiDatetimeLocal(c.opens_at), closesAt: toTaipeiDatetimeLocal(c.closes_at),
       codCampaignCap: c.cod_campaign_cap != null ? String(c.cod_campaign_cap) : "",
       giftCodCampaignCap: c.gift_cod_campaign_cap != null ? String(c.gift_cod_campaign_cap) : "",
+      perUserCodCap: c.per_user_cod_cap != null ? String(c.per_user_cod_cap) : "",
+      perUserGiftCodCap: c.per_user_gift_cod_cap != null ? String(c.per_user_gift_cod_cap) : "",
       checkoutGiftPlatformId: c.checkout_gift_platform_id || "",
       splitCalcFxRate: c.split_calc_fx_rate != null ? String(c.split_calc_fx_rate) : "",
       shippingCostPerKg: c.shipping_cost_per_kg != null ? String(c.shipping_cost_per_kg) : "",
@@ -529,6 +531,8 @@ export default function AdminPage() {
           closes_at: fromTaipeiDatetimeLocal(campaignForm.closesAt),
           cod_campaign_cap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
           gift_cod_campaign_cap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
+          per_user_cod_cap: campaignForm.perUserCodCap === "" ? null : Number(campaignForm.perUserCodCap),
+          per_user_gift_cod_cap: campaignForm.perUserGiftCodCap === "" ? null : Number(campaignForm.perUserGiftCodCap),
           checkout_gift_platform_id: campaignForm.checkoutGiftPlatformId || null,
           split_calc_fx_rate: campaignForm.splitCalcFxRate === "" ? null : Number(campaignForm.splitCalcFxRate),
           shipping_cost_per_kg: campaignForm.shippingCostPerKg === "" ? null : Number(campaignForm.shippingCostPerKg),
@@ -543,6 +547,8 @@ export default function AdminPage() {
           closesAt: fromTaipeiDatetimeLocal(campaignForm.closesAt),
           codCampaignCap: campaignForm.codCampaignCap === "" ? null : Number(campaignForm.codCampaignCap),
           giftCodCampaignCap: campaignForm.giftCodCampaignCap === "" ? null : Number(campaignForm.giftCodCampaignCap),
+          perUserCodCap: campaignForm.perUserCodCap === "" ? null : Number(campaignForm.perUserCodCap),
+          perUserGiftCodCap: campaignForm.perUserGiftCodCap === "" ? null : Number(campaignForm.perUserGiftCodCap),
           checkoutGiftPlatformId: campaignForm.checkoutGiftPlatformId || null,
           splitCalcFxRate: campaignForm.splitCalcFxRate === "" ? null : Number(campaignForm.splitCalcFxRate),
           shippingCostPerKg: campaignForm.shippingCostPerKg === "" ? null : Number(campaignForm.shippingCostPerKg),
@@ -1618,11 +1624,31 @@ export default function AdminPage() {
       setEditItemRows((d.order.items || []).map((it: any) => ({ name: it.name, style: it.style || "", qty: String(it.qty) })));
       loadOrderArrivalStatus(d.order.orderNo);
       loadShippingBatches(d.order.orderNo);
-      if (d.order.seriesId) {
+      // 一次結帳＝一張訂單、可跨系列，所以 orders.series_id 在跨系列時是空的。
+      // 商品目錄要從「這張訂單所有品項各自的系列」收集，不然編輯時下拉會是空的
+      const seriesIds = Array.from(
+        new Set([
+          ...(d.order.seriesId ? [d.order.seriesId] : []),
+          ...(d.order.items || []).map((it: any) => it.seriesId).filter(Boolean),
+        ])
+      );
+      if (seriesIds.length > 0) {
         try {
-          const pr = await fetch(`/api/admin/products?seriesId=${d.order.seriesId}`, { cache: "no-store" });
-          const pd = await pr.json();
-          if (pr.ok) setOrderPlanProducts(pd.products || []);
+          // 跨系列時不同系列可能有同名商品，載入時標上系列名稱才分得清楚
+          const seriesNameById = new Map<string, string>();
+          (d.order.items || []).forEach((it: any) => {
+            if (it.seriesId && it.seriesName) seriesNameById.set(it.seriesId, it.seriesName);
+          });
+          const lists = await Promise.all(
+            seriesIds.map(async (sid) => {
+              const pr = await fetch(`/api/admin/products?seriesId=${sid}`, { cache: "no-store" });
+              const pd = await pr.json();
+              if (!pr.ok) return [];
+              const sname = seriesNameById.get(sid) || "";
+              return (pd.products || []).map((p: any) => ({ ...p, seriesName: sname }));
+            })
+          );
+          setOrderPlanProducts(lists.flat());
         } catch {}
       }
     } catch {
@@ -2631,6 +2657,14 @@ export default function AdminPage() {
                 <input type="number" step="0.01" value={campaignForm.splitCalcFxRate} onChange={(e) => setCampaignForm((f) => ({ ...f, splitCalcFxRate: e.target.value }))} placeholder="例如 4.5，用來把贈品的台幣售價換算成人民幣，跟折扣金額一起比較" />
               </div>
               <div className="id-row">
+                <span className="id-label">單人取付上限</span>
+                <input type="number" value={campaignForm.perUserCodCap} onChange={(e) => setCampaignForm((f) => ({ ...f, perUserCodCap: e.target.value }))} placeholder="留空＝不限。每位顧客在這個檔期的取付總額上限（一般商品）" />
+              </div>
+              <div className="id-row">
+                <span className="id-label">單人滿贈取付上限</span>
+                <input type="number" value={campaignForm.perUserGiftCodCap} onChange={(e) => setCampaignForm((f) => ({ ...f, perUserGiftCodCap: e.target.value }))} placeholder="留空＝不限。跟上面的一般商品上限分開累計" />
+              </div>
+              <div className="id-row">
                 <span className="id-label">每公斤運費（NT$）</span>
                 <input type="number" step="0.01" value={campaignForm.shippingCostPerKg} onChange={(e) => setCampaignForm((f) => ({ ...f, shippingCostPerKg: e.target.value }))} placeholder="成本表用：乘上所有物流單號的重量加總＝這期的運費成本" />
               </div>
@@ -3615,7 +3649,10 @@ export default function AdminPage() {
                               style={{ flex: 2, minWidth: 0 }}
                             >
                               {uniqueNames.length === 0 && <option value={row.name}>{row.name}（系列商品目錄找不到，請改選）</option>}
-                              {uniqueNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                              {uniqueNames.map((n) => {
+                                const sname = orderPlanProducts.find((p) => p.name === n)?.seriesName;
+                                return <option key={n} value={n}>{sname ? `${sname} / ${n}` : n}</option>;
+                              })}
                             </select>
                             <select
                               value={row.style}

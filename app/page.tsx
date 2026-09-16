@@ -84,11 +84,14 @@ export default function Home() {
   const [campaignOpen, setCampaignOpen] = useState(true); // 先預設true，抓到真實狀態前不擋顧客
   // 2.4節：檔期層級的取付總上限（不是每個系列各自的上限）
   const [campaignCodAvailable, setCampaignCodAvailable] = useState(true);
+  // 這位顧客在目前檔期已經用掉多少取付額度（一般／滿贈分開），用來在選取付的當下就判斷夠不夠
+  const [myCodUsed, setMyCodUsed] = useState({ regularUsed: 0, giftUsed: 0 });
   const [campaignCodCap, setCampaignCodCap] = useState<number | null>(null);
   const [campaignCodUsed, setCampaignCodUsed] = useState(0);
   // 滿贈系列商品有自己獨立的取付額度，跟一般商品分開累計、互不影響
   const [giftCodAvailable, setGiftCodAvailable] = useState(true);
   const [giftCodCap, setGiftCodCap] = useState<number | null>(null);
+  const [giftCodUsed, setGiftCodUsed] = useState(0);
   const [currentCampaign, setCurrentCampaign] = useState<any | null>(null); // 完整檔期資料，含8種匯率、滿贈基礎設定
   async function refreshCampaignStatus() {
     try {
@@ -103,6 +106,7 @@ export default function Home() {
       const giftCap = d.campaign?.gift_cod_campaign_cap ?? null;
       const giftUsed = Number(d.campaign?.gift_cod_campaign_used) || 0;
       setGiftCodCap(giftCap);
+      setGiftCodUsed(giftUsed);
       setGiftCodAvailable(giftCap == null || giftUsed < giftCap);
       setCurrentCampaign(d.campaign || null);
     } catch {}
@@ -1002,6 +1006,12 @@ export default function Home() {
     });
     setCheckoutGiftPicks({});
     setCheckoutError("");
+    if (currentCampaign?.id) {
+      fetch(`/api/campaigns/my-cod-usage?campaignId=${currentCampaign.id}`)
+        .then((r) => r.json())
+        .then((d) => setMyCodUsed({ regularUsed: Number(d.regularUsed) || 0, giftUsed: Number(d.giftUsed) || 0 }))
+        .catch(() => {});
+    }
     fetchCheckoutGiftQuota(selectedActive);
   }
 
@@ -2416,8 +2426,38 @@ export default function Home() {
                         const groupItemsAreGift = entries.map((e) => isGiftConversionItem(e.planId, e) || (isAltSite && hasAltSitePrice(e)));
                         const hasGiftItems = groupItemsAreGift.some(Boolean);
                         const hasRegularItems = groupItemsAreGift.some((x) => !x);
+                        // 取付能不能選，要在「選的當下」就判斷清楚，不能等按送出才被後端擋。
+                        // 三件事都要過：① 檔期總額度夠 ② 這位顧客的單人額度夠 ③ 該匯率組合有開啟
+                        const codRegularTotal = entries.reduce(
+                          (s, e, i) => (groupItemsAreGift[i] ? s : s + itemAmount(e.planId, e, "取付", checkoutWantsGift)),
+                          0
+                        );
+                        const codGiftTotal = entries.reduce(
+                          (s, e, i) => (groupItemsAreGift[i] ? s + itemAmount(e.planId, e, "取付", checkoutWantsGift) : s),
+                          0
+                        );
+                        // ① 檔期總額度：要把這張訂單的金額算進去，不能只看「還沒用完」
+                        const campaignCodEnough =
+                          campaignCodCap == null || campaignCodUsed + codRegularTotal <= campaignCodCap;
+                        const campaignGiftCodEnough =
+                          giftCodCap == null || giftCodUsed + codGiftTotal <= giftCodCap;
+                        // ② 單人額度
+                        const perUserCap = currentCampaign?.per_user_cod_cap ?? null;
+                        const perUserGiftCap = currentCampaign?.per_user_gift_cod_cap ?? null;
+                        const perUserEnough =
+                          perUserCap == null || myCodUsed.regularUsed + codRegularTotal <= Number(perUserCap);
+                        const perUserGiftEnough =
+                          perUserGiftCap == null || myCodUsed.giftUsed + codGiftTotal <= Number(perUserGiftCap);
+                        // ③ 匯率組合有沒有開啟（沒設匯率的組合不能下單，之前會誤報成「額度超過」）
+                        const codRateEnabled = entries.every((e, i) => {
+                          if (groupItemsAreGift[i]) return true; // 滿贈系列商品不套匯率
+                          return itemRateInfo(e.planId, e, "取付", checkoutWantsGift).enabled;
+                        });
+
                         const codOffered =
-                          (!hasRegularItems || campaignCodAvailable) && (!hasGiftItems || giftCodAvailable);
+                          (!hasRegularItems || (campaignCodEnough && perUserEnough)) &&
+                          (!hasGiftItems || (campaignGiftCodEnough && perUserGiftEnough)) &&
+                          codRateEnabled;
                         const codDisabled = !codOffered;
                         const rawPayment = checkoutPayment;
                         const payment = (rawPayment === "取付" && codDisabled) ? "匯款" : rawPayment;
@@ -2566,9 +2606,21 @@ export default function Home() {
                               </div>
                               {codDisabled && (
                                 <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
-                                  {hasGiftItems && !giftCodAvailable
-                                    ? "贈品／滿贈系列商品的取付金額已超過本檔期設定的金額，請改用匯款/無卡"
-                                    : "取付金額已超過本檔期設定的金額，請改用匯款/無卡"}
+                                  {/* 檔期層級的額度是內部設定，不對顧客顯示金額；
+                                      單人額度是顧客自己的，要讓他知道還剩多少 */}
+                                  {(() => {
+                                    if (!codRateEnabled) return "目前這個商品組合不開放取付，請改用匯款/無卡";
+                                    if (!perUserGiftEnough) {
+                                      const left = Math.max(0, Number(perUserGiftCap) - myCodUsed.giftUsed);
+                                      return `贈品／滿贈系列商品的取付額度剩餘 NT$${fmt(left)}，金額已超過上限，請改用匯款/無卡`;
+                                    }
+                                    if (!perUserEnough) {
+                                      const left = Math.max(0, Number(perUserCap) - myCodUsed.regularUsed);
+                                      return `取付額度剩餘 NT$${fmt(left)}，金額已超過上限，請改用匯款/無卡`;
+                                    }
+                                    if (hasGiftItems && !campaignGiftCodEnough) return "目前檔期贈品／滿贈系列商品取付名額不足，請改用匯款/無卡";
+                                    return "目前檔期取付名額不足，請改用匯款/無卡";
+                                  })()}
                                 </div>
                               )}
 

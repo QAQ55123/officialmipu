@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { refundCodQuota } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,6 +46,7 @@ export async function GET(req: Request) {
       createdAt: order.created_at,
       items: (order.order_items || []).map((it: any) => ({
         // 一次結帳＝一張訂單、可跨系列，所以系列記在品項層級（orders 那層只在單一系列時才有值）
+        seriesId: it.series_id || null,
         seriesName: it.series_name_snapshot || null,
         name: it.product_name,
         style: it.style,
@@ -128,6 +130,9 @@ export async function DELETE(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: order } = await supabase.from("orders").select("id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
+
+  // 刪掉之前先把取付額度還回去
+  await refundCodQuota(supabase, order.id);
 
   const { error } = await supabase.from("orders").delete().eq("id", order.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -306,6 +306,10 @@ alter table campaigns add column if not exists checkout_gift_platform_id uuid;
 alter table campaigns add column if not exists split_calc_fx_rate numeric;
 -- 成本表：這個檔期的每公斤運費（台幣），乘上所有物流單號的重量加總就是這期的運費成本
 alter table campaigns add column if not exists shipping_cost_per_kg numeric;
+-- 單人取付上限：每個顧客在這個檔期的取付「總額」上限（同一個人買好幾次會累計）。
+-- 跟檔期總上限一樣分兩組：一般商品、滿贈系列商品各自累計、互不影響。
+alter table campaigns add column if not exists per_user_cod_cap numeric;
+alter table campaigns add column if not exists per_user_gift_cod_cap numeric;
 alter table campaigns add column if not exists gift_cod_campaign_used numeric not null default 0;
 
 alter table gift_styles disable row level security;

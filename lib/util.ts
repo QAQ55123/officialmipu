@@ -45,3 +45,50 @@ export function paymentLabel(payment: string | null | undefined): string {
   if (payment === "匯款") return "匯款/無卡";
   return payment || "";
 }
+
+/**
+ * 取付額度退回：訂單被取消或刪除時，把它佔用的取付金額還給檔期。
+ * 額度分兩組（一般商品 / 滿贈系列商品）各自累計，所以退的時候也要分開算。
+ * 沒有這段的話額度只進不出，取消掉的訂單會一直佔著名額。
+ */
+export async function refundCodQuota(supabase: any, orderId: string): Promise<void> {
+  const { data: order } = await supabase
+    .from("orders")
+    .select("campaign_id, payment, order_items(product_name, style, subtotal, series_id)")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (!order || order.payment !== "取付" || !order.campaign_id) return;
+
+  // 哪些商品是「滿贈系列商品」（店家把贈品拿出來賣的），它們走另一組額度
+  const { data: giftProducts } = await supabase
+    .from("products")
+    .select("name, style, series_id")
+    .not("linked_gift_style_id", "is", null);
+  const giftKeys = new Set(
+    (giftProducts || []).map((p: any) => `${p.series_id}||${p.name}||${p.style || ""}`)
+  );
+
+  let regularTotal = 0;
+  let giftTotal = 0;
+  (order.order_items || []).forEach((it: any) => {
+    const key = `${it.series_id}||${it.product_name}||${it.style || ""}`;
+    if (giftKeys.has(key)) giftTotal += Number(it.subtotal) || 0;
+    else regularTotal += Number(it.subtotal) || 0;
+  });
+  if (regularTotal === 0 && giftTotal === 0) return;
+
+  const { data: campaign } = await supabase
+    .from("campaigns")
+    .select("cod_campaign_used, gift_cod_campaign_used")
+    .eq("id", order.campaign_id)
+    .maybeSingle();
+  if (!campaign) return;
+
+  await supabase
+    .from("campaigns")
+    .update({
+      cod_campaign_used: Math.max(0, (Number(campaign.cod_campaign_used) || 0) - regularTotal),
+      gift_cod_campaign_used: Math.max(0, (Number(campaign.gift_cod_campaign_used) || 0) - giftTotal),
+    })
+    .eq("id", order.campaign_id);
+}

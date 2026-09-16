@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { deleteStorageFiles } from "@/lib/storage";
 import { syncPlansSheet } from "@/lib/sheetsSync";
+import { refundCodQuota } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -177,6 +178,9 @@ export async function DELETE(req: Request) {
     if (orderIds.length) {
       const { error: itemsErr } = await supabase.from("order_items").delete().in("order_id", orderIds);
       if (itemsErr) return NextResponse.json({ error: "刪除訂單明細失敗：" + itemsErr.message }, { status: 500 });
+      // 刪掉之前先把每張訂單的取付額度還回去
+      for (const oid of orderIds) await refundCodQuota(supabase, oid);
+
       const { error: ordersErr } = await supabase.from("orders").delete().in("id", orderIds);
       if (ordersErr) return NextResponse.json({ error: "刪除訂單失敗：" + ordersErr.message }, { status: 500 });
     }

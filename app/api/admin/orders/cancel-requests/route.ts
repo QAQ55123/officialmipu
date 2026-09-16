@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { refundCodQuota } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -49,6 +50,9 @@ export async function POST(req: Request) {
   const supabase = getSupabaseAdmin();
   const { data: order } = await supabase.from("orders").select("id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
+
+  // 訂單要刪掉之前，先把它佔用的取付額度還給檔期（刪掉之後就查不到品項了）
+  await refundCodQuota(supabase, order.id);
 
   const { error } = await supabase.from("orders").delete().eq("id", order.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -140,18 +140,56 @@ export async function POST(req: Request) {
       const used = Number(campaign.cod_campaign_used) || 0;
       if (used + regularTotal > cap) {
         return NextResponse.json(
-          { error: `取付金額已超過本檔期設定的金額 NT$${fmtMoney(cap)}，請改用匯款/無卡` },
+          { error: "目前檔期取付名額不足，請改用匯款/無卡" },
           { status: 400 }
         );
       }
     }
+    // 單人取付上限：每位顧客在這個檔期的取付總額上限，跟檔期總上限一樣分兩組各自累計
+    if (
+      (campaign.per_user_cod_cap != null && Number(campaign.per_user_cod_cap) > 0) ||
+      (campaign.per_user_gift_cod_cap != null && Number(campaign.per_user_gift_cod_cap) > 0)
+    ) {
+      const { data: myOrders } = await supabase
+        .from("orders")
+        .select("id, order_items(product_name, style, subtotal, series_id)")
+        .eq("campaign_id", campaign.id)
+        .eq("payment", "取付")
+        .ilike("username", member.username);
+
+      const { data: giftProds } = await supabase
+        .from("products")
+        .select("name, style, series_id")
+        .not("linked_gift_style_id", "is", null);
+      const giftKeySet = new Set((giftProds || []).map((p: any) => `${p.series_id}||${p.name}||${p.style || ""}`));
+
+      let myRegularUsed = 0;
+      let myGiftUsed = 0;
+      (myOrders || []).forEach((o: any) => {
+        (o.order_items || []).forEach((it: any) => {
+          const key = `${it.series_id}||${it.product_name}||${it.style || ""}`;
+          if (giftKeySet.has(key)) myGiftUsed += Number(it.subtotal) || 0;
+          else myRegularUsed += Number(it.subtotal) || 0;
+        });
+      });
+
+      const perUserCap = Number(campaign.per_user_cod_cap) || 0;
+      if (perUserCap > 0 && myRegularUsed + regularTotal > perUserCap) {
+        return NextResponse.json({ error: `取付額度剩餘 NT$${fmtMoney(Math.max(0, perUserCap - myRegularUsed))}，金額已超過上限，請改用匯款/無卡` }, { status: 400 });
+      }
+      const perUserGiftCap = Number(campaign.per_user_gift_cod_cap) || 0;
+      if (perUserGiftCap > 0 && myGiftUsed + giftConvTotal > perUserGiftCap) {
+        return NextResponse.json({ error: `贈品／滿贈系列商品的取付額度剩餘 NT$${fmtMoney(Math.max(0, perUserGiftCap - myGiftUsed))}，金額已超過上限，請改用匯款/無卡` }, { status: 400 });
+      }
+    }
+
     // 滿贈系列商品有自己獨立的取付上限，跟一般商品分開累計、互不影響
     if (campaign.gift_cod_campaign_cap != null && Number(campaign.gift_cod_campaign_cap) > 0) {
       const giftCap = Number(campaign.gift_cod_campaign_cap);
       const giftUsed = Number(campaign.gift_cod_campaign_used) || 0;
       if (giftUsed + giftConvTotal > giftCap) {
         return NextResponse.json(
-          { error: `贈品／滿贈系列商品的取付金額已超過本檔期設定的金額 NT$${fmtMoney(giftCap)}，請改用匯款/無卡` },
+          { error: "目前檔期贈品／滿贈系列商品取付名額不足，請改用匯款/無卡" },
           { status: 400 }
         );
       }

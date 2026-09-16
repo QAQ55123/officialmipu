@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { google } from "googleapis";
 import { toDirectImageUrl } from "@/lib/imageUrl";
+import { resolveTxnRate } from "@/lib/txnRate";
 import { normFb } from "@/lib/util";
 
 export function norm(v: any): string {
@@ -202,7 +203,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
 
   // 一次結帳＝一張訂單：同一個分組代號就是一張訂單，即使裡面有不同系列的商品，
   // 所以系列改記在品項層級（planName 只保留第一筆當作訂單層級的顯示用途）
-  type Group = { groupKey: string; nickname: string; fbUrl: string; planName: string; campaignName: string; payment: string; paidAmount: number; orderDate: Date; originalOrderNo: string; items: { name: string; style: string; qty: number; unitPrice: number; planName: string; unitPriceOriginal: number | null; fxRate: number | null; hasDiscountFlag: boolean }[];
+  type Group = { groupKey: string; nickname: string; fbUrl: string; planName: string; campaignName: string; payment: string; paidAmount: number; orderDate: Date; originalOrderNo: string; items: { name: string; style: string; qty: number; planName: string }[];
     gifts: { styleName: string; qty: number }[]; wantsGift: boolean };
   const groups = new Map<string, Group>();
   const rowErrors: string[] = [];
@@ -217,18 +218,12 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
     const productName = norm(r["商品名稱"]);
     const style = norm(r["款式"]);
     const qty = Number(r["數量"]);
-    const unitPrice = Number(r["單價"]) || 0;
+    // 原幣單價、是否滿減都從商品目錄撈，匯率依檔期設定自動判斷，不用手動填
     // 顯示文字是「匯款/無卡」，範本兩種寫法都接受，存進資料庫統一用「匯款」
     const payment = norm(r["交易方式"]) === "匯款/無卡" ? "匯款" : norm(r["交易方式"]);
     const paidAmount = Number(r["已收金額"] || 0);
     const orderDate = parseFlexibleDate(r["下單日期"]);
     const originalOrderNo = norm(r["原始訂單編號"]); // 選填，舊系統原本的訂單編號，有填的話會保留（不足9碼補0）
-    // 拆單工具完全依賴原幣金額計算，沒有這欄的舊訂單在拆單池裡會變成壞資料，所以要一併匯入
-    const unitPriceOriginalRaw = r["原幣單價"];
-    const unitPriceOriginal = unitPriceOriginalRaw === "" || unitPriceOriginalRaw == null ? null : Number(unitPriceOriginalRaw);
-    const fxRateRaw = r["匯率"];
-    const fxRate = fxRateRaw === "" || fxRateRaw == null ? null : Number(fxRateRaw);
-    const hasDiscountFlag = norm(r["是否滿減"]).toLowerCase() === "v";
     // 滿贈：一列可以填一個款式與數量，同一張訂單的滿贈分散在該訂單的任意幾列都可以
     const giftStyleName = norm(r["滿贈款式"]);
     const giftQty = Number(r["滿贈數量"] || 0);
@@ -253,11 +248,6 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         rowErrors.push(`第 ${rowNo} 列：缺少檔期名稱，已略過（檔期名稱是必填，訂單要能對應到現有的檔期）`);
         return;
       }
-      // 單價可以留空，但那樣就必須有原幣單價＋匯率，系統才算得出台幣金額
-      if (!unitPrice && (unitPriceOriginal == null || fxRate == null)) {
-        rowErrors.push(`第 ${rowNo} 列：「單價」留空時，必須填「原幣單價」和「匯率」讓系統換算，已略過`);
-        return;
-      }
       if (!["匯款", "取付"].includes(payment)) {
         rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款/無卡」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
         return;
@@ -273,7 +263,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
     if (!groups.has(groupKey)) groups.set(groupKey, { groupKey, nickname, fbUrl, planName, campaignName, payment, paidAmount, orderDate, originalOrderNo, items: [], gifts: [], wantsGift: false });
     const grp = groups.get(groupKey)!;
     if (!isGiftOnlyRow) {
-      grp.items.push({ name: productName, style, qty, unitPrice, planName, unitPriceOriginal, fxRate, hasDiscountFlag });
+      grp.items.push({ name: productName, style, qty, planName });
     }
     if (giftStyleName && giftQty > 0) {
       const existing = grp.gifts.find((g) => g.styleName === giftStyleName);
@@ -297,7 +287,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
 
   for (const g of groups.values()) {
     const { identity, ambiguous } = resolve(g.fbUrl, g.nickname);
-    const total = g.items.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+    const totalQty = g.items.reduce((s, it) => s + it.qty, 0);
     if (!identity) unmatched++;
 
     if (!commit) {
@@ -307,7 +297,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       const campaignCheck = await findCampaignByName(g.campaignName);
       const campaignLabel = campaignCheck ? "" : `　⚠找不到檔期「${g.campaignName}」，請先在後台建立`;
       const seriesNames = Array.from(new Set(g.items.map((it) => it.planName))).join("、");
-      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${seriesNames}（${g.campaignName}）－ ${g.items.length}項 小計NT$${total}${dupLabel}${campaignLabel}`, matched: !!identity, ambiguous, status: "ok" });
+      results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${seriesNames}（${g.campaignName}）－ ${g.items.length}項 共${totalQty}件${dupLabel}${campaignLabel}`, matched: !!identity, ambiguous, status: "ok" });
       continue;
     }
 
@@ -338,7 +328,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
           .eq("style", it.style)
           .maybeSingle();
         if (!existingProduct) {
-          await supabase.from("products").insert({ series_id: itemPlan.id, name: it.name, style: it.style, price: it.unitPrice });
+          await supabase.from("products").insert({ series_id: itemPlan.id, name: it.name, style: it.style, price: 0 });
           imageByItemIndex.push(null);
         } else {
           imageByItemIndex.push(existingProduct.image_url || null);
@@ -366,35 +356,57 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
             : orderErr.message
         );
       }
-      // 台幣金額的算法（2.6節）：實務上是「整張訂單的原幣總額 × 匯率」再無條件進位，
-      // 不是逐件各自換算，所以 Excel 的「單價」欄可以留空，只要填原幣單價跟匯率就好。
-      // 分攤回各品項時，每項先無條件進位，多出來的差額從最後一項扣掉，確保加總等於訂單總額。
-      const needAutoPrice = g.items.every((it) => !it.unitPrice) && g.items.every((it) => it.unitPriceOriginal != null);
-      const twdByItem: number[] = [];
-      if (needAutoPrice) {
-        const rate = g.items.find((it) => it.fxRate != null)?.fxRate || 0;
-        const originalTotal = g.items.reduce((s, it) => s + (it.unitPriceOriginal || 0) * it.qty, 0);
-        const orderTwdTotal = Math.ceil(originalTotal * rate);
-        let allocated = 0;
-        g.items.forEach((it, i) => {
-          if (i === g.items.length - 1) {
-            twdByItem.push(orderTwdTotal - allocated); // 最後一項吸收差額
-          } else {
-            const v = Math.ceil((it.unitPriceOriginal || 0) * it.qty * rate);
-            twdByItem.push(v);
-            allocated += v;
-          }
+      // 原幣單價、是否滿減從商品目錄撈；匯率依「檔期＋交易方式＋有無滿減＋有無滿贈」自動判斷；
+      // 台幣金額用「訂單原幣總額 × 匯率」無條件進位，再分攤回各品項（差額由最後一項吸收）。
+      // 這些資料系統都查得到，不需要匯入時手動填。
+      const productInfo: { priceOriginal: number; hasDiscountFlag: boolean }[] = [];
+      for (let i = 0; i < g.items.length; i++) {
+        const it = g.items[i];
+        const { data: prod } = await supabase
+          .from("products")
+          .select("price, has_discount_flag")
+          .eq("series_id", planByItemIndex[i].id)
+          .eq("name", it.name)
+          .eq("style", it.style)
+          .maybeSingle();
+        productInfo.push({
+          priceOriginal: Number(prod?.price) || 0,
+          hasDiscountFlag: !!prod?.has_discount_flag,
         });
       }
 
+      // 匯率：整張訂單套同一組（有任何一個滿減商品就算滿減組）
+      const anyDiscount = productInfo.some((p) => p.hasDiscountFlag);
+      const { rate: resolvedRate } = resolveTxnRate(
+        campaign as any,
+        g.payment === "取付" ? "cod" : "bank",
+        anyDiscount,
+        g.wantsGift
+      );
+      const fxRate = resolvedRate || 0;
+
+      const originalTotal = g.items.reduce((s, it, i) => s + productInfo[i].priceOriginal * it.qty, 0);
+      const orderTwdTotal = Math.ceil(originalTotal * fxRate);
+      const twdByItem: number[] = [];
+      let allocated = 0;
+      g.items.forEach((it, i) => {
+        if (i === g.items.length - 1) {
+          twdByItem.push(orderTwdTotal - allocated); // 最後一項吸收除不盡的差額
+        } else {
+          const v = Math.ceil(productInfo[i].priceOriginal * it.qty * fxRate);
+          twdByItem.push(v);
+          allocated += v;
+        }
+      });
+
       const itemRows = g.items.map((it, idx) => ({
         order_id: order.id, product_name: it.name, style: it.style, qty: it.qty,
-        unit_price: needAutoPrice ? Math.ceil(twdByItem[idx] / it.qty) : it.unitPrice,
-        subtotal: needAutoPrice ? twdByItem[idx] : Math.ceil(it.qty * it.unitPrice),
+        unit_price: it.qty > 0 ? Math.ceil(twdByItem[idx] / it.qty) : 0,
+        subtotal: twdByItem[idx],
         series_id: planByItemIndex[idx]?.id || null, series_name_snapshot: it.planName,
-        unit_price_original: it.unitPriceOriginal,
-        fx_rate: it.fxRate,
-        has_discount_flag_snapshot: it.hasDiscountFlag,
+        unit_price_original: productInfo[idx].priceOriginal,
+        fx_rate: fxRate,
+        has_discount_flag_snapshot: productInfo[idx].hasDiscountFlag,
         image_url: imageByItemIndex[idx] || null,
       }));
       const { error: itemsErr } = await supabase.from("order_items").insert(itemRows);
@@ -430,8 +442,8 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
 
       // 匯入舊訂單如果是取付，比照正常下單流程，一併累加進該檔期的取付已用額度
       if (g.payment === "取付") {
-        await supabase.from("campaigns").update({ cod_campaign_used: (Number(campaign.cod_campaign_used) || 0) + total }).eq("id", campaign.id);
-        campaign.cod_campaign_used = (Number(campaign.cod_campaign_used) || 0) + total; // 同一次匯入裡後續同檔期的訂單要接續累加，不能每筆都讀到舊值
+        await supabase.from("campaigns").update({ cod_campaign_used: (Number(campaign.cod_campaign_used) || 0) + orderTwdTotal }).eq("id", campaign.id);
+        campaign.cod_campaign_used = (Number(campaign.cod_campaign_used) || 0) + orderTwdTotal; // 同一次匯入裡後續同檔期的訂單要接續累加，不能每筆都讀到舊值
       }
 
       results.push({ groupKey: g.groupKey, label: `${g.nickname} － ${Array.from(new Set(g.items.map((it) => it.planName))).join("、")}`, matched: !!identity, ambiguous, status: "ok" });
@@ -510,14 +522,14 @@ export async function importLegacySheetTab(sheetId: string, tabName: string, com
 
   for (const g of groups.values()) {
     const { identity, ambiguous } = resolve(g.fbUrl, g.nickname);
-    const total = g.items.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+    const totalQty = g.items.reduce((s, it) => s + it.qty, 0);
     if (!identity) unmatched++;
 
     if (!commit) {
       const sourceRef = `sheet:${sheetId}:${tabName}:${g.orderNo}`;
       const { data: existingOrder } = await supabase.from("orders").select("order_no").eq("legacy_source_ref", sourceRef).maybeSingle();
       const dupLabel = existingOrder ? `（已經匯入過，訂單編號 ${existingOrder.order_no}，正式匯入時會自動跳過）` : "";
-      results.push({ orderNo: g.orderNo, label: `${g.nickname || "(無暱稱)"} － ${g.items.length}項 小計NT$${total}${dupLabel}`, matched: !!identity, ambiguous, status: "ok" });
+      results.push({ orderNo: g.orderNo, label: `${g.nickname || "(無暱稱)"} － ${g.items.length}項 共${totalQty}件${dupLabel}`, matched: !!identity, ambiguous, status: "ok" });
       continue;
     }
 
