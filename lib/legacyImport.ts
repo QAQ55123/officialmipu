@@ -312,7 +312,8 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
   const campaignCache = new Map<string, any>();
   async function findCampaignByName(name: string) {
     if (campaignCache.has(name)) return campaignCache.get(name);
-    const { data } = await supabase.from("campaigns").select("id, name, cod_campaign_used").eq("name", name).maybeSingle();
+    // 要撈完整欄位：匯率換算需要那8組 txn_* 設定，只撈 id/name 的話 fxRate 會是0、金額全變0
+    const { data } = await supabase.from("campaigns").select("*").eq("name", name).maybeSingle();
     campaignCache.set(name, data || null);
     return data || null;
   }
@@ -448,6 +449,11 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         g.wantsGift
       );
       const fxRate = resolvedRate || 0;
+      if (!fxRate) {
+        rowErrors.push(
+          `訂單 ${g.groupKey}：檔期「${g.campaignName}」沒有設定「${g.payment}${anyDiscount ? "＋滿減" : ""}${g.wantsGift ? "＋滿贈" : ""}」這組的匯率，金額會是0`
+        );
+      }
 
       const originalTotal = g.items.reduce((s, it, i) => s + productInfo[i].priceOriginal * it.qty, 0);
       const orderTwdTotal = Math.ceil(originalTotal * fxRate);
