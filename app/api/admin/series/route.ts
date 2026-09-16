@@ -98,7 +98,7 @@ export async function PUT(req: Request) {
   const supabase = getSupabaseAdmin();
 
   // 先抓舊資料，等下比對哪些圖片被換掉/移除了，順便清掉 Storage 裡的舊檔案
-  const { data: oldSeries } = await supabase.from("series").select("image_url, promo_images").eq("id", body.id).single();
+  const { data: oldSeries } = await supabase.from("series").select("name, image_url, promo_images").eq("id", body.id).single();
 
   const { error } = await supabase
     .from("series")
@@ -112,6 +112,13 @@ export async function PUT(req: Request) {
     })
     .eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // 系列改名時，把訂單品項的系列名稱快照一起更新。
+  // 不更新的話，改名前後的訂單會被當成兩個不同系列，成本表的商品統計就會拆成兩筆。
+  if (oldSeries && body.name && body.name !== oldSeries.name) {
+    await supabase.from("order_items").update({ series_name_snapshot: body.name }).eq("series_id", body.id);
+    await supabase.from("orders").update({ series_name_snapshot: body.name }).eq("series_id", body.id);
+  }
 
   // 多分類關聯：整批覆蓋（先刪光再寫入現在選的）
   if (Array.isArray(body.categoryIds)) {

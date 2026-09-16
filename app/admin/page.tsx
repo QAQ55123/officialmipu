@@ -2763,6 +2763,7 @@ export default function AdminPage() {
                       <button className="btn small secondary" onClick={() => openGiftStyles(c)}>滿贈款式登記</button>
                       <button className="btn small secondary" onClick={() => openVendorRules(c)}>廠商規則設定</button>
                       <button className="btn small secondary" onClick={() => window.open(`/admin/campaigns/${c.id}/purchase-batches`, "_self")}>拆單</button>
+                      <button className="btn small secondary" onClick={() => window.open(`/admin/campaigns/${c.id}/shipping`, "_self")}>出貨作業</button>
                       <button className="btn small secondary" onClick={() => editCampaign(c)}>編輯</button>
                       <button className="btn small danger" onClick={() => deleteCampaign(c.id)}>刪除</button>
                     </span>

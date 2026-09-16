@@ -2403,10 +2403,10 @@ export default function Home() {
                     return singleItemGiftCap(e.price, currentCampaign);
                   }
 
+                  // 一次結帳＝一張訂單，付款方式與要不要滿贈都是整筆共用的；
+                  // 用舊的 by-plan 狀態會永遠拿到預設值，取消勾選滿贈時總計不會變
                   const grandTotal = Object.entries(grouped).reduce((sum, [planId, entries]) => {
-                    const payment = checkoutPaymentByPlan[planId] || "匯款";
-                    const wantsGift = wantsGiftByPlan[planId] ?? true;
-                    return sum + entries.reduce((s, e) => s + itemAmount(planId, e, payment, wantsGift), 0);
+                    return sum + entries.reduce((s, e) => s + itemAmount(planId, e, checkoutPayment, checkoutWantsGift), 0);
                   }, 0);
 
                   // 滿贈要選滿才能送出（一次結帳＝一張訂單，整筆一起判斷）
@@ -2445,10 +2445,10 @@ export default function Home() {
                         // ② 單人額度
                         const perUserCap = currentCampaign?.per_user_cod_cap ?? null;
                         const perUserGiftCap = currentCampaign?.per_user_gift_cod_cap ?? null;
-                        const perUserEnough =
-                          perUserCap == null || myCodUsed.regularUsed + codRegularTotal <= Number(perUserCap);
-                        const perUserGiftEnough =
-                          perUserGiftCap == null || myCodUsed.giftUsed + codGiftTotal <= Number(perUserGiftCap);
+                        // 進結帳頁只看「這次購物車金額有沒有超過上限」，不累計以前用掉的——
+                        // 累計額度是按下送出時後端才要判斷的事
+                        const perUserEnough = perUserCap == null || codRegularTotal <= Number(perUserCap);
+                        const perUserGiftEnough = perUserGiftCap == null || codGiftTotal <= Number(perUserGiftCap);
                         // ③ 匯率組合有沒有開啟（沒設匯率的組合不能下單，之前會誤報成「額度超過」）
                         const codRateEnabled = entries.every((e, i) => {
                           if (groupItemsAreGift[i]) return true; // 滿贈系列商品不套匯率
@@ -2591,7 +2591,8 @@ export default function Home() {
 
                               <div className="id-label" style={{ marginBottom: 6 }}>這個系列的交易方式</div>
                               <div className="source-btns">
-                                {(!codOffered ? ["匯款"] : ["匯款", "取付"]).map((p) => (
+                                {/* 取付不可用時按鈕還是顯示，只是反灰 */}
+                                {["匯款", "取付"].map((p) => (
                                   <button
                                     key={p}
                                     className={`src-btn ${payment === p ? "active" : ""}`}
@@ -2607,19 +2608,12 @@ export default function Home() {
                               </div>
                               {codDisabled && (
                                 <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
-                                  {/* 檔期層級的額度是內部設定，不對顧客顯示金額；
-                                      單人額度是顧客自己的，要讓他知道還剩多少 */}
                                   {(() => {
+                                    // 單人額度顯示的是「上限」；檔期額度是店家內部設定，不給顧客看金額
                                     if (!codRateEnabled) return "目前這個商品組合不開放取付，請改用匯款/無卡";
-                                    if (!perUserGiftEnough) {
-                                      const left = Math.max(0, Number(perUserGiftCap) - myCodUsed.giftUsed);
-                                      return `贈品／滿贈系列商品的取付額度剩餘 NT$${fmt(left)}，金額已超過上限，請改用匯款/無卡`;
-                                    }
-                                    if (!perUserEnough) {
-                                      const left = Math.max(0, Number(perUserCap) - myCodUsed.regularUsed);
-                                      return `取付額度剩餘 NT$${fmt(left)}，金額已超過上限，請改用匯款/無卡`;
-                                    }
-                                    if (hasGiftItems && !campaignGiftCodEnough) return "目前檔期贈品／滿贈系列商品取付名額不足，請改用匯款/無卡";
+                                    if (!perUserGiftEnough) return `滿贈系列商品金額已超過滿贈取付額度 NT$${fmt(Number(perUserGiftCap))}，無法使用取付`;
+                                    if (!perUserEnough) return `金額已超過取付額度 NT$${fmt(Number(perUserCap))}，無法使用取付`;
+                                    if (hasGiftItems && !campaignGiftCodEnough) return "目前檔期滿贈系列商品取付名額不足，請改用匯款/無卡";
                                     return "目前檔期取付名額不足，請改用匯款/無卡";
                                   })()}
                                 </div>
