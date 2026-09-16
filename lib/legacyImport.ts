@@ -355,13 +355,14 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       for (const it of g.items) {
         const itemPlan = await findOrCreateArchivedPlan(planCache, it.planName, g.orderDate, true);
         planByItemIndex.push(itemPlan);
-        const { data: existingProduct } = await supabase
+        // 沒款式的商品資料庫存 null，要用 is null 查才對得上
+        let existQuery = supabase
           .from("products")
           .select("id, image_url")
           .eq("series_id", itemPlan.id)
-          .eq("name", it.name)
-          .eq("style", it.style)
-          .maybeSingle();
+          .eq("name", it.name);
+        existQuery = it.style ? existQuery.eq("style", it.style) : existQuery.or("style.is.null,style.eq.");
+        const { data: existingProduct } = await existQuery.maybeSingle();
         if (!existingProduct) {
           await supabase.from("products").insert({ series_id: itemPlan.id, name: it.name, style: it.style, price: 0 });
           imageByItemIndex.push(null);
@@ -410,15 +411,18 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
           .eq("is_legacy_archive", false)
           .limit(1)
           .maybeSingle();
-        const { data: prod } = realSeries
-          ? await supabase
+        // 沒有款式的商品，資料庫存的是 null 不是空字串，要用 is null 查才對得上
+        let prodQuery = realSeries
+          ? supabase
               .from("products")
               .select("price, has_discount_flag")
               .eq("series_id", realSeries.id)
               .eq("name", it.name)
-              .eq("style", it.style)
-              .maybeSingle()
-          : { data: null };
+          : null;
+        if (prodQuery) {
+          prodQuery = it.style ? prodQuery.eq("style", it.style) : prodQuery.or("style.is.null,style.eq.");
+        }
+        const { data: prod } = prodQuery ? await prodQuery.maybeSingle() : { data: null };
         productInfo.push({
           priceOriginal: Number(prod?.price) || 0,
           hasDiscountFlag: !!prod?.has_discount_flag,
@@ -593,7 +597,9 @@ export async function importLegacySheetTab(sheetId: string, tabName: string, com
       }
 
       for (const it of g.items) {
-        const { data: existingProduct } = await supabase.from("products").select("id").eq("series_id", plan.id).eq("name", it.name).eq("style", it.style).maybeSingle();
+        let q2 = supabase.from("products").select("id").eq("series_id", plan.id).eq("name", it.name);
+        q2 = it.style ? q2.eq("style", it.style) : q2.or("style.is.null,style.eq.");
+        const { data: existingProduct } = await q2.maybeSingle();
         if (!existingProduct) {
           const imageUrl = catalogImageByKey.get(`${it.name}__${it.style}`) || null;
           await supabase.from("products").insert({ series_id: plan.id, name: it.name, style: it.style, price: it.unitPrice, image_url: imageUrl });
