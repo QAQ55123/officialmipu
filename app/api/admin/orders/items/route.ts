@@ -46,7 +46,7 @@ export async function PATCH(req: Request) {
   }
   const { data: catalog } = await supabase
     .from("products")
-    .select("name, style, price, image_url, series_id, has_discount_flag")
+    .select("name, style, price, image_url, series_id, has_discount_flag, linked_gift_style_id")
     .in("series_id", seriesIds);
   // key 要帶系列，不同系列可能有同名商品
   const catalogMap = new Map((catalog || []).map((p) => [`${p.series_id}|${p.name}|${p.style || ""}`, p]));
@@ -69,22 +69,30 @@ export async function PATCH(req: Request) {
       const sname = seriesNameById.get(rowSeriesId) || "(未指定系列)";
       return NextResponse.json({ error: `系列「${sname}」的商品目錄裡找不到「${name}${style ? `（${style}）` : ""}」，請確認名稱/款式是否正確` }, { status: 400 });
     }
-    // products.price 是人民幣原幣，要依「檔期＋交易方式＋有無滿減＋有無滿贈」抓匯率換成台幣，
-    // 不能直接當成台幣存（原本就是這樣寫的，編輯過的訂單金額會整個錯掉）
+    // 滿贈系列商品（店家把贈品拿出來賣的）價格本來就是台幣，不套匯率；
+    // 一般商品的 products.price 是人民幣原幣，要依匯率換成台幣
+    const isGiftConversion = !!product.linked_gift_style_id;
     const priceOriginal = Number(product.price) || 0;
-    const { rate } = resolveTxnRate(
-      (order as any).campaigns || {},
-      order.payment === "取付" ? "cod" : "bank",
-      !!product.has_discount_flag,
-      !!order.wants_gift
-    );
-    if (rate == null) {
-      return NextResponse.json(
-        { error: `「${name}」對應的交易方式與滿贈組合沒有設定匯率，請先到檔期設定補上` },
-        { status: 400 }
+    let unitPrice: number;
+    let rate: number | null = null;
+    if (isGiftConversion) {
+      unitPrice = priceOriginal; // 已經是台幣
+    } else {
+      const resolved = resolveTxnRate(
+        (order as any).campaigns || {},
+        order.payment === "取付" ? "cod" : "bank",
+        !!product.has_discount_flag,
+        !!order.wants_gift
       );
+      if (resolved.rate == null) {
+        return NextResponse.json(
+          { error: `「${name}」對應的交易方式與滿贈組合沒有設定匯率，請先到檔期設定補上` },
+          { status: 400 }
+        );
+      }
+      rate = resolved.rate;
+      unitPrice = ceilToTwd(priceOriginal, rate);
     }
-    const unitPrice = ceilToTwd(priceOriginal, rate);
     newItemRows.push({
       order_id: order.id,
       product_name: name,
@@ -95,7 +103,7 @@ export async function PATCH(req: Request) {
       image_url: product.image_url,
       series_id: rowSeriesId,
       series_name_snapshot: seriesNameById.get(rowSeriesId) || "",
-      unit_price_original: priceOriginal,
+      unit_price_original: isGiftConversion ? 0 : priceOriginal,
       fx_rate: rate,
       has_discount_flag_snapshot: !!product.has_discount_flag,
     });
