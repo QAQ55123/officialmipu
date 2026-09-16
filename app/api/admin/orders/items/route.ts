@@ -26,20 +26,35 @@ export async function PATCH(req: Request) {
 
   const body = await req.json();
   const orderNo = String(body.orderNo || "").trim();
-  const items: { name: string; style: string; qty: number }[] = Array.isArray(body.items) ? body.items : [];
+  // 一次結帳＝一張訂單、可跨系列，所以每個品項各自帶自己的系列
+  const items: { name: string; style: string; qty: number; seriesId?: string }[] = Array.isArray(body.items) ? body.items : [];
   if (!orderNo) return NextResponse.json({ error: "缺少訂單編號" }, { status: 400 });
   if (items.length === 0) return NextResponse.json({ error: "訂單至少要有一項商品" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
   const { data: order } = await supabase.from("orders").select("id, series_id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
-  if (!order.series_id) return NextResponse.json({ error: "這張訂單沒有對應的系列，沒辦法修改商品內容" }, { status: 400 });
+  // 跨系列訂單的 orders.series_id 是空的（系列改記在品項層級），不能因此擋掉編輯
 
-  // 用企劃目前的商品目錄，找出每個品項現在的正確單價（含圖片快照）
-  const { data: catalog } = await supabase.from("products").select("name, style, price, image_url").eq("series_id", order.series_id);
-  const catalogMap = new Map((catalog || []).map((p) => [`${p.name}|${p.style || ""}`, p]));
+  // 商品目錄要涵蓋「這次送來的所有品項各自的系列」，不是只查訂單層級那一個
+  const seriesIds = Array.from(
+    new Set([...(order.series_id ? [order.series_id] : []), ...items.map((it) => it.seriesId).filter(Boolean)])
+  ) as string[];
+  if (seriesIds.length === 0) {
+    return NextResponse.json({ error: "每個品項都要指定所屬系列" }, { status: 400 });
+  }
+  const { data: catalog } = await supabase
+    .from("products")
+    .select("name, style, price, image_url, series_id")
+    .in("series_id", seriesIds);
+  // key 要帶系列，不同系列可能有同名商品
+  const catalogMap = new Map((catalog || []).map((p) => [`${p.series_id}|${p.name}|${p.style || ""}`, p]));
 
-  const newItemRows: { order_id: string; product_name: string; style: string; qty: number; unit_price: number; subtotal: number; image_url: string | null }[] = [];
+  // 系列名稱快照：編輯完要保留，不然拆單、成本表、Google Sheet 都會失去系列資訊
+  const { data: seriesRows } = await supabase.from("series").select("id, name").in("id", seriesIds);
+  const seriesNameById = new Map((seriesRows || []).map((s: any) => [s.id, s.name]));
+
+  const newItemRows: { order_id: string; product_name: string; style: string; qty: number; unit_price: number; subtotal: number; image_url: string | null; series_id: string; series_name_snapshot: string }[] = [];
   for (const it of items) {
     const name = String(it.name || "").trim();
     const style = String(it.style || "").trim();
@@ -47,9 +62,11 @@ export async function PATCH(req: Request) {
     if (!name || !Number.isFinite(qty) || qty <= 0) {
       return NextResponse.json({ error: `品項「${name || "(未命名)"}」的數量不正確` }, { status: 400 });
     }
-    const product = catalogMap.get(`${name}|${style}`);
+    const rowSeriesId = String(it.seriesId || order.series_id || "");
+    const product = catalogMap.get(`${rowSeriesId}|${name}|${style}`);
     if (!product) {
-      return NextResponse.json({ error: `企劃的商品目錄裡找不到「${name}${style ? `（${style}）` : ""}」，請確認名稱/款式是否正確` }, { status: 400 });
+      const sname = seriesNameById.get(rowSeriesId) || "(未指定系列)";
+      return NextResponse.json({ error: `系列「${sname}」的商品目錄裡找不到「${name}${style ? `（${style}）` : ""}」，請確認名稱/款式是否正確` }, { status: 400 });
     }
     const unitPrice = Number(product.price) || 0;
     newItemRows.push({
@@ -60,6 +77,8 @@ export async function PATCH(req: Request) {
       unit_price: unitPrice,
       subtotal: unitPrice * qty,
       image_url: product.image_url,
+      series_id: rowSeriesId,
+      series_name_snapshot: seriesNameById.get(rowSeriesId) || "",
     });
   }
 

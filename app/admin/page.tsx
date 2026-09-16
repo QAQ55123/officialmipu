@@ -853,7 +853,7 @@ export default function AdminPage() {
   const [orderLookupMsg, setOrderLookupMsg] = useState("");
   const [orderPlanProducts, setOrderPlanProducts] = useState<ProductAdmin[]>([]);
   const [editingOrderItems, setEditingOrderItems] = useState(false);
-  const [editItemRows, setEditItemRows] = useState<{ name: string; style: string; qty: string }[]>([]);
+  const [editItemRows, setEditItemRows] = useState<{ name: string; style: string; qty: string; seriesId: string }[]>([]);
   // 出貨通知：每個批次各自記賣場網址（每個檔期的賣貨便連結不一樣，每次都要當場填）
   const [notifyShopUrl, setNotifyShopUrl] = useState<Record<string, string>>({});
   const [notifyingBatchId, setNotifyingBatchId] = useState<string | null>(null);
@@ -1664,7 +1664,7 @@ export default function AdminPage() {
       if (!r.ok) return setOrderLookupMsg(d.error || "查詢失敗");
       setOrderLookupResult(d.order);
       setOrderPaidAmountInput(String(d.order.paidAmount || 0));
-      setEditItemRows((d.order.items || []).map((it: any) => ({ name: it.name, style: it.style || "", qty: String(it.qty) })));
+      setEditItemRows((d.order.items || []).map((it: any) => ({ name: it.name, style: it.style || "", qty: String(it.qty), seriesId: it.seriesId || "" })));
       loadOrderArrivalStatus(d.order.orderNo);
       loadShippingBatches(d.order.orderNo);
       // 一次結帳＝一張訂單、可跨系列，所以 orders.series_id 在跨系列時是空的。
@@ -1707,13 +1707,13 @@ export default function AdminPage() {
   }
   function addEditItemRow() {
     const first = orderPlanProducts[0];
-    setEditItemRows((rows) => [...rows, { name: first?.name || "", style: first?.style || "", qty: "1" }]);
+    setEditItemRows((rows) => [...rows, { name: first?.name || "", style: first?.style || "", qty: "1", seriesId: first?.seriesId || "" }]);
   }
 
   async function saveOrderItems() {
     if (!orderLookupResult) return;
     const items = editItemRows
-      .map((r) => ({ name: r.name.trim(), style: r.style.trim(), qty: Number(r.qty) }))
+      .map((r) => ({ name: r.name.trim(), style: r.style.trim(), qty: Number(r.qty), seriesId: r.seriesId }))
       .filter((r) => r.name);
     if (items.length === 0) return setOrderLookupMsg("至少要有一項商品");
     setSavingOrderItems(true);
@@ -3733,6 +3733,8 @@ export default function AdminPage() {
                                   onClick={() => {
                                     loadProductsForEditRow(i, s.id);
                                     setEditRowSeries((prev) => ({ ...prev, [i]: { ...(prev[i] || { products: [] }), seriesId: s.id, search: "" } }));
+                                    // 這一列改掛到新系列，商品名稱／款式要清空重選
+                                    setEditItemRows((rows) => rows.map((r, ri) => (ri === i ? { ...r, seriesId: s.id, name: "", style: "" } : r)));
                                   }}
                                   style={{ padding: "7px 10px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #F3F1EA" }}
                                 >
@@ -3778,7 +3780,7 @@ export default function AdminPage() {
                       <button className="btn small secondary" onClick={addEditItemRow} style={{ marginBottom: 10 }}>＋ 新增一項商品</button>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button className="btn small" onClick={saveOrderItems} disabled={savingOrderItems}>{savingOrderItems ? "儲存中…" : "儲存修改"}</button>
-                        <button className="btn small secondary" onClick={() => { setEditingOrderItems(false); setEditItemRows(orderLookupResult.items.map((it: any) => ({ name: it.name, style: it.style || "", qty: String(it.qty) }))); }}>取消</button>
+                        <button className="btn small secondary" onClick={() => { setEditingOrderItems(false); setEditItemRows(orderLookupResult.items.map((it: any) => ({ name: it.name, style: it.style || "", qty: String(it.qty), seriesId: it.seriesId || "" }))); }}>取消</button>
                       </div>
                     </div>
                   )}
