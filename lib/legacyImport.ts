@@ -422,6 +422,17 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
           : { data: [] };
         const wantStyle = (it.style || "").trim();
         const prod = (candidates || []).find((p: any) => ((p.style || "").trim() === wantStyle)) || null;
+        // 查不到商品的話金額會變成0，直接把查詢條件寫進結果訊息，才知道是哪一步對不上
+        if (!prod) {
+          if (!realSeries) {
+            rowErrors.push(`訂單 ${g.groupKey}：找不到系列「${it.planName}」（要跟商品管理裡的系列名稱完全一致），「${it.name}」金額會是0`);
+          } else if (!candidates || candidates.length === 0) {
+            rowErrors.push(`訂單 ${g.groupKey}：系列「${it.planName}」底下找不到商品「${it.name}」，金額會是0`);
+          } else {
+            const styleList = (candidates || []).map((p: any) => `「${p.style ?? "(null)"}」`).join("、");
+            rowErrors.push(`訂單 ${g.groupKey}：商品「${it.name}」找不到款式「${wantStyle || "(空白)"}」，目錄裡有的款式是 ${styleList}，金額會是0`);
+          }
+        }
         productInfo.push({
           priceOriginal: Number(prod?.price) || 0,
           hasDiscountFlag: !!prod?.has_discount_flag,
