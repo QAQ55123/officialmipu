@@ -47,6 +47,9 @@ export async function POST(req: Request) {
     .single();
   if (seriesErr) return NextResponse.json({ error: "建立系列失敗：" + seriesErr.message }, { status: 500 });
 
+  // 前台是從 series_categories 反查系列的，不寫這張表的話前台看不到這個系列
+  await supabase.from("series_categories").insert({ series_id: series.id, category_id: categoryId });
+
   // 依門檻金額分組
   const grouped = new Map<number, { id: string; style_name: string; image_url: string | null }[]>();
   giftStyles.forEach((g) => {

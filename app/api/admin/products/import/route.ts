@@ -57,6 +57,11 @@ export async function POST(req: Request) {
         if (seriesImageUrl && !existingSeries.image_url) {
           await supabase.from("series").update({ image_url: toDirectImageUrl(seriesImageUrl) }).eq("id", existingSeries.id);
         }
+        // 系列可以掛多個分類，前台是從 series_categories 反查的，
+        // 舊系列可能還沒寫進關聯表，這裡補上才不會在前台消失
+        await supabase
+          .from("series_categories")
+          .upsert({ series_id: existingSeries.id, category_id: categoryId }, { onConflict: "series_id,category_id" });
         seriesCache.set(seriesName, existingSeries.id);
         return existingSeries.id;
       }
@@ -74,6 +79,8 @@ export async function POST(req: Request) {
         .select()
         .single();
       if (createErr || !created) throw new Error(`建立系列「${seriesName}」失敗：${createErr?.message || "未知錯誤"}`);
+      // 前台是從 series_categories 反查系列的，不寫這張表的話前台看不到
+      await supabase.from("series_categories").insert({ series_id: created.id, category_id: categoryId });
       seriesCache.set(seriesName, created.id);
       return created.id;
     }

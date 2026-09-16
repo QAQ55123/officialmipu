@@ -64,7 +64,9 @@ create table if not exists series_categories (
 );
 create index if not exists idx_series_categories_category on series_categories (category_id);
 
--- 把現有的 series.category_id 搬進關聯表，既有設定不會消失
+-- 把現有的 series.category_id 搬進關聯表，既有設定不會消失。
+-- 每次跑 schema 都會執行，所以之前漏掉沒寫關聯表的系列（例如商品批次匯入自動建立的）
+-- 也會在這裡自動補上，前台才看得到。
 insert into series_categories (series_id, category_id)
 select id, category_id from series where category_id is not null
 on conflict do nothing;
