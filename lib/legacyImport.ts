@@ -355,14 +355,14 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       for (const it of g.items) {
         const itemPlan = await findOrCreateArchivedPlan(planCache, it.planName, g.orderDate, true);
         planByItemIndex.push(itemPlan);
-        // 沒款式的商品資料庫存 null，要用 is null 查才對得上
-        let existQuery = supabase
+        // 款式空白時，資料庫可能存空字串或 null，撈出來自己比對比較保險
+        const { data: existCandidates } = await supabase
           .from("products")
-          .select("id, image_url")
+          .select("id, image_url, style")
           .eq("series_id", itemPlan.id)
           .eq("name", it.name);
-        existQuery = it.style ? existQuery.eq("style", it.style) : existQuery.or("style.is.null,style.eq.");
-        const { data: existingProduct } = await existQuery.maybeSingle();
+        const wantStyle0 = (it.style || "").trim();
+        const existingProduct = (existCandidates || []).find((p: any) => ((p.style || "").trim() === wantStyle0)) || null;
         if (!existingProduct) {
           await supabase.from("products").insert({ series_id: itemPlan.id, name: it.name, style: it.style, price: 0 });
           imageByItemIndex.push(null);
@@ -411,18 +411,17 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
           .eq("is_legacy_archive", false)
           .limit(1)
           .maybeSingle();
-        // 沒有款式的商品，資料庫存的是 null 不是空字串，要用 is null 查才對得上
-        let prodQuery = realSeries
-          ? supabase
+        // 款式空白的商品，資料庫可能存空字串也可能存 null，Supabase 的 .or() 語法對
+        // 「等於空字串」解析不了，所以先把同名商品全撈出來，再用程式碼自己比對款式
+        const { data: candidates } = realSeries
+          ? await supabase
               .from("products")
-              .select("price, has_discount_flag")
+              .select("price, has_discount_flag, style")
               .eq("series_id", realSeries.id)
               .eq("name", it.name)
-          : null;
-        if (prodQuery) {
-          prodQuery = it.style ? prodQuery.eq("style", it.style) : prodQuery.or("style.is.null,style.eq.");
-        }
-        const { data: prod } = prodQuery ? await prodQuery.maybeSingle() : { data: null };
+          : { data: [] };
+        const wantStyle = (it.style || "").trim();
+        const prod = (candidates || []).find((p: any) => ((p.style || "").trim() === wantStyle)) || null;
         productInfo.push({
           priceOriginal: Number(prod?.price) || 0,
           hasDiscountFlag: !!prod?.has_discount_flag,
@@ -597,9 +596,9 @@ export async function importLegacySheetTab(sheetId: string, tabName: string, com
       }
 
       for (const it of g.items) {
-        let q2 = supabase.from("products").select("id").eq("series_id", plan.id).eq("name", it.name);
-        q2 = it.style ? q2.eq("style", it.style) : q2.or("style.is.null,style.eq.");
-        const { data: existingProduct } = await q2.maybeSingle();
+        const { data: cands2 } = await supabase.from("products").select("id, style").eq("series_id", plan.id).eq("name", it.name);
+        const wantStyle2 = (it.style || "").trim();
+        const existingProduct = (cands2 || []).find((p: any) => ((p.style || "").trim() === wantStyle2)) || null;
         if (!existingProduct) {
           const imageUrl = catalogImageByKey.get(`${it.name}__${it.style}`) || null;
           await supabase.from("products").insert({ series_id: plan.id, name: it.name, style: it.style, price: it.unitPrice, image_url: imageUrl });
