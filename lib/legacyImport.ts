@@ -160,6 +160,18 @@ async function buildIdentityIndex() {
       byNickname.get(key)!.push(id);
     }
   }
+  // 也要比對「現有的會員帳號」——店家幫已經註冊的會員補訂單時，
+  // 那個人不在舊會員名冊裡，只比對名冊的話會一直說「對不到身份」
+  const { data: allMembers } = await supabase.from("members").select("id, username, profile_url");
+  const memberByFbUrl = new Map<string, any>();
+  const memberByUsername = new Map<string, any[]>();
+  for (const m of allMembers || []) {
+    if (m.profile_url) memberByFbUrl.set(normFb(m.profile_url), m);
+    const key = norm(m.username).toLowerCase();
+    if (!memberByUsername.has(key)) memberByUsername.set(key, []);
+    memberByUsername.get(key)!.push(m);
+  }
+
   function resolve(fbUrl: string, nickname: string): { identity: any | null; ambiguous: boolean } {
     if (fbUrl) {
       const hit = byFbUrl.get(normFb(fbUrl));
@@ -169,6 +181,17 @@ async function buildIdentityIndex() {
       const c = byNickname.get(norm(nickname).toLowerCase());
       if (c && c.length === 1) return { identity: c[0], ambiguous: false };
       if (c && c.length > 1) return { identity: null, ambiguous: true };
+    }
+
+    // 名冊裡找不到，再比對現有會員帳號。配對到的話訂單直接掛在他名下，不用再認領
+    if (fbUrl) {
+      const m = memberByFbUrl.get(normFb(fbUrl));
+      if (m) return { identity: { directMember: m, claimedMember: m }, ambiguous: false };
+    }
+    if (nickname) {
+      const ms = memberByUsername.get(norm(nickname).toLowerCase());
+      if (ms && ms.length === 1) return { identity: { directMember: ms[0], claimedMember: ms[0] }, ambiguous: false };
+      if (ms && ms.length > 1) return { identity: null, ambiguous: true };
     }
     return { identity: null, ambiguous: false };
   }
@@ -239,17 +262,29 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       rowErrors.push(`第 ${rowNo} 列：缺少訂單分組代號，已略過`);
       return;
     }
+
+    // 一張訂單有好幾個商品時，暱稱／FB網址／檔期／交易方式／已收金額／下單日期
+    // 這些「訂單層級」的欄位只要第一列填過就好，後續列留空會自動沿用同一組的值
+    const existing = groups.get(groupKey);
+    const effNickname = nickname || existing?.nickname || "";
+    const effFbUrl = fbUrl || existing?.fbUrl || "";
+    const effCampaignName = campaignName || existing?.campaignName || "";
+    const effPayment = payment || existing?.payment || "";
+    const effPaidAmount = paidAmount || existing?.paidAmount || 0;
+    const effOrderDate = orderDate || existing?.orderDate || null;
+    const effOriginalOrderNo = originalOrderNo || existing?.originalOrderNo || "";
+
     if (!isGiftOnlyRow) {
-      if (!nickname || !planName || !productName || !qty) {
-        rowErrors.push(`第 ${rowNo} 列：缺少必填欄位，已略過`);
+      if (!effNickname || !planName || !productName || !qty) {
+        rowErrors.push(`第 ${rowNo} 列：缺少必填欄位（暱稱、系列名稱、商品名稱、數量），已略過`);
         return;
       }
-      if (!campaignName) {
+      if (!effCampaignName) {
         rowErrors.push(`第 ${rowNo} 列：缺少檔期名稱，已略過（檔期名稱是必填，訂單要能對應到現有的檔期）`);
         return;
       }
-      if (!["匯款", "取付"].includes(payment)) {
-        rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款/無卡」或「取付」，目前是「${payment || "(空白)"}」，已略過`);
+      if (!["匯款", "取付"].includes(effPayment)) {
+        rowErrors.push(`第 ${rowNo} 列：交易方式必須是「匯款/無卡」或「取付」，目前是「${effPayment || "(空白)"}」，已略過`);
         return;
       }
     }
@@ -260,7 +295,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
       return;
     }
 
-    if (!groups.has(groupKey)) groups.set(groupKey, { groupKey, nickname, fbUrl, planName, campaignName, payment, paidAmount, orderDate, originalOrderNo, items: [], gifts: [], wantsGift: false });
+    if (!groups.has(groupKey)) groups.set(groupKey, { groupKey, nickname: effNickname, fbUrl: effFbUrl, planName, campaignName: effCampaignName, payment: effPayment, paidAmount: effPaidAmount, orderDate: effOrderDate as Date, originalOrderNo: effOriginalOrderNo, items: [], gifts: [], wantsGift: false });
     const grp = groups.get(groupKey)!;
     if (!isGiftOnlyRow) {
       grp.items.push({ name: productName, style, qty, planName });
@@ -346,7 +381,11 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         wants_gift: g.wantsGift,
         campaign_id: campaign.id,
         username: targetUsername, profile_url: profileUrl, payment: g.payment, paid_amount: g.paidAmount,
-        created_at: g.orderDate.toISOString(), legacy_identity_id: identity ? identity.id : null, legacy_unmatched: !identity,
+        created_at: g.orderDate.toISOString(),
+        // 直接比對到現有會員的話沒有 legacy_identity_id（那是舊會員名冊的紀錄），
+        // 但訂單已經掛在他帳號上了，不算「未配對」
+        legacy_identity_id: identity?.directMember ? null : (identity ? identity.id : null),
+        legacy_unmatched: !identity,
         legacy_source_ref: sourceRef,
       }).select().single();
       if (orderErr) {
@@ -567,7 +606,11 @@ export async function importLegacySheetTab(sheetId: string, tabName: string, com
       const { data: order, error: orderErr } = await supabase.from("orders").insert({
         order_no: paddedOrderNo, series_id: plan.id, series_name_snapshot: tabName,
         username: usernamePlaceholder, profile_url: profileUrl, payment: g.payment, paid_amount: 0,
-        created_at: g.orderDate.toISOString(), legacy_identity_id: identity ? identity.id : null, legacy_unmatched: !identity,
+        created_at: g.orderDate.toISOString(),
+        // 直接比對到現有會員的話沒有 legacy_identity_id（那是舊會員名冊的紀錄），
+        // 但訂單已經掛在他帳號上了，不算「未配對」
+        legacy_identity_id: identity?.directMember ? null : (identity ? identity.id : null),
+        legacy_unmatched: !identity,
         legacy_source_ref: sourceRef,
       }).select().single();
       if (orderErr) {
