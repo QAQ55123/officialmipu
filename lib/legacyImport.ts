@@ -440,34 +440,31 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         });
       }
 
-      // 匯率：整張訂單套同一組（有任何一個滿減商品就算滿減組）
-      const anyDiscount = productInfo.some((p) => p.hasDiscountFlag);
-      const { rate: resolvedRate } = resolveTxnRate(
-        campaign as any,
-        g.payment === "取付" ? "cod" : "bank",
-        anyDiscount,
-        g.wantsGift
-      );
-      const fxRate = resolvedRate || 0;
-      if (!fxRate) {
+      // 匯率是「逐品項」判斷的：同一張訂單裡，滿減商品用滿減那組、無滿減商品用無滿減那組，
+      // 不能整張套同一組（顧客端下單時也是逐品項算的）
+      const rateByItem: number[] = [];
+      const missingRateDesc = new Set<string>();
+      productInfo.forEach((p) => {
+        const { rate } = resolveTxnRate(
+          campaign as any,
+          g.payment === "取付" ? "cod" : "bank",
+          p.hasDiscountFlag,
+          g.wantsGift
+        );
+        if (!rate) {
+          missingRateDesc.add(`${g.payment}${p.hasDiscountFlag ? "＋滿減" : "＋無滿減"}${g.wantsGift ? "＋滿贈" : ""}`);
+        }
+        rateByItem.push(rate || 0);
+      });
+      if (missingRateDesc.size > 0) {
         rowErrors.push(
-          `訂單 ${g.groupKey}：檔期「${g.campaignName}」沒有設定「${g.payment}${anyDiscount ? "＋滿減" : ""}${g.wantsGift ? "＋滿贈" : ""}」這組的匯率，金額會是0`
+          `訂單 ${g.groupKey}：檔期「${g.campaignName}」沒有設定「${Array.from(missingRateDesc).join("」「")}」這些組的匯率，金額會是0`
         );
       }
 
-      const originalTotal = g.items.reduce((s, it, i) => s + productInfo[i].priceOriginal * it.qty, 0);
-      const orderTwdTotal = Math.ceil(originalTotal * fxRate);
-      const twdByItem: number[] = [];
-      let allocated = 0;
-      g.items.forEach((it, i) => {
-        if (i === g.items.length - 1) {
-          twdByItem.push(orderTwdTotal - allocated); // 最後一項吸收除不盡的差額
-        } else {
-          const v = Math.ceil(productInfo[i].priceOriginal * it.qty * fxRate);
-          twdByItem.push(v);
-          allocated += v;
-        }
-      });
+      // 各品項用自己的匯率換算後無條件進位；訂單總額就是各品項加總
+      const twdByItem = g.items.map((it, i) => Math.ceil(productInfo[i].priceOriginal * it.qty * rateByItem[i]));
+      const orderTwdTotal = twdByItem.reduce((s, v) => s + v, 0);
 
       const itemRows = g.items.map((it, idx) => ({
         order_id: order.id, product_name: it.name, style: it.style, qty: it.qty,
@@ -475,7 +472,7 @@ export async function importLegacyOrdersManual(rows: Record<string, any>[], comm
         subtotal: twdByItem[idx],
         series_id: planByItemIndex[idx]?.id || null, series_name_snapshot: it.planName,
         unit_price_original: productInfo[idx].priceOriginal,
-        fx_rate: fxRate,
+        fx_rate: rateByItem[idx],
         has_discount_flag_snapshot: productInfo[idx].hasDiscountFlag,
         image_url: imageByItemIndex[idx] || null,
       }));
