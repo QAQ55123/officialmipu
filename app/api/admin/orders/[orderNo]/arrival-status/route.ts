@@ -104,7 +104,7 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
   // 2.8節：滿贈品項比照一般商品，同樣要顯示到貨狀態、同樣可被勾進出貨批次（運費固定0）
   const { data: giftSelections } = await supabase
     .from("order_gift_selections")
-    .select("id, style_name_snapshot, qty")
+    .select("id, gift_style_id, style_name_snapshot, qty")
     .eq("order_id", order.id);
 
   const giftIds = (giftSelections || []).map((g: any) => g.id);
@@ -119,15 +119,60 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
     batchedQtyByGift.set(s.order_gift_selection_id, (batchedQtyByGift.get(s.order_gift_selection_id) || 0) + s.qty);
   });
 
+  // 滿贈也要先到貨才能出貨（原本沒判斷，沒到貨的贈品也能直接勾進出貨批次）。
+  // 採購單的滿贈只記款式、對不到是給哪位顧客的，所以先算出這個檔期每個款式到貨幾個，
+  // 再扣掉「其他訂單已經拿走的」，剩下的才是這張訂單可以出的量。
+  const giftStyleIds = Array.from(new Set((giftSelections || []).map((g: any) => g.gift_style_id).filter(Boolean)));
+  const arrivedByGiftStyle = new Map<string, number>();
+  const takenByGiftStyle = new Map<string, number>();
+  if (giftStyleIds.length > 0 && order.campaign_id) {
+    const { data: campBatches } = await supabase
+      .from("vendor_purchase_batches")
+      .select("id")
+      .eq("campaign_id", order.campaign_id);
+    const campBatchIds = (campBatches || []).map((b: any) => b.id);
+    const { data: batchGifts } = campBatchIds.length
+      ? await supabase.from("vendor_purchase_batch_gifts").select("id, gift_style_id").in("batch_id", campBatchIds)
+      : { data: [] };
+    const styleByBatchGift = new Map<string, string>((batchGifts || []).map((bg: any) => [bg.id, bg.gift_style_id]));
+    const { data: arrivedRows } = (batchGifts || []).length
+      ? await supabase.from("vendor_shipment_items").select("batch_gift_id, qty, arrived").eq("arrived", true)
+      : { data: [] };
+    (arrivedRows || []).forEach((r: any) => {
+      const sid = r.batch_gift_id ? styleByBatchGift.get(r.batch_gift_id) : null;
+      if (sid) arrivedByGiftStyle.set(sid, (arrivedByGiftStyle.get(sid) || 0) + r.qty);
+    });
+
+    // 其他訂單已經勾進出貨批次的滿贈，要從可用數扣掉
+    const { data: campOrders } = await supabase.from("orders").select("id").eq("campaign_id", order.campaign_id);
+    const campOrderIds = (campOrders || []).map((o: any) => o.id);
+    const { data: allGiftSels } = campOrderIds.length
+      ? await supabase.from("order_gift_selections").select("id, gift_style_id, order_id").in("order_id", campOrderIds)
+      : { data: [] };
+    const styleBySelId = new Map<string, string>((allGiftSels || []).map((s: any) => [s.id, s.gift_style_id]));
+    const otherSelIds = (allGiftSels || []).filter((s: any) => s.order_id !== order.id).map((s: any) => s.id);
+    const { data: otherShipped } = otherSelIds.length
+      ? await supabase.from("shipping_batch_items").select("order_gift_selection_id, qty").in("order_gift_selection_id", otherSelIds)
+      : { data: [] };
+    (otherShipped || []).forEach((s: any) => {
+      const sid = s.order_gift_selection_id ? styleBySelId.get(s.order_gift_selection_id) : null;
+      if (sid) takenByGiftStyle.set(sid, (takenByGiftStyle.get(sid) || 0) + s.qty);
+    });
+  }
+
   const gifts = (giftSelections || []).map((g: any) => {
     const batchedQty = batchedQtyByGift.get(g.id) || 0;
+    const arrived = g.gift_style_id ? arrivedByGiftStyle.get(g.gift_style_id) || 0 : 0;
+    const takenByOthers = g.gift_style_id ? takenByGiftStyle.get(g.gift_style_id) || 0 : 0;
+    const availableForThisOrder = Math.max(0, arrived - takenByOthers);
+    const arrivedQty = Math.min(g.qty, availableForThisOrder);
     return {
       giftSelectionId: g.id,
       styleName: g.style_name_snapshot,
       qty: g.qty,
+      arrivedQty,
       batchedQty,
-      // 滿贈的到貨追蹤走的是採購單那條線，這裡先讓店家能把已經拿到的贈品勾進出貨批次
-      batchableQty: Math.max(0, g.qty - batchedQty),
+      batchableQty: Math.max(0, arrivedQty - batchedQty),
     };
   });
 

@@ -818,9 +818,11 @@ export default function AdminPage() {
     try {
       const r = await fetch(`/api/admin/products?seriesId=${seriesId}`, { cache: "no-store" });
       const d = await r.json();
+      // 一次把 seriesId／search／products 寫齊。之前這裡跟點選處兩個地方搶著寫，
+      // API 回來的快慢會決定誰蓋掉誰，products 有機會被清成空陣列（款式就選不了）
       setEditRowSeries((prev) => ({
         ...prev,
-        [rowIndex]: { ...(prev[rowIndex] || { search: "" }), seriesId, products: d.products || [] },
+        [rowIndex]: { seriesId, search: "", products: d.products || [] },
       }));
     } catch {}
   }
@@ -1706,8 +1708,9 @@ export default function AdminPage() {
     setEditItemRows((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== idx)));
   }
   function addEditItemRow() {
-    const first = orderPlanProducts[0];
-    setEditItemRows((rows) => [...rows, { name: first?.name || "", style: first?.style || "", qty: "1", seriesId: first?.seriesId || "" }]);
+    // 新增列不預填商品：預填的話那一列還沒選系列，商品／款式下拉會是空的，看起來像壞掉。
+    // 讓店家先搜尋系列，選了之後商品跟款式才會出現。
+    setEditItemRows((rows) => [...rows, { name: "", style: "", qty: "1", seriesId: "" }]);
   }
 
   async function saveOrderItems() {
@@ -3732,8 +3735,8 @@ export default function AdminPage() {
                                 <div
                                   key={s.id}
                                   onClick={() => {
+                                    // 商品清單由 loadProductsForEditRow 統一寫入，這裡不要再寫一次
                                     loadProductsForEditRow(i, s.id);
-                                    setEditRowSeries((prev) => ({ ...prev, [i]: { ...(prev[i] || { products: [] }), seriesId: s.id, search: "" } }));
                                     // 這一列改掛到新系列，商品名稱／款式要清空重選
                                     setEditItemRows((rows) => rows.map((r, ri) => (ri === i ? { ...r, seriesId: s.id, name: "", style: "" } : r)));
                                   }}
