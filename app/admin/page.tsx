@@ -820,10 +820,19 @@ export default function AdminPage() {
       const d = await r.json();
       // 一次把 seriesId／search／products 寫齊。之前這裡跟點選處兩個地方搶著寫，
       // API 回來的快慢會決定誰蓋掉誰，products 有機會被清成空陣列（款式就選不了）
+      const products: ProductAdmin[] = d.products || [];
       setEditRowSeries((prev) => ({
         ...prev,
-        [rowIndex]: { seriesId, search: "", products: d.products || [] },
+        [rowIndex]: { seriesId, search: "", products },
       }));
+      // 自動帶入第一個商品與它的第一個款式。
+      // 不帶的話 row.name 是空字串，但下拉沒有空選項、瀏覽器會自動顯示第一個，
+      // 看起來像選好了、實際上 row.name 還是空的，款式就永遠篩不出來。
+      const firstName = products[0]?.name || "";
+      const firstStyle = products.find((p) => p.name === firstName)?.style || "";
+      setEditItemRows((rows) =>
+        rows.map((r, ri) => (ri === rowIndex ? { ...r, seriesId, name: firstName, style: firstStyle } : r))
+      );
     } catch {}
   }
 
@@ -3735,10 +3744,8 @@ export default function AdminPage() {
                                 <div
                                   key={s.id}
                                   onClick={() => {
-                                    // 商品清單由 loadProductsForEditRow 統一寫入，這裡不要再寫一次
+                                    // 商品清單與預設選項都由 loadProductsForEditRow 統一處理
                                     loadProductsForEditRow(i, s.id);
-                                    // 這一列改掛到新系列，商品名稱／款式要清空重選
-                                    setEditItemRows((rows) => rows.map((r, ri) => (ri === i ? { ...r, seriesId: s.id, name: "", style: "" } : r)));
                                   }}
                                   style={{ padding: "7px 10px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #F3F1EA" }}
                                 >
@@ -3757,7 +3764,9 @@ export default function AdminPage() {
                               }}
                               style={{ flex: 2, minWidth: 0 }}
                             >
-                              {uniqueNames.length === 0 && <option value={row.name}>{row.name}（請先搜尋並選擇系列）</option>}
+                              {/* 一定要有 value="" 的選項：沒有的話瀏覽器會自動顯示第一個選項，
+                                  但 row.name 其實還是空字串，款式就永遠篩不出來 */}
+                              <option value="">{uniqueNames.length === 0 ? "（請先搜尋並選擇系列）" : "（請選擇商品）"}</option>
                               {!uniqueNames.includes(row.name) && row.name && <option value={row.name}>{row.name}</option>}
                               {uniqueNames.map((n) => <option key={n} value={n}>{n}</option>)}
                             </select>
@@ -3766,7 +3775,7 @@ export default function AdminPage() {
                               onChange={(e) => updateEditItemRow(i, "style", e.target.value)}
                               style={{ flex: 1, minWidth: 0 }}
                             >
-                              {stylesForName.length === 0 && <option value={row.style}>{row.style || "（無款式）"}</option>}
+                              <option value="">{!row.name ? "（請先選商品）" : stylesForName.length === 0 ? "（無款式）" : "（請選擇款式）"}</option>
                               {stylesForName.map((p) => <option key={p.id} value={p.style || ""}>{p.style || "（無款式）"}</option>)}
                             </select>
                             <input
