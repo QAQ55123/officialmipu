@@ -217,13 +217,18 @@ export default function PurchaseBatchesPage() {
     setMsg("");
     try {
       // 先整筆刪除，讓這個訂單品項的數量重新變成「可分配」，再分別建回原採購單(剩餘)跟目標採購單(搬走的部分)
-      await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${sourceBatchId}/items`, "DELETE", { batchItemId });
       const remain = totalQty - moveQty;
+      const adjusted: string[] = [];
+      // 還有剩餘要建回去時，刪除當下先不夾限滿贈（不然會用「全部搬走」的金額去夾，多砍）
+      const d1 = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${sourceBatchId}/items`, "DELETE", { batchItemId, skipGiftClamp: remain > 0 });
+      if (d1?.adjustedGifts) adjusted.push(...d1.adjustedGifts);
       if (remain > 0) {
-        await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${sourceBatchId}/items`, "POST", { orderItemId, qty: remain });
+        const d2 = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${sourceBatchId}/items`, "POST", { orderItemId, qty: remain });
+        if (d2?.adjustedGifts) adjusted.push(...d2.adjustedGifts);
       }
       await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${targetBatchId}/items`, "POST", { orderItemId, qty: moveQty });
       setSplitOpenForItem(null);
+      if (adjusted.length > 0) setMsg(`採購單金額變少，已自動調整滿贈配置：${adjusted.join("；")}`);
       loadPurchaseBatchesData();
     } catch (e: any) {
       setMsg(e.message || "搬移失敗");
@@ -235,8 +240,9 @@ export default function PurchaseBatchesPage() {
     if (draggedItem.sourceBatchId === targetBatchId) { setDraggedItem(null); return; }
     setMsg("");
     try {
-      await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${draggedItem.sourceBatchId}/items`, "DELETE", { batchItemId: draggedItem.batchItemId });
+      const d = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${draggedItem.sourceBatchId}/items`, "DELETE", { batchItemId: draggedItem.batchItemId });
       await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${targetBatchId}/items`, "POST", { orderItemId: draggedItem.orderItemId, qty: draggedItem.qty });
+      if (d?.adjustedGifts) setMsg(`原採購單金額變少，已自動調整滿贈配置：${d.adjustedGifts.join("；")}`);
       loadPurchaseBatchesData();
     } catch (e: any) {
       setMsg(e.message || "搬動失敗");
@@ -270,7 +276,8 @@ export default function PurchaseBatchesPage() {
   }
 
   async function removeBatchItem(batchId: string, batchItemId: string) {
-    await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}/items`, "DELETE", { batchItemId });
+    const d = await callJson(`/api/admin/campaigns/${campaignId}/purchase-batches/${batchId}/items`, "DELETE", { batchItemId });
+    if (d?.adjustedGifts) setMsg(`採購單金額變少，已自動調整滿贈配置：${d.adjustedGifts.join("；")}`);
     loadPurchaseBatchesData();
   }
 
@@ -407,6 +414,66 @@ export default function PurchaseBatchesPage() {
   async function deleteExtraPurchase(id: string) {
     await callJson(`/api/admin/campaigns/${campaignId}/extra-purchases/${id}`, "DELETE", {});
     loadPurchaseBatchesData();
+  }
+
+  // ---- 額外採購的到貨追蹤（訂單編號 → 物流單號 → 到貨勾選，可以分批到貨）----
+  const [expandedExtraId, setExpandedExtraId] = useState<string | null>(null);
+  const [extraNewOrderNumber, setExtraNewOrderNumber] = useState<Record<string, string>>({});
+  const [extraNewShipment, setExtraNewShipment] = useState<Record<string, { tracking: string; qty: string; weight: string }>>({});
+  const [extraTrackMsg, setExtraTrackMsg] = useState<Record<string, string>>({});
+
+  /** 只重抓額外採購清單，不重抓整頁（勾到貨時才不會卡） */
+  async function reloadExtraPurchases() {
+    try {
+      const d = await fetchJson(`/api/admin/campaigns/${campaignId}/extra-purchases`);
+      setExtraPurchases(d.extraPurchases || []);
+    } catch {}
+  }
+
+  async function extraTracking(purchaseId: string, method: string, body: any) {
+    setExtraTrackMsg((prev) => ({ ...prev, [purchaseId]: "" }));
+    try {
+      await callJson(`/api/admin/campaigns/${campaignId}/extra-purchases/${purchaseId}/tracking`, method, body);
+      await reloadExtraPurchases();
+      return true;
+    } catch (e: any) {
+      setExtraTrackMsg((prev) => ({ ...prev, [purchaseId]: e.message || "操作失敗" }));
+      await reloadExtraPurchases();
+      return false;
+    }
+  }
+
+  async function addExtraOrderNumber(purchaseId: string) {
+    const orderNumber = (extraNewOrderNumber[purchaseId] || "").trim();
+    if (!orderNumber) return setExtraTrackMsg((prev) => ({ ...prev, [purchaseId]: "請輸入廠商訂單編號" }));
+    if (await extraTracking(purchaseId, "POST", { action: "addOrderNumber", orderNumber })) {
+      setExtraNewOrderNumber((prev) => ({ ...prev, [purchaseId]: "" }));
+    }
+  }
+
+  async function addExtraShipment(purchaseId: string, orderNumberId: string) {
+    const s = extraNewShipment[orderNumberId] || { tracking: "", qty: "", weight: "" };
+    if (await extraTracking(purchaseId, "POST", { action: "addShipment", orderNumberId, trackingNumber: s.tracking, qty: s.qty, weightKg: s.weight })) {
+      setExtraNewShipment((prev) => ({ ...prev, [orderNumberId]: { tracking: "", qty: "", weight: "" } }));
+    }
+  }
+
+  /** 勾到貨：畫面先更新，不等後端（跟一般採購單的到貨勾選一樣） */
+  function toggleExtraArrived(purchaseId: string, shipmentId: string, arrived: boolean) {
+    setExtraPurchases((prev) =>
+      prev.map((p: any) =>
+        p.id !== purchaseId
+          ? p
+          : {
+              ...p,
+              orderNumbers: p.orderNumbers.map((o: any) => ({
+                ...o,
+                shipments: o.shipments.map((s: any) => (s.id === shipmentId ? { ...s, arrived } : s)),
+              })),
+            }
+      )
+    );
+    extraTracking(purchaseId, "PATCH", { shipmentId, arrived });
   }
 
   // ---- 到貨追蹤 ----
@@ -816,9 +883,19 @@ export default function PurchaseBatchesPage() {
                       const unlockedStyles = campaignGiftStyles
                         .map((s) => ({ ...s, max: effectiveMax(s.id, s.threshold_amount) }))
                         .filter((s) => s.max > 0);
+                      // 整張採購單的滿贈總量上限（後端算好的：min(金額÷基礎單位, 平台上限)）。
+                      // 原本「＋」只看單一款式上限，總量滿了還能繼續加
+                      const giftTotal = b.gifts.reduce((s: number, g: any) => s + g.qty, 0);
+                      const giftTotalCap = Number(b.giftTotalCap) || 0;
+                      const totalFull = giftTotal >= giftTotalCap;
 
                       return (
                         <>
+                          {b.platform && (
+                            <div style={{ fontSize: 12, color: totalFull ? "#3D6B1F" : "#8A8779", marginBottom: 4 }}>
+                              滿贈總量 {giftTotal} / {giftTotalCap}
+                            </div>
+                          )}
                           {b.gifts.map((g: any) => {
                             const max = effectiveMax(g.giftStyleId, g.thresholdAmount);
                             return (
@@ -827,13 +904,13 @@ export default function PurchaseBatchesPage() {
                                 <div className="stepper">
                                   <button className="step-btn" disabled={g.qty <= 0} onClick={() => setBatchGiftQty(b.id, g.giftStyleId, g.qty - 1)}>－</button>
                                   <input className="qty" value={g.qty} readOnly />
-                                  <button className="step-btn" disabled={g.qty >= max} onClick={() => setBatchGiftQty(b.id, g.giftStyleId, g.qty + 1)}>＋</button>
+                                  <button className="step-btn" disabled={g.qty >= max || totalFull} onClick={() => setBatchGiftQty(b.id, g.giftStyleId, g.qty + 1)}>＋</button>
                                 </div>
                               </div>
                             );
                           })}
                           {!b.platform && <div style={{ fontSize: 12, color: "#993C1D" }}>還沒指定平台，無法配置滿贈</div>}
-                          {b.platform && unlockedStyles.filter((s) => !b.gifts.find((g: any) => g.giftStyleId === s.id)).length > 0 && (
+                          {b.platform && !totalFull && unlockedStyles.filter((s) => !b.gifts.find((g: any) => g.giftStyleId === s.id)).length > 0 && (
                             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                               <select
                                 style={{ padding: 6 }}
@@ -907,16 +984,99 @@ export default function PurchaseBatchesPage() {
 
               <div style={{ marginTop: 16, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
                 {extraPurchases.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有任何額外採購紀錄</div>}
-                {extraPurchases.map((p) => (
-                  <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
-                    <span style={{ fontSize: 14 }}>
-                      {p.orderNumber ? `[${p.orderNumber}] ` : ""}{p.styleName} x{p.qty}
-                      {p.subtotal != null ? `　成本 ￥${p.subtotal}` : ""}
-                      {p.note ? `（${p.note}）` : ""}
-                    </span>
-                    <button className="btn small danger" onClick={() => deleteExtraPurchase(p.id)}>刪除</button>
-                  </div>
-                ))}
+                {extraPurchases.map((p) => {
+                  const expanded = expandedExtraId === p.id;
+                  const allArrived = p.qty > 0 && p.arrivedQty >= p.qty;
+                  return (
+                    <div key={p.id} style={{ padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 14 }}>
+                          {p.orderNumber ? `[${p.orderNumber}] ` : ""}{p.styleName} x{p.qty}
+                          {p.subtotal != null ? `　成本 ￥${p.subtotal}` : ""}
+                          {p.note ? `（${p.note}）` : ""}
+                        </span>
+                        <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <button
+                            className="btn small"
+                            style={allArrived ? { background: "#639922" } : p.arrivedQty > 0 ? { background: "#D9A441" } : undefined}
+                            onClick={() => setExpandedExtraId(expanded ? null : p.id)}
+                          >
+                            {p.trackedQty > 0 ? `到貨 ${p.arrivedQty}/${p.qty}` : "到貨追蹤"}
+                          </button>
+                          <button className="btn small danger" onClick={() => deleteExtraPurchase(p.id)}>刪除</button>
+                        </span>
+                      </div>
+
+                      {expanded && (
+                        <div style={{ marginTop: 10, padding: 12, background: "#F7F5EF", borderRadius: 8 }}>
+                          <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 8 }}>
+                            共 {p.qty} 個，已開物流單 {p.trackedQty} 個、其中已到貨 {p.arrivedQty} 個。可以分好幾張物流單分批到貨。
+                          </div>
+
+                          {p.orderNumbers.map((o: any) => {
+                            const ns = extraNewShipment[o.id] || { tracking: "", qty: "", weight: "" };
+                            return (
+                              <div key={o.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 10, marginBottom: 10, background: "var(--card)" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600 }}>廠商訂單編號：{o.orderNumber}</span>
+                                  <button className="btn small danger" onClick={() => { if (confirm("確定要刪除這個訂單編號嗎？底下的物流單號也會一起刪除。")) extraTracking(p.id, "DELETE", { orderNumberId: o.id }); }}>刪除</button>
+                                </div>
+
+                                {o.shipments.map((s: any) => (
+                                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0 4px 10px", flexWrap: "wrap", fontSize: 13 }}>
+                                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                      <input type="checkbox" checked={s.arrived} onChange={(e) => toggleExtraArrived(p.id, s.id, e.target.checked)} style={{ width: 16, height: 16 }} />
+                                      <span>{s.arrived ? "已到貨" : "未到貨"}</span>
+                                    </label>
+                                    <span>物流單號：{s.trackingNumber || "（未填）"}</span>
+                                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                      數量
+                                      <input
+                                        type="number"
+                                        className="admin-input"
+                                        defaultValue={s.qty}
+                                        onBlur={(e) => { if (Number(e.target.value) !== s.qty) extraTracking(p.id, "PATCH", { shipmentId: s.id, qty: e.target.value }); }}
+                                        style={{ width: 70 }}
+                                      />
+                                    </span>
+                                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                      重量
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        className="admin-input"
+                                        defaultValue={s.weightKg ?? ""}
+                                        onBlur={(e) => extraTracking(p.id, "PATCH", { shipmentId: s.id, weightKg: e.target.value })}
+                                        placeholder="KG"
+                                        style={{ width: 80 }}
+                                      />
+                                      KG
+                                    </span>
+                                    <button className="btn small danger" onClick={() => extraTracking(p.id, "DELETE", { shipmentId: s.id })}>刪除</button>
+                                  </div>
+                                ))}
+
+                                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
+                                  <input type="text" className="admin-input" placeholder="物流單號（選填）" value={ns.tracking} onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, tracking: e.target.value } }))} style={{ minWidth: 160 }} />
+                                  <input type="number" className="admin-input" placeholder="數量" value={ns.qty} onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, qty: e.target.value } }))} style={{ width: 80 }} />
+                                  <input type="number" step="0.01" className="admin-input" placeholder="重量KG" value={ns.weight} onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, weight: e.target.value } }))} style={{ width: 90 }} />
+                                  <button className="btn small secondary" onClick={() => addExtraShipment(p.id, o.id)}>新增物流單號</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <input type="text" className="admin-input" placeholder="廠商訂單編號" value={extraNewOrderNumber[p.id] || ""} onChange={(e) => setExtraNewOrderNumber((prev) => ({ ...prev, [p.id]: e.target.value }))} style={{ minWidth: 200 }} />
+                            <button className="btn small secondary" onClick={() => addExtraOrderNumber(p.id)}>新增廠商訂單編號</button>
+                          </div>
+
+                          {extraTrackMsg[p.id] && <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>{extraTrackMsg[p.id]}</div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { extraArrivedByGiftStyle } from "@/lib/extraPurchaseArrival";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   (batches || []).forEach((b: any) => batchCountByOrder.set(b.order_id, (batchCountByOrder.get(b.order_id) || 0) + 1));
 
   // 每個滿贈款式還有多少到貨數可以分給顧客（依訂單順序先到先給）
+  // 額外採購（跟其他管道補買的滿贈）到貨的數量也要算進去
+  const extraArrived = await extraArrivedByGiftStyle(supabase, params.id);
+  extraArrived.forEach((qty, styleId) => arrivedByGiftStyle.set(styleId, (arrivedByGiftStyle.get(styleId) || 0) + qty));
   const giftStyleRemaining = new Map<string, number>(arrivedByGiftStyle);
 
   const customers = orders

@@ -22,6 +22,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const batchIds = (batches || []).map((b) => b.id);
 
+  // 滿贈總量上限要用基礎單位換算（跟手動配置 API、自動分配同一套規則），前端「＋」按鈕靠這個鎖
+  const { data: campaignRow } = await supabase.from("campaigns").select("gift_base_unit").eq("id", params.id).maybeSingle();
+  const giftBaseUnit = Number(campaignRow?.gift_base_unit) || 100;
+
   const { data: items } = batchIds.length
     ? await supabase.from("vendor_purchase_batch_items").select("*, order_items(product_name, style, unit_price, unit_price_original, has_discount_flag_snapshot, series_name_snapshot, order_id, orders(username))").in("batch_id", batchIds)
     : { data: [] };
@@ -93,6 +97,16 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         qty: g.qty,
       })),
       subtotalOriginal,
+      // 滿贈總量上限＝min(floor(原幣小計÷基礎單位), 平台單筆上限)；沒指定平台＝不能配
+      giftTotalCap: b.vendor_platforms
+        ? Math.max(
+            0,
+            Math.min(
+              Math.floor(subtotalOriginal / giftBaseUnit),
+              Number(b.vendor_platforms.order_gift_cap) > 0 ? Number(b.vendor_platforms.order_gift_cap) : Infinity
+            )
+          )
+        : 0,
       discountableOriginal,
       matchedDiscountAmount: matchedTier ? Number(matchedTier.discount_amount) : 0,
       matchedThresholdAmount: matchedTier ? Number(matchedTier.threshold_amount) : null,

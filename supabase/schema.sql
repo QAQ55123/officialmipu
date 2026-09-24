@@ -433,6 +433,35 @@ alter table vendor_extra_purchases add column if not exists order_number text;
 alter table vendor_extra_purchases add column if not exists subtotal numeric;
 create index if not exists idx_vendor_extra_purchases_campaign on vendor_extra_purchases (campaign_id);
 
+-- 額外採購的到貨追蹤：比照一般採購單的三層結構
+--   額外採購 → 廠商訂單編號（可以多個）→ 物流單號（可以多個，各自記數量、重量、有沒有到貨）
+-- 分批到貨時，同一筆額外採購可以開好幾張物流單，各自勾到貨。
+create table if not exists extra_purchase_order_numbers (
+  id                 uuid primary key default gen_random_uuid(),
+  extra_purchase_id  uuid not null references vendor_extra_purchases(id) on delete cascade,
+  order_number       text not null,
+  created_at         timestamptz default now()
+);
+create index if not exists idx_extra_po_numbers_purchase on extra_purchase_order_numbers (extra_purchase_id);
+
+create table if not exists extra_purchase_shipments (
+  id               uuid primary key default gen_random_uuid(),
+  order_number_id  uuid not null references extra_purchase_order_numbers(id) on delete cascade,
+  tracking_number  text,
+  qty              int not null default 0,
+  weight_kg        numeric,
+  arrived          boolean not null default false,
+  created_at       timestamptz default now()
+);
+create index if not exists idx_extra_shipments_order_number on extra_purchase_shipments (order_number_id);
+
+-- 舊資料：額外採購原本只有一個「訂單編號」文字欄，搬進新的訂單編號表（只搬一次，重跑不會重複）
+insert into extra_purchase_order_numbers (extra_purchase_id, order_number)
+select p.id, p.order_number
+from vendor_extra_purchases p
+where p.order_number is not null and p.order_number <> ''
+  and not exists (select 1 from extra_purchase_order_numbers o where o.extra_purchase_id = p.id);
+
 alter table vendor_purchase_batches disable row level security;
 alter table vendor_purchase_batch_items disable row level security;
 alter table vendor_purchase_batch_gifts disable row level security;

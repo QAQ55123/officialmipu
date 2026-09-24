@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { clampBatchGifts } from "@/lib/batchGiftCaps";
 
 /** POST body: { orderItemId, qty } — 把某個訂單品項的一部分數量分配進這張採購單 */
 export async function POST(req: Request, { params }: { params: { id: string; batchId: string } }) {
@@ -28,7 +29,9 @@ export async function POST(req: Request, { params }: { params: { id: string; bat
 
   const { error } = await supabase.from("vendor_purchase_batch_items").insert({ batch_id: params.batchId, order_item_id: orderItemId, qty });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  // 金額變了，滿贈上限也跟著變，重新夾一次（加品項通常不會超過，但保持規則一致）
+  const adjustedGifts = await clampBatchGifts(supabase, params.id, params.batchId);
+  return NextResponse.json({ ok: true, adjustedGifts: adjustedGifts.length > 0 ? adjustedGifts : undefined });
 }
 
 /** DELETE body: { batchItemId } — 把已分配的品項移出這張採購單，回到未分配池 */
@@ -45,5 +48,8 @@ export async function DELETE(req: Request, { params }: { params: { id: string; b
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("vendor_purchase_batch_items").delete().eq("id", batchItemId).eq("batch_id", params.batchId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  // 品項移出後採購單金額變少，原本配的滿贈可能已經超過上限，要夾回去。
+  // 「部分搬移」是先整筆刪掉再把剩餘的建回來，這時要跳過，等建回剩餘那一步再夾，不然會多砍
+  const adjustedGifts = body.skipGiftClamp ? [] : await clampBatchGifts(supabase, params.id, params.batchId);
+  return NextResponse.json({ ok: true, adjustedGifts: adjustedGifts.length > 0 ? adjustedGifts : undefined });
 }

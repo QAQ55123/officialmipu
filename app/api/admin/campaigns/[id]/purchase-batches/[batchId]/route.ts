@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { clampBatchGifts } from "@/lib/batchGiftCaps";
 
 /**
  * PATCH：換平台（換了之後總上限/每款上限/對應折扣都以新平台重新計算，前端重新拉一次資料即可反映）
@@ -30,53 +31,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string; ba
   const { error } = await supabase.from("vendor_purchase_batches").update(updates).eq("id", params.batchId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const adjustedGifts: string[] = [];
-  if ("platformId" in body) {
-    const newPlatformId = body.platformId || null;
-
-    const { data: existingGifts } = await supabase
-      .from("vendor_purchase_batch_gifts")
-      .select("id, gift_style_id, qty, gift_styles(style_name, threshold_amount)")
-      .eq("batch_id", params.batchId);
-
-    if (existingGifts && existingGifts.length > 0) {
-      const { data: batchItems } = await supabase
-        .from("vendor_purchase_batch_items")
-        .select("qty, order_items(unit_price_original)")
-        .eq("batch_id", params.batchId);
-      const subtotalOriginal = (batchItems || []).reduce((s: number, it: any) => s + (Number(it.order_items?.unit_price_original) || 0) * it.qty, 0);
-
-      if (!newPlatformId) {
-        // 沒有平台了，滿贈規則完全無從比對，全部清空
-        await supabase.from("vendor_purchase_batch_gifts").delete().eq("batch_id", params.batchId);
-        existingGifts.forEach((g: any) => adjustedGifts.push(`${g.gift_styles?.style_name}：因為取消指定平台，配置已清空`));
-      } else {
-        const { data: platform } = await supabase.from("vendor_platforms").select("order_gift_cap").eq("id", newPlatformId).maybeSingle();
-        let runningTotal = 0;
-        for (const g of existingGifts as any[]) {
-          const threshold = Number(g.gift_styles?.threshold_amount) || 0;
-          const amountBasedMax = threshold > 0 ? Math.floor(subtotalOriginal / threshold) : 0;
-          const { data: styleCap } = await supabase
-            .from("vendor_platform_style_caps")
-            .select("per_style_cap")
-            .eq("platform_id", newPlatformId)
-            .eq("gift_style_id", g.gift_style_id)
-            .maybeSingle();
-          let newMax = styleCap ? Math.min(amountBasedMax, styleCap.per_style_cap) : amountBasedMax;
-          if (platform) newMax = Math.min(newMax, Math.max(0, platform.order_gift_cap - runningTotal));
-          if (newMax < g.qty) {
-            if (newMax <= 0) {
-              await supabase.from("vendor_purchase_batch_gifts").delete().eq("id", g.id);
-            } else {
-              await supabase.from("vendor_purchase_batch_gifts").update({ qty: newMax }).eq("id", g.id);
-            }
-            adjustedGifts.push(`${g.gift_styles?.style_name}：${g.qty} → ${newMax}`);
-          }
-          runningTotal += Math.min(newMax, g.qty);
-        }
-      }
-    }
-  }
+  // 換平台之後，用共用規則把既有滿贈夾回新平台的上限內
+  // （總量上限＝min(金額換算數量, 平台上限)，原本這裡只看平台上限）
+  const adjustedGifts: string[] = "platformId" in body ? await clampBatchGifts(supabase, params.id, params.batchId) : [];
 
   return NextResponse.json({ ok: true, adjustedGifts: adjustedGifts.length > 0 ? adjustedGifts : undefined });
 }

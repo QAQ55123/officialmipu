@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { extraShipmentWeightKg } from "@/lib/extraPurchaseArrival";
 import {
 
   requireCostSheetId,
@@ -138,7 +139,10 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   const { data: shipments } = orderNumberIds.length
     ? await supabase.from("vendor_shipments").select("weight_kg").in("vendor_order_number_id", orderNumberIds)
     : { data: [] };
-  const totalWeightKg = (shipments || []).reduce((s: number, sh: any) => s + (Number(sh.weight_kg) || 0), 0);
+  // 額外採購的物流單重量也要算進這期的運費成本
+  const totalWeightKg =
+    (shipments || []).reduce((s: number, sh: any) => s + (Number(sh.weight_kg) || 0), 0) +
+    (await extraShipmentWeightKg(supabase, campaignId));
 
   // ── 讀回舊表：保留店家手填的儲存格（匯率、每公斤運費、其他成本）──
   const costId = requireCostSheetId();

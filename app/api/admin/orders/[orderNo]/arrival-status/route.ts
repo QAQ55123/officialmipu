@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { extraArrivedByGiftStyle } from "@/lib/extraPurchaseArrival";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -158,6 +159,12 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
       const sid = s.order_gift_selection_id ? styleBySelId.get(s.order_gift_selection_id) : null;
       if (sid) takenByGiftStyle.set(sid, (takenByGiftStyle.get(sid) || 0) + s.qty);
     });
+  }
+
+  // 額外採購（跟其他管道補買的滿贈）到貨的數量也要算進去
+  if (order.campaign_id) {
+    const extraArrived = await extraArrivedByGiftStyle(supabase, order.campaign_id);
+    extraArrived.forEach((qty, styleId) => arrivedByGiftStyle.set(styleId, (arrivedByGiftStyle.get(styleId) || 0) + qty));
   }
 
   const gifts = (giftSelections || []).map((g: any) => {
