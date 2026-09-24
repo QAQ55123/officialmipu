@@ -24,6 +24,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     backorders: (data || []).map((b) => ({
       id: b.id,
       username: b.username,
+      seriesName: b.series_name_snapshot || null,
       productName: b.product_name,
       style: b.style,
       qty: b.qty,

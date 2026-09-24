@@ -575,6 +575,8 @@ create table if not exists backorders (
   fulfilled     boolean not null default false,
   created_at    timestamptz default now()
 );
+-- 欠貨清單也要能看出是哪個系列的商品（跨系列訂單很常見，只有商品名稱分不出來）
+alter table backorders add column if not exists series_name_snapshot text;
 create index if not exists idx_backorders_campaign on backorders (campaign_id);
 create index if not exists idx_backorders_lookup on backorders (campaign_id, product_name, style, fulfilled, created_at);
 

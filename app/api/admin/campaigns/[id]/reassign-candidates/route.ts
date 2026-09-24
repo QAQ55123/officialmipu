@@ -20,7 +20,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
   const { data: orders } = await supabase
     .from("orders")
-    .select("id, username, order_items(id, product_name, style, qty)")
+    .select("id, username, order_items(id, product_name, style, qty, series_name_snapshot)")
     .eq("campaign_id", params.id);
 
   const orderItemIds: string[] = [];
@@ -72,6 +72,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         needing.push({
           orderItemId: it.id,
           username: o.username,
+          seriesName: it.series_name_snapshot || null,
           productName: it.product_name,
           style: it.style,
           stillNeed,

@@ -27,7 +27,7 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
   const { data: items } = batchIds.length
     ? await supabase
         .from("shipping_batch_items")
-        .select("*, order_items(product_name, style), order_gift_selections(style_name_snapshot)")
+        .select("*, order_items(product_name, style, series_name_snapshot), order_gift_selections(style_name_snapshot)")
         .in("shipping_batch_id", batchIds)
     : { data: [] };
 
@@ -45,7 +45,7 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
           isGift: !!it.order_gift_selection_id,
           label: it.order_gift_selection_id
             ? `滿贈：${it.order_gift_selections?.style_name_snapshot || "（款式已刪除）"}`
-            : `${it.order_items?.product_name}${it.order_items?.style ? `（${it.order_items.style}）` : ""}`,
+            : `${it.order_items?.series_name_snapshot ? `${it.order_items.series_name_snapshot} / ` : ""}${it.order_items?.product_name}${it.order_items?.style ? `（${it.order_items.style}）` : ""}`,
           qty: it.qty,
           shippingFee: Number(it.shipping_fee) || 0,
         })),

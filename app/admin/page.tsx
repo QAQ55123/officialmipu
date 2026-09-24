@@ -3583,7 +3583,7 @@ export default function AdminPage() {
                           {orderArrivalItems.map((ai: any) => (
                             <div key={ai.orderItemId} style={{ padding: "6px 0", borderBottom: "1px dashed #EDE9DC" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-                                <span>{ai.productName}{ai.style ? `（${ai.style}）` : ""} x{ai.qty}</span>
+                                <span>{ai.seriesName ? `${ai.seriesName} / ` : ""}{ai.productName}{ai.style ? `（${ai.style}）` : ""} x{ai.qty}</span>
                                 <span style={{ color: ai.stillNeed <= 0 ? "#639922" : "#B3261E", fontWeight: 600 }}>
                                   {ai.stillNeed <= 0 ? "已到貨" : `已到 ${ai.arrivedQty}／還缺 ${ai.stillNeed}`}
                                 </span>
@@ -3616,7 +3616,7 @@ export default function AdminPage() {
                               <>
                                 {orderArrivalItems.filter((ai: any) => ai.batchableQty > 0).map((ai: any) => (
                                   <div key={ai.orderItemId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "3px 0" }}>
-                                    <span>{ai.productName}{ai.style ? `（${ai.style}）` : ""}　可出貨 {ai.batchableQty} 件</span>
+                                    <span>{ai.seriesName ? `${ai.seriesName} / ` : ""}{ai.productName}{ai.style ? `（${ai.style}）` : ""}　可出貨 {ai.batchableQty} 件</span>
                                     <input
                                       type="number"
                                       placeholder="0"

@@ -1089,7 +1089,7 @@ export default function PurchaseBatchesPage() {
               {backorders.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有任何欠貨紀錄</div>}
               {backorders.map((b) => (
                 <div key={b.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
-                  <span style={{ fontSize: 14 }}>{b.username}：{b.productName}{b.style ? `（${b.style}）` : ""} 欠 {b.qty} 件</span>
+                  <span style={{ fontSize: 14 }}>{b.username}：{b.seriesName ? `${b.seriesName} / ` : ""}{b.productName}{b.style ? `（${b.style}）` : ""} 欠 {b.qty} 件</span>
                   <span style={{ fontSize: 12, color: "#8A8779" }}>{new Date(b.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</span>
                 </div>
               ))}
@@ -1105,7 +1105,7 @@ export default function PurchaseBatchesPage() {
               {reassignNeeding.map((n: any) => (
                 <div key={n.orderItemId} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 10 }}>
                   <div style={{ fontSize: 14, marginBottom: 6 }}>
-                    {n.username}：{n.productName}{n.style ? `（${n.style}）` : ""} 還缺 {n.stillNeed} 件
+                    {n.username}：{n.seriesName ? `${n.seriesName} / ` : ""}{n.productName}{n.style ? `（${n.style}）` : ""} 還缺 {n.stillNeed} 件
                   </div>
                   {n.candidates.map((c: any) => (
                     <div key={c.shipmentItemId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, padding: "4px 0" }}>

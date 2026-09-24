@@ -19,7 +19,7 @@ export async function GET(req: Request, { params }: { params: { id: string; batc
 
   const { data: batchItems } = await supabase
     .from("vendor_purchase_batch_items")
-    .select("*, order_items(product_name, style, orders(username))")
+    .select("*, order_items(product_name, style, series_name_snapshot, orders(username))")
     .eq("batch_id", params.batchId);
 
   const { data: batchGifts } = await supabase
@@ -42,7 +42,7 @@ export async function GET(req: Request, { params }: { params: { id: string; batc
   const { data: shipmentItems } = shipmentIds.length
     ? await supabase
         .from("vendor_shipment_items")
-        .select("*, vendor_purchase_batch_items(order_items(product_name, style, orders(username))), vendor_purchase_batch_gifts(gift_styles(style_name))")
+        .select("*, vendor_purchase_batch_items(order_items(product_name, style, series_name_snapshot, orders(username))), vendor_purchase_batch_gifts(gift_styles(style_name))")
         .in("shipment_id", shipmentIds)
     : { data: [] };
 
@@ -59,7 +59,8 @@ export async function GET(req: Request, { params }: { params: { id: string; batc
       .map((bi: any) => ({
         type: "item" as const,
         id: bi.id,
-        label: `${bi.order_items?.orders?.username || ""}：${bi.order_items?.product_name}${bi.order_items?.style ? `（${bi.order_items.style}）` : ""}`,
+        // 跨系列訂單很常見，不標系列分不出是哪個系列的商品
+        label: `${bi.order_items?.orders?.username || ""}：${bi.order_items?.series_name_snapshot ? `${bi.order_items.series_name_snapshot} / ` : ""}${bi.order_items?.product_name}${bi.order_items?.style ? `（${bi.order_items.style}）` : ""}`,
         remaining: bi.qty - (shippedQtyByBatchItem.get(bi.id) || 0),
       }))
       .filter((x) => x.remaining > 0),
@@ -87,7 +88,7 @@ export async function GET(req: Request, { params }: { params: { id: string; batc
           .map((si: any) => ({
             id: si.id,
             label: si.batch_item_id
-              ? `${si.vendor_purchase_batch_items?.order_items?.orders?.username || ""}：${si.vendor_purchase_batch_items?.order_items?.product_name}${si.vendor_purchase_batch_items?.order_items?.style ? `（${si.vendor_purchase_batch_items.order_items.style}）` : ""}`
+              ? `${si.vendor_purchase_batch_items?.order_items?.orders?.username || ""}：${si.vendor_purchase_batch_items?.order_items?.series_name_snapshot ? `${si.vendor_purchase_batch_items.order_items.series_name_snapshot} / ` : ""}${si.vendor_purchase_batch_items?.order_items?.product_name}${si.vendor_purchase_batch_items?.order_items?.style ? `（${si.vendor_purchase_batch_items.order_items.style}）` : ""}`
               : `滿贈：${si.vendor_purchase_batch_gifts?.gift_styles?.style_name}`,
             qty: si.qty,
             arrived: si.arrived,

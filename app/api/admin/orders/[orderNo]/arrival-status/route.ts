@@ -21,7 +21,7 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
 
   const { data: order } = await supabase
     .from("orders")
-    .select("id, username, campaign_id, order_items(id, product_name, style, qty)")
+    .select("id, username, campaign_id, order_items(id, product_name, style, qty, series_name_snapshot)")
     .eq("order_no", params.orderNo)
     .maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
@@ -90,6 +90,7 @@ export async function GET(req: Request, { params }: { params: { orderNo: string 
 
     return {
       orderItemId: it.id,
+      seriesName: it.series_name_snapshot || null,
       productName: it.product_name,
       style: it.style,
       qty: it.qty,

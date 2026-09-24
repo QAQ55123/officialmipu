@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: { params: { itemId: string 
 
   const { data: shipItem } = await supabase
     .from("vendor_shipment_items")
-    .select("*, vendor_purchase_batch_items(id, batch_id, order_item_id, qty, order_items(id, product_name, style, order_id, orders(id, username, campaign_id)))")
+    .select("*, vendor_purchase_batch_items(id, batch_id, order_item_id, qty, order_items(id, product_name, style, series_name_snapshot, order_id, orders(id, username, campaign_id)))")
     .eq("id", params.itemId)
     .maybeSingle();
   if (!shipItem) return NextResponse.json({ error: "找不到這筆到貨紀錄" }, { status: 404 });
@@ -87,6 +87,8 @@ export async function POST(req: Request, { params }: { params: { itemId: string 
     username: sourceUsername,
     product_name: sourceOrderItem.product_name,
     style: sourceOrderItem.style || "",
+    // 欠貨清單也要看得出是哪個系列的商品
+    series_name_snapshot: sourceOrderItem.series_name_snapshot || null,
     qty: shipItem.qty,
   });
   if (backorderErr) console.error("建立欠貨紀錄失敗：", backorderErr.message);
