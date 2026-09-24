@@ -92,3 +92,12 @@ export async function refundCodQuota(supabase: any, orderId: string): Promise<vo
     })
     .eq("id", order.campaign_id);
 }
+
+/**
+ * 金額加總用：把浮點數相加的誤差修掉，保留到小數點後2位。
+ * JavaScript 的 0.1 + 0.2 會得到 0.30000000000000004，直接存進資料庫或寫進試算表
+ * 就會看到一長串小數；而且拆單的折扣門檻是用原始值比對，299.99999 會判不到 300 的門檻。
+ */
+export function money(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}

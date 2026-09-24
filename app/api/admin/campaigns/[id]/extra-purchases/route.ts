@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { money } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,7 +77,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         orderNumbers,
         totalQty: itemRows.reduce((s: number, i: any) => s + i.qty, 0),
         arrivedQty: itemRows.reduce((s: number, i: any) => s + i.arrivedQty, 0),
-        subtotal: itemRows.reduce((s: number, i: any) => s + (i.subtotal || 0), 0),
+        subtotal: money(itemRows.reduce((s: number, i: any) => s + (i.subtotal || 0), 0)),
       };
     }),
   });
@@ -95,7 +96,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .map((it) => ({
       giftStyleId: String(it.giftStyleId || ""),
       qty: Number(it.qty),
-      subtotal: it.subtotal === "" || it.subtotal == null ? null : Number(it.subtotal),
+      subtotal: it.subtotal === "" || it.subtotal == null ? null : money(Number(it.subtotal)),
     }))
     .filter((it) => it.giftStyleId);
   if (items.length === 0) return NextResponse.json({ error: "請至少填一個滿贈款式" }, { status: 400 });
@@ -112,7 +113,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       qty: items.reduce((s, it) => s + it.qty, 0),
       note: body.note || null,
       order_number: body.orderNumber || null,
-      subtotal: items.reduce((s, it) => s + (it.subtotal || 0), 0) || null,
+      subtotal: money(items.reduce((s, it) => s + (it.subtotal || 0), 0)) || null,
     })
     .select()
     .single();

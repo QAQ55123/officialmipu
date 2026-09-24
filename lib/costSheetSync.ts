@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { money } from "@/lib/util";
 import { extraShipmentWeightKg } from "@/lib/extraPurchaseArrival";
 import {
 
@@ -116,7 +117,7 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
     );
     const tier = (discountTiers || []).find((t: any) => discountable >= Number(t.threshold_amount));
     const discount = tier ? Number(tier.discount_amount) : 0;
-    purchaseNetTotal += subtotal - discount + (Number(b.extra_adjustment) || 0);
+    purchaseNetTotal = money(purchaseNetTotal + subtotal - discount + (Number(b.extra_adjustment) || 0));
   });
 
   // ── 額外採購成本（原幣）──────────────────────────────────────
@@ -137,7 +138,7 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
     // 還沒搬移的舊資料（一筆＝一個款式）
     return [{ styleName: p.gift_styles?.style_name || "（款式已刪除）", qty: p.qty, subtotal: Number(p.subtotal) || 0 }];
   });
-  const extraPurchaseTotal = extraRows.reduce((s, r) => s + r.subtotal, 0);
+  const extraPurchaseTotal = money(extraRows.reduce((s, r) => s + r.subtotal, 0));
 
   // ── 運費成本：所有物流單號的重量加總 ──────────────────────────
   const { data: orderNumbers } = batchIds.length

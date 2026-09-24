@@ -119,7 +119,7 @@ function candidatePartitions(pieces: SplitPiece[], tiers: DiscountTier[], giftRu
       let curAmount = 0;
       for (const p of order) {
         cur.push(p);
-        curAmount += p.amount;
+        curAmount = Math.round((curAmount + p.amount) * 100) / 100;
         if (curAmount >= cut) {
           groups.push(cur);
           cur = [];
@@ -166,7 +166,7 @@ function candidatePartitions(pieces: SplitPiece[], tiers: DiscountTier[], giftRu
       if (bestIdx >= 0) {
         // 找得到就用它收尾，這組剛好卡在門檻附近
         cur.push(remaining[bestIdx]);
-        curAmount += remaining[bestIdx].amount;
+        curAmount = Math.round((curAmount + remaining[bestIdx].amount) * 100) / 100;
         remaining.splice(bestIdx, 1);
         groups.push(cur);
         cur = [];
@@ -178,7 +178,7 @@ function candidatePartitions(pieces: SplitPiece[], tiers: DiscountTier[], giftRu
           if (p.amount > remaining[maxIdx].amount) maxIdx = i;
         });
         cur.push(remaining[maxIdx]);
-        curAmount += remaining[maxIdx].amount;
+        curAmount = Math.round((curAmount + remaining[maxIdx].amount) * 100) / 100;
         remaining.splice(maxIdx, 1);
       }
     }
@@ -214,8 +214,10 @@ function buildGroups(
   vendorOrderGiftCap: number
 ): DiscountGroup[] {
   return partition.map((bucket) => {
-    const amount = bucket.reduce((s, p) => s + p.amount, 0);
-    const discountable = bucket.reduce((s, p) => s + (p.hasDiscountFlag ? p.amount : 0), 0);
+    // 浮點誤差會讓「剛好300」變成 299.99999 而判不到折扣門檻，加總後要修掉
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const amount = round2(bucket.reduce((s, p) => s + p.amount, 0));
+    const discountable = round2(bucket.reduce((s, p) => s + (p.hasDiscountFlag ? p.amount : 0), 0));
     return makeGroup(bucket.map((p) => p.id), amount, discountable, tiers, giftRules, vendorOrderGiftCap);
   });
 }

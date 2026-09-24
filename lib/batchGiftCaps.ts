@@ -22,10 +22,11 @@ export async function getBatchGiftContext(supabase: any, campaignId: string, bat
     .from("vendor_purchase_batch_items")
     .select("qty, order_items(unit_price_original)")
     .eq("batch_id", batchId);
-  const subtotalOriginal = (batchItems || []).reduce(
-    (s: number, it: any) => s + (Number(it.order_items?.unit_price_original) || 0) * it.qty,
-    0
-  );
+  // 浮點誤差會讓金額換算出的上限少一個，加總後要修掉
+  const subtotalOriginal =
+    Math.round(
+      (batchItems || []).reduce((s: number, it: any) => s + (Number(it.order_items?.unit_price_original) || 0) * it.qty, 0) * 100
+    ) / 100;
 
   const { data: campaign } = await supabase.from("campaigns").select("gift_base_unit").eq("id", campaignId).maybeSingle();
   const baseUnit = Number(campaign?.gift_base_unit) || 100;

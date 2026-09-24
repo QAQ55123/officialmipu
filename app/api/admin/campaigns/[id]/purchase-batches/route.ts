@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { money } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -63,12 +64,14 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const result = (batches || []).map((b: any) => {
     const batchItems = (items || []).filter((it: any) => it.batch_id === b.id);
     const batchGifts = (gifts || []).filter((g: any) => g.batch_id === b.id);
-    const subtotalOriginal = batchItems.reduce((s: number, it: any) => s + (Number(it.order_items?.unit_price_original) || 0) * it.qty, 0);
+    const subtotalOriginal = money(batchItems.reduce((s: number, it: any) => s + (Number(it.order_items?.unit_price_original) || 0) * it.qty, 0));
     // 折扣門檻只看「有滿減標記(v)」的商品金額——無滿減商品照樣要跟廠商買，
     // 但它的金額不算進折扣門檻，不然折扣會算多
-    const discountableOriginal = batchItems.reduce(
-      (s: number, it: any) => s + (it.order_items?.has_discount_flag_snapshot ? (Number(it.order_items?.unit_price_original) || 0) * it.qty : 0),
-      0
+    const discountableOriginal = money(
+      batchItems.reduce(
+        (s: number, it: any) => s + (it.order_items?.has_discount_flag_snapshot ? (Number(it.order_items?.unit_price_original) || 0) * it.qty : 0),
+        0
+      )
     );
 
     // 依可折金額找出符合的折扣門檻（取最高符合的門檻）
@@ -113,7 +116,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       extraAdjustment: Number(b.extra_adjustment) || 0,
       extraAdjustmentText: b.extra_adjustment_text || "",
       // 3.2節：實收 = 該單小計 − 對應門檻的廠商折扣金額 + 額外調整加總
-      netReceivable: subtotalOriginal - (matchedTier ? Number(matchedTier.discount_amount) : 0) + (Number(b.extra_adjustment) || 0),
+      netReceivable: money(subtotalOriginal - (matchedTier ? Number(matchedTier.discount_amount) : 0) + (Number(b.extra_adjustment) || 0)),
       // 有登記廠商訂單編號＝已經跟廠商下單了，「全部重新分配」時要跳過這種採購單
       vendorOrderNumbers: (orderNumbers || []).filter((o: any) => o.batch_id === b.id).map((o: any) => o.order_number),
       arrivalTotalQty: arrival.totalQty,
