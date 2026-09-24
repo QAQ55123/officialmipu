@@ -124,11 +124,12 @@ export default function PurchaseBatchesPage() {
   const [giftPickByBatch, setGiftPickByBatch] = useState<Record<string, string>>({});
   const [giftQtyByBatch, setGiftQtyByBatch] = useState<Record<string, string>>({});
   const [giftErrorByBatch, setGiftErrorByBatch] = useState<Record<string, string>>({});
-  const [extraGiftStyleId, setExtraGiftStyleId] = useState("");
-  const [extraQty, setExtraQty] = useState("");
+  // 一張額外採購單可以買好幾個款式，所以款式是多列的
+  const [extraItemRows, setExtraItemRows] = useState<{ giftStyleId: string; qty: string; subtotal: string }[]>([
+    { giftStyleId: "", qty: "", subtotal: "" },
+  ]);
   const [extraNote, setExtraNote] = useState("");
   const [extraOrderNumber, setExtraOrderNumber] = useState("");
-  const [extraSubtotal, setExtraSubtotal] = useState("");
 
   // ---- 到貨追蹤子頁面 ----
   const [activeBatchForArrival, setActiveBatchForArrival] = useState<any | null>(null);
@@ -397,14 +398,16 @@ export default function PurchaseBatchesPage() {
 
   async function addExtraPurchase() {
     setMsg("");
-    if (!extraGiftStyleId) return setMsg("請選擇滿贈款式");
-    const qty = Number(extraQty);
-    if (!isFinite(qty) || qty <= 0) return setMsg("數量格式不正確");
+    const items = extraItemRows
+      .filter((r) => r.giftStyleId)
+      .map((r) => ({ giftStyleId: r.giftStyleId, qty: Number(r.qty), subtotal: r.subtotal }));
+    if (items.length === 0) return setMsg("請至少選一個滿贈款式");
+    if (items.some((it) => !isFinite(it.qty) || it.qty <= 0)) return setMsg("每個款式都要填正確的數量");
     try {
       await callJson(`/api/admin/campaigns/${campaignId}/extra-purchases`, "POST", {
-        giftStyleId: extraGiftStyleId, qty, note: extraNote, orderNumber: extraOrderNumber, subtotal: extraSubtotal,
+        items, note: extraNote, orderNumber: extraOrderNumber,
       });
-      setExtraGiftStyleId(""); setExtraQty(""); setExtraNote(""); setExtraOrderNumber(""); setExtraSubtotal("");
+      setExtraItemRows([{ giftStyleId: "", qty: "", subtotal: "" }]); setExtraNote(""); setExtraOrderNumber("");
       loadPurchaseBatchesData();
     } catch (e: any) {
       setMsg(e.message || "新增失敗");
@@ -420,6 +423,8 @@ export default function PurchaseBatchesPage() {
   const [expandedExtraId, setExpandedExtraId] = useState<string | null>(null);
   const [extraNewOrderNumber, setExtraNewOrderNumber] = useState<Record<string, string>>({});
   const [extraNewShipment, setExtraNewShipment] = useState<Record<string, { tracking: string; qty: string; weight: string }>>({});
+  // 這張物流單要裝哪個款式、幾個（到貨勾選在這一層，所以同一張物流單的不同款式可以各自到貨）
+  const [extraNewShipmentItem, setExtraNewShipmentItem] = useState<Record<string, { itemId: string; qty: string }>>({});
   const [extraTrackMsg, setExtraTrackMsg] = useState<Record<string, string>>({});
 
   /** 只重抓額外採購清單，不重抓整頁（勾到貨時才不會卡） */
@@ -453,13 +458,22 @@ export default function PurchaseBatchesPage() {
 
   async function addExtraShipment(purchaseId: string, orderNumberId: string) {
     const s = extraNewShipment[orderNumberId] || { tracking: "", qty: "", weight: "" };
-    if (await extraTracking(purchaseId, "POST", { action: "addShipment", orderNumberId, trackingNumber: s.tracking, qty: s.qty, weightKg: s.weight })) {
+    if (await extraTracking(purchaseId, "POST", { action: "addShipment", orderNumberId, trackingNumber: s.tracking, weightKg: s.weight })) {
       setExtraNewShipment((prev) => ({ ...prev, [orderNumberId]: { tracking: "", qty: "", weight: "" } }));
     }
   }
 
+  /** 把某個款式裝進這張物流單（數量與到貨勾選都在這一層） */
+  async function addExtraShipmentItem(purchaseId: string, shipmentId: string) {
+    const pick = extraNewShipmentItem[shipmentId] || { itemId: "", qty: "" };
+    if (!pick.itemId) return setExtraTrackMsg((prev) => ({ ...prev, [purchaseId]: "請選擇這張物流單裝了哪個款式" }));
+    if (await extraTracking(purchaseId, "POST", { action: "addShipmentItem", shipmentId, extraPurchaseItemId: pick.itemId, qty: pick.qty })) {
+      setExtraNewShipmentItem((prev) => ({ ...prev, [shipmentId]: { itemId: "", qty: "" } }));
+    }
+  }
+
   /** 勾到貨：畫面先更新，不等後端（跟一般採購單的到貨勾選一樣） */
-  function toggleExtraArrived(purchaseId: string, shipmentId: string, arrived: boolean) {
+  function toggleExtraArrived(purchaseId: string, shipmentItemId: string, arrived: boolean) {
     setExtraPurchases((prev) =>
       prev.map((p: any) =>
         p.id !== purchaseId
@@ -468,12 +482,15 @@ export default function PurchaseBatchesPage() {
               ...p,
               orderNumbers: p.orderNumbers.map((o: any) => ({
                 ...o,
-                shipments: o.shipments.map((s: any) => (s.id === shipmentId ? { ...s, arrived } : s)),
+                shipments: o.shipments.map((s: any) => ({
+                  ...s,
+                  items: s.items.map((si: any) => (si.id === shipmentItemId ? { ...si, arrived } : si)),
+                })),
               })),
             }
       )
     );
-    extraTracking(purchaseId, "PATCH", { shipmentId, arrived });
+    extraTracking(purchaseId, "PATCH", { shipmentItemId, arrived });
   }
 
   // ---- 到貨追蹤 ----
@@ -968,17 +985,33 @@ export default function PurchaseBatchesPage() {
             <div>
               <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>跟其他賣家/管道額外買到的現貨，用來抵掉贈品缺口，不強制走拆單，會計入這次檔期的成本。</p>
               <div className="id-row"><span className="id-label">訂單編號（採購單號）</span><input type="text" value={extraOrderNumber} onChange={(e) => setExtraOrderNumber(e.target.value)} placeholder="選填" /></div>
-              <div className="id-row">
-                <span className="id-label">滿贈款式</span>
-                <select value={extraGiftStyleId} onChange={(e) => setExtraGiftStyleId(e.target.value)} style={{ flex: 1, padding: 8 }}>
-                  <option value="">請選擇</option>
-                  {campaignGiftStyles.map((s) => (
-                    <option key={s.id} value={s.id}>{s.style_name}（門檻{s.threshold_amount}）</option>
-                  ))}
-                </select>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 13, color: "#8A8779", marginBottom: 4 }}>款式（一張單可以買好幾個款式）</div>
+                {extraItemRows.map((row, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <select
+                      className="admin-input"
+                      value={row.giftStyleId}
+                      onChange={(e) => setExtraItemRows((rows) => rows.map((r, ri) => (ri === i ? { ...r, giftStyleId: e.target.value } : r)))}
+                      style={{ flex: 1, minWidth: 180 }}
+                    >
+                      <option value="">請選擇款式</option>
+                      {campaignGiftStyles.map((s) => (
+                        <option key={s.id} value={s.id}>{s.style_name}（門檻{s.threshold_amount}）</option>
+                      ))}
+                    </select>
+                    <input type="number" className="admin-input" placeholder="數量" value={row.qty}
+                      onChange={(e) => setExtraItemRows((rows) => rows.map((r, ri) => (ri === i ? { ...r, qty: e.target.value } : r)))}
+                      style={{ width: 80 }} />
+                    <input type="number" className="admin-input" placeholder="成本(選填)" value={row.subtotal}
+                      onChange={(e) => setExtraItemRows((rows) => rows.map((r, ri) => (ri === i ? { ...r, subtotal: e.target.value } : r)))}
+                      style={{ width: 110 }} />
+                    <button className="btn small secondary" disabled={extraItemRows.length <= 1}
+                      onClick={() => setExtraItemRows((rows) => rows.filter((_, ri) => ri !== i))}>刪除</button>
+                  </div>
+                ))}
+                <button className="btn small secondary" onClick={() => setExtraItemRows((rows) => [...rows, { giftStyleId: "", qty: "", subtotal: "" }])}>＋ 新增一個款式</button>
               </div>
-              <div className="id-row"><span className="id-label">數量</span><input type="number" value={extraQty} onChange={(e) => setExtraQty(e.target.value)} /></div>
-              <div className="id-row"><span className="id-label">小計（成本）</span><input type="number" value={extraSubtotal} onChange={(e) => setExtraSubtotal(e.target.value)} placeholder="選填" /></div>
               <div className="id-row"><span className="id-label">備註</span><input type="text" value={extraNote} onChange={(e) => setExtraNote(e.target.value)} placeholder="選填" /></div>
               <button className="btn" onClick={addExtraPurchase}>新增額外採購紀錄</button>
 
@@ -986,13 +1019,14 @@ export default function PurchaseBatchesPage() {
                 {extraPurchases.length === 0 && <div style={{ fontSize: 13, color: "#8A8779" }}>還沒有任何額外採購紀錄</div>}
                 {extraPurchases.map((p) => {
                   const expanded = expandedExtraId === p.id;
-                  const allArrived = p.qty > 0 && p.arrivedQty >= p.qty;
+                  const allArrived = p.totalQty > 0 && p.arrivedQty >= p.totalQty;
                   return (
-                    <div key={p.id} style={{ padding: "8px 0", borderBottom: "1px dashed var(--line)" }}>
+                    <div key={p.id} style={{ padding: "10px 0", borderBottom: "1px dashed var(--line)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 14 }}>
-                          {p.orderNumber ? `[${p.orderNumber}] ` : ""}{p.styleName} x{p.qty}
-                          {p.subtotal != null ? `　成本 ￥${p.subtotal}` : ""}
+                          {p.orderNumber ? `[${p.orderNumber}] ` : ""}
+                          共 {p.items.length} 個款式 / {p.totalQty} 個
+                          {p.subtotal ? `　成本 ￥${p.subtotal}` : ""}
                           {p.note ? `（${p.note}）` : ""}
                         </span>
                         <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -1001,16 +1035,30 @@ export default function PurchaseBatchesPage() {
                             style={allArrived ? { background: "#639922" } : p.arrivedQty > 0 ? { background: "#D9A441" } : undefined}
                             onClick={() => setExpandedExtraId(expanded ? null : p.id)}
                           >
-                            {p.trackedQty > 0 ? `到貨 ${p.arrivedQty}/${p.qty}` : "到貨追蹤"}
+                            到貨 {p.arrivedQty}/{p.totalQty}
                           </button>
                           <button className="btn small danger" onClick={() => deleteExtraPurchase(p.id)}>刪除</button>
                         </span>
                       </div>
 
+                      {/* 這張單買了哪些款式 */}
+                      <div style={{ paddingLeft: 12, marginTop: 4 }}>
+                        {p.items.map((it: any) => (
+                          <div key={it.id} style={{ fontSize: 13, color: "#6B6858", padding: "2px 0" }}>
+                            ・{it.styleName} x{it.qty}
+                            {it.subtotal != null ? `　成本 ￥${it.subtotal}` : ""}
+                            <span style={{ color: it.arrivedQty >= it.qty ? "#3D6B1F" : "#8A8779", marginLeft: 6 }}>
+                              到貨 {it.arrivedQty}/{it.qty}
+                              {it.trackedQty < it.qty ? `（還有 ${it.qty - it.trackedQty} 個沒開物流單）` : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
                       {expanded && (
                         <div style={{ marginTop: 10, padding: 12, background: "#F7F5EF", borderRadius: 8 }}>
                           <div style={{ fontSize: 12, color: "#8A8779", marginBottom: 8 }}>
-                            共 {p.qty} 個，已開物流單 {p.trackedQty} 個、其中已到貨 {p.arrivedQty} 個。可以分好幾張物流單分批到貨。
+                            廠商訂單編號 → 物流單號 → 物流單裡的款式。到貨勾選在最底層，同一張物流單裝了不同款式可以各自勾。
                           </div>
 
                           {p.orderNumbers.map((o: any) => {
@@ -1022,44 +1070,62 @@ export default function PurchaseBatchesPage() {
                                   <button className="btn small danger" onClick={() => { if (confirm("確定要刪除這個訂單編號嗎？底下的物流單號也會一起刪除。")) extraTracking(p.id, "DELETE", { orderNumberId: o.id }); }}>刪除</button>
                                 </div>
 
-                                {o.shipments.map((s: any) => (
-                                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0 4px 10px", flexWrap: "wrap", fontSize: 13 }}>
-                                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                      <input type="checkbox" checked={s.arrived} onChange={(e) => toggleExtraArrived(p.id, s.id, e.target.checked)} style={{ width: 16, height: 16 }} />
-                                      <span>{s.arrived ? "已到貨" : "未到貨"}</span>
-                                    </label>
-                                    <span>物流單號：{s.trackingNumber || "（未填）"}</span>
-                                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                      數量
-                                      <input
-                                        type="number"
-                                        className="admin-input"
-                                        defaultValue={s.qty}
-                                        onBlur={(e) => { if (Number(e.target.value) !== s.qty) extraTracking(p.id, "PATCH", { shipmentId: s.id, qty: e.target.value }); }}
-                                        style={{ width: 70 }}
-                                      />
-                                    </span>
-                                    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                      重量
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        className="admin-input"
-                                        defaultValue={s.weightKg ?? ""}
-                                        onBlur={(e) => extraTracking(p.id, "PATCH", { shipmentId: s.id, weightKg: e.target.value })}
-                                        placeholder="KG"
-                                        style={{ width: 80 }}
-                                      />
-                                      KG
-                                    </span>
-                                    <button className="btn small danger" onClick={() => extraTracking(p.id, "DELETE", { shipmentId: s.id })}>刪除</button>
-                                  </div>
-                                ))}
+                                {o.shipments.map((s: any) => {
+                                  const pick = extraNewShipmentItem[s.id] || { itemId: "", qty: "" };
+                                  return (
+                                    <div key={s.id} style={{ border: "1px dashed var(--line)", borderRadius: 8, padding: 8, marginBottom: 8 }}>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13, marginBottom: 4 }}>
+                                        <span>物流單號：{s.trackingNumber || "（未填）"}</span>
+                                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                          重量
+                                          <input type="number" step="0.01" className="admin-input" defaultValue={s.weightKg ?? ""}
+                                            onBlur={(e) => extraTracking(p.id, "PATCH", { shipmentId: s.id, weightKg: e.target.value })}
+                                            placeholder="KG" style={{ width: 80 }} />
+                                          KG
+                                        </span>
+                                        <button className="btn small danger" onClick={() => extraTracking(p.id, "DELETE", { shipmentId: s.id })}>刪除物流單</button>
+                                      </div>
+
+                                      {s.items.map((si: any) => (
+                                        <div key={si.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0 3px 12px", flexWrap: "wrap", fontSize: 13 }}>
+                                          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                            <input type="checkbox" checked={si.arrived} onChange={(e) => toggleExtraArrived(p.id, si.id, e.target.checked)} style={{ width: 16, height: 16 }} />
+                                            <span>{si.arrived ? "已到貨" : "未到貨"}</span>
+                                          </label>
+                                          <span>{si.styleName}</span>
+                                          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                            數量
+                                            <input type="number" className="admin-input" defaultValue={si.qty}
+                                              onBlur={(e) => { if (Number(e.target.value) !== si.qty) extraTracking(p.id, "PATCH", { shipmentItemId: si.id, qty: e.target.value }); }}
+                                              style={{ width: 70 }} />
+                                          </span>
+                                          <button className="btn small danger" onClick={() => extraTracking(p.id, "DELETE", { shipmentItemId: si.id })}>移除</button>
+                                        </div>
+                                      ))}
+
+                                      <div style={{ display: "flex", gap: 6, marginTop: 4, paddingLeft: 12, flexWrap: "wrap", alignItems: "center" }}>
+                                        <select className="admin-input" value={pick.itemId}
+                                          onChange={(e) => setExtraNewShipmentItem((prev) => ({ ...prev, [s.id]: { ...pick, itemId: e.target.value } }))}
+                                          style={{ minWidth: 170 }}>
+                                          <option value="">這張物流單裝了哪個款式</option>
+                                          {p.items.map((it: any) => (
+                                            <option key={it.id} value={it.id}>{it.styleName}（還沒開 {it.qty - it.trackedQty} 個）</option>
+                                          ))}
+                                        </select>
+                                        <input type="number" className="admin-input" placeholder="數量" value={pick.qty}
+                                          onChange={(e) => setExtraNewShipmentItem((prev) => ({ ...prev, [s.id]: { ...pick, qty: e.target.value } }))}
+                                          style={{ width: 80 }} />
+                                        <button className="btn small secondary" onClick={() => addExtraShipmentItem(p.id, s.id)}>加入這張物流單</button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
 
                                 <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-                                  <input type="text" className="admin-input" placeholder="物流單號（選填）" value={ns.tracking} onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, tracking: e.target.value } }))} style={{ minWidth: 160 }} />
-                                  <input type="number" className="admin-input" placeholder="數量" value={ns.qty} onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, qty: e.target.value } }))} style={{ width: 80 }} />
-                                  <input type="number" step="0.01" className="admin-input" placeholder="重量KG" value={ns.weight} onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, weight: e.target.value } }))} style={{ width: 90 }} />
+                                  <input type="text" className="admin-input" placeholder="物流單號（選填）" value={ns.tracking}
+                                    onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, tracking: e.target.value } }))} style={{ minWidth: 150 }} />
+                                  <input type="number" step="0.01" className="admin-input" placeholder="重量KG" value={ns.weight}
+                                    onChange={(e) => setExtraNewShipment((prev) => ({ ...prev, [o.id]: { ...ns, weight: e.target.value } }))} style={{ width: 90 }} />
                                   <button className="btn small secondary" onClick={() => addExtraShipment(p.id, o.id)}>新增物流單號</button>
                                 </div>
                               </div>
@@ -1067,7 +1133,8 @@ export default function PurchaseBatchesPage() {
                           })}
 
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            <input type="text" className="admin-input" placeholder="廠商訂單編號" value={extraNewOrderNumber[p.id] || ""} onChange={(e) => setExtraNewOrderNumber((prev) => ({ ...prev, [p.id]: e.target.value }))} style={{ minWidth: 200 }} />
+                            <input type="text" className="admin-input" placeholder="廠商訂單編號" value={extraNewOrderNumber[p.id] || ""}
+                              onChange={(e) => setExtraNewOrderNumber((prev) => ({ ...prev, [p.id]: e.target.value }))} style={{ minWidth: 200 }} />
                             <button className="btn small secondary" onClick={() => addExtraOrderNumber(p.id)}>新增廠商訂單編號</button>
                           </div>
 
@@ -1076,7 +1143,7 @@ export default function PurchaseBatchesPage() {
                       )}
                     </div>
                   );
-                })}
+                                })}
               </div>
             </div>
           )}

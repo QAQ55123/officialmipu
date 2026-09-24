@@ -122,13 +122,21 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   // ── 額外採購成本（原幣）──────────────────────────────────────
   const { data: extraPurchases } = await supabase
     .from("vendor_extra_purchases")
-    .select("qty, subtotal, gift_styles(style_name)")
+    .select("qty, subtotal, order_number, gift_styles(style_name), extra_purchase_items(qty, subtotal, gift_styles(style_name))")
     .eq("campaign_id", campaignId);
-  const extraRows = (extraPurchases || []).map((p: any) => ({
-    styleName: p.gift_styles?.style_name || "（款式已刪除）",
-    qty: p.qty,
-    subtotal: Number(p.subtotal) || 0,
-  }));
+  // 一張額外採購單可以有好幾個款式，明細要逐款列出
+  const extraRows = (extraPurchases || []).flatMap((p: any) => {
+    const details = p.extra_purchase_items || [];
+    if (details.length > 0) {
+      return details.map((d: any) => ({
+        styleName: d.gift_styles?.style_name || "（款式已刪除）",
+        qty: d.qty,
+        subtotal: Number(d.subtotal) || 0,
+      }));
+    }
+    // 還沒搬移的舊資料（一筆＝一個款式）
+    return [{ styleName: p.gift_styles?.style_name || "（款式已刪除）", qty: p.qty, subtotal: Number(p.subtotal) || 0 }];
+  });
   const extraPurchaseTotal = extraRows.reduce((s, r) => s + r.subtotal, 0);
 
   // ── 運費成本：所有物流單號的重量加總 ──────────────────────────

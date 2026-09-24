@@ -433,9 +433,22 @@ alter table vendor_extra_purchases add column if not exists order_number text;
 alter table vendor_extra_purchases add column if not exists subtotal numeric;
 create index if not exists idx_vendor_extra_purchases_campaign on vendor_extra_purchases (campaign_id);
 
--- 額外採購的到貨追蹤：比照一般採購單的三層結構
---   額外採購 → 廠商訂單編號（可以多個）→ 物流單號（可以多個，各自記數量、重量、有沒有到貨）
--- 分批到貨時，同一筆額外採購可以開好幾張物流單，各自勾到貨。
+-- 額外採購比照一般採購單的結構：
+--   額外採購單 ─┬─ 款式明細（一張單可以買好幾個款式，各自記數量與成本）
+--               └─ 廠商訂單編號 → 物流單號 → 物流單裡的款式（數量、到貨勾選）
+-- 到貨勾選在最底層，所以同一張物流單裝了不同款式，可以各自勾到貨。
+
+-- 款式明細：一張額外採購單可以有好幾個款式
+create table if not exists extra_purchase_items (
+  id                 uuid primary key default gen_random_uuid(),
+  extra_purchase_id  uuid not null references vendor_extra_purchases(id) on delete cascade,
+  gift_style_id      uuid references gift_styles(id) on delete set null,
+  qty                int not null,
+  subtotal           numeric,
+  created_at         timestamptz default now()
+);
+create index if not exists idx_extra_purchase_items_purchase on extra_purchase_items (extra_purchase_id);
+
 create table if not exists extra_purchase_order_numbers (
   id                 uuid primary key default gen_random_uuid(),
   extra_purchase_id  uuid not null references vendor_extra_purchases(id) on delete cascade,
@@ -448,19 +461,48 @@ create table if not exists extra_purchase_shipments (
   id               uuid primary key default gen_random_uuid(),
   order_number_id  uuid not null references extra_purchase_order_numbers(id) on delete cascade,
   tracking_number  text,
-  qty              int not null default 0,
   weight_kg        numeric,
-  arrived          boolean not null default false,
   created_at       timestamptz default now()
 );
 create index if not exists idx_extra_shipments_order_number on extra_purchase_shipments (order_number_id);
+-- 舊版本把數量與到貨狀態放在物流單上（那時一張單只有一個款式），現在改放到下面的品項表
+alter table extra_purchase_shipments add column if not exists qty int;
+alter table extra_purchase_shipments add column if not exists arrived boolean;
 
--- 舊資料：額外採購原本只有一個「訂單編號」文字欄，搬進新的訂單編號表（只搬一次，重跑不會重複）
+-- 物流單裡裝了哪些款式、各幾個、到了沒（到貨勾選在這一層）
+create table if not exists extra_purchase_shipment_items (
+  id                      uuid primary key default gen_random_uuid(),
+  shipment_id             uuid not null references extra_purchase_shipments(id) on delete cascade,
+  extra_purchase_item_id  uuid not null references extra_purchase_items(id) on delete cascade,
+  qty                     int not null,
+  arrived                 boolean not null default false,
+  created_at              timestamptz default now()
+);
+create index if not exists idx_extra_shipment_items_shipment on extra_purchase_shipment_items (shipment_id);
+
+-- 舊資料搬移（只搬一次，重跑不會重複）
+-- ① 原本「一筆額外採購＝一個款式」→ 轉成那張單底下的一筆款式明細
+insert into extra_purchase_items (extra_purchase_id, gift_style_id, qty, subtotal)
+select p.id, p.gift_style_id, p.qty, p.subtotal
+from vendor_extra_purchases p
+where p.gift_style_id is not null
+  and not exists (select 1 from extra_purchase_items i where i.extra_purchase_id = p.id);
+
+-- ② 原本填在單上的訂單編號 → 轉成訂單編號紀錄
 insert into extra_purchase_order_numbers (extra_purchase_id, order_number)
 select p.id, p.order_number
 from vendor_extra_purchases p
 where p.order_number is not null and p.order_number <> ''
   and not exists (select 1 from extra_purchase_order_numbers o where o.extra_purchase_id = p.id);
+
+-- ③ 原本記在物流單上的數量／到貨狀態 → 轉成物流單品項（舊資料一張單只有一個款式，不會對錯）
+insert into extra_purchase_shipment_items (shipment_id, extra_purchase_item_id, qty, arrived)
+select s.id, i.id, coalesce(s.qty, 0), coalesce(s.arrived, false)
+from extra_purchase_shipments s
+join extra_purchase_order_numbers o on o.id = s.order_number_id
+join extra_purchase_items i on i.extra_purchase_id = o.extra_purchase_id
+where s.qty is not null
+  and not exists (select 1 from extra_purchase_shipment_items si where si.shipment_id = s.id);
 
 alter table vendor_purchase_batches disable row level security;
 alter table vendor_purchase_batch_items disable row level security;

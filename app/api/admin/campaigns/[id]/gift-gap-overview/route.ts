@@ -64,9 +64,22 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     allocatedByStyle.set(a.gift_style_id, (allocatedByStyle.get(a.gift_style_id) || 0) + a.qty);
   });
 
-  const { data: extraPurchases } = await supabase.from("vendor_extra_purchases").select("gift_style_id, qty").eq("campaign_id", params.id);
+  // 額外採購改成「一張單可以買多個款式」，數量記在款式明細上
+  const { data: extraPurchases } = await supabase
+    .from("vendor_extra_purchases")
+    .select("gift_style_id, qty, extra_purchase_items(gift_style_id, qty)")
+    .eq("campaign_id", params.id);
   const extraByStyle = new Map<string, number>();
   (extraPurchases || []).forEach((e: any) => {
+    const details = e.extra_purchase_items || [];
+    if (details.length > 0) {
+      details.forEach((d: any) => {
+        if (!d.gift_style_id) return;
+        extraByStyle.set(d.gift_style_id, (extraByStyle.get(d.gift_style_id) || 0) + d.qty);
+      });
+      return;
+    }
+    // 還沒搬移的舊資料（一筆＝一個款式）
     if (!e.gift_style_id) return;
     extraByStyle.set(e.gift_style_id, (extraByStyle.get(e.gift_style_id) || 0) + e.qty);
   });
