@@ -3692,11 +3692,8 @@ export default function AdminPage() {
                           </div>
                         </div>
                       )}
-                      {currentRole === "owner" && orderLookupResult.seriesId && (
+                      {currentRole === "owner" && (
                         <button className="btn small secondary" onClick={() => { setEditingOrderItems(true); loadAllSeriesForEdit(); }} style={{ marginTop: 8 }}>編輯商品／款式</button>
-                      )}
-                      {currentRole === "owner" && !orderLookupResult.seriesId && (
-                        <div style={{ fontSize: 12, color: "#8A8779", marginTop: 8 }}>這張訂單沒有對應的系列了，沒辦法編輯商品內容（系列可能已被刪除）。</div>
                       )}
                     </>
                   ) : (

@@ -281,7 +281,7 @@ export async function POST(req: Request) {
           { name: "訂單編號", value: order.order_no, inline: true },
           { name: "交易方式", value: payment, inline: true },
           { name: "帳號", value: member.username, inline: true },
-          { name: "系列", value: series.name, inline: true },
+          { name: "系列", value: series ? series.name : (Array.from(new Set(rows.map((r) => r.seriesName).filter(Boolean))).join("、") || "(無)"), inline: true },
           { name: "金額", value: `NT$ ${fmtMoney(orderTotal)}`, inline: true },
           { name: "個人頁", value: member.profile_url },
           { name: "品項", value: lines || "(無)" },
