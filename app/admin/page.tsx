@@ -675,7 +675,7 @@ export default function AdminPage() {
   const [importCategoryId, setImportCategoryId] = useState("");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{ total: number; success: number; created?: number; updated?: number; failed: string[]; seriesCount?: number; seriesNames?: string[] } | null>(null);
+  const [importResult, setImportResult] = useState<{ total: number; success: number; created?: number; updated?: number; failed: string[]; seriesCount?: number; seriesNames?: string[]; imageMissing?: string[]; imageUnused?: string[]; imageDuplicates?: string[]; folderErrors?: string[] } | null>(null);
   const [importMsg, setImportMsg] = useState("");
 
   async function runProductImport() {
@@ -2645,6 +2645,12 @@ export default function AdminPage() {
                 一次可以匯入好幾個不同系列的商品。金額填人民幣(￥)、運費填台幣(NT$)。圖片網址支援 Google 雲端硬碟分享連結。
                 <strong>重複匯入同一筆商品（同系列＋同商品名稱＋同款式）會更新既有資料，不會重複建立；圖片欄位留空時不會覆蓋掉原本設定好的圖片。</strong>
               </p>
+              <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
+                <strong>選用欄位「圖片資料夾」</strong>：貼上 Google 雲端資料夾連結，同一個系列只要有一列填就好，系統會依檔名自動抓圖（圖片網址欄可以留空）。
+                檔名規則：<code>系列.jpg</code> → 系列圖（每次匯入都會覆蓋）；<code>商品名稱.jpg</code> → 封面圖（沒有款式的商品也當作它的圖）；
+                <code>款式.jpg</code> → 款式圖；不同商品有同名款式時寫成 <code>商品名稱_款式.jpg</code>（優先）。不看副檔名、英文不分大小寫。
+                資料夾要共用給服務帳號（檢視者），並設成「知道連結的任何人都可以檢視」，顧客才看得到圖。
+              </p>
 
               <div className="id-row">
                 <span className="id-label">匯入到分類</span>
@@ -2690,6 +2696,21 @@ export default function AdminPage() {
                   {importResult.failed.map((msg, i) => (
                     <div key={i} style={{ fontSize: 12, color: "#993C1D" }}>{msg}</div>
                   ))}
+                  {([
+                    ["資料夾讀不到", importResult.folderErrors, "#993C1D"],
+                    ["找不到圖片（商品已匯入，原本的圖保留）", importResult.imageMissing, "#993C1D"],
+                    ["沒有用到的圖片（檢查檔名是否打錯）", importResult.imageUnused, "#5F5E5A"],
+                    ["重複的圖片", importResult.imageDuplicates, "#5F5E5A"],
+                  ] as [string, string[] | undefined, string][]).map(([title, list, color]) =>
+                    list && list.length > 0 ? (
+                      <div key={title} style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#2C2C2A", marginBottom: 4 }}>{title}（{list.length}）</div>
+                        {list.map((msg, i) => (
+                          <div key={i} style={{ fontSize: 12, color }}>{msg}</div>
+                        ))}
+                      </div>
+                    ) : null
+                  )}
                 </div>
               )}
             </div>

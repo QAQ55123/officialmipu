@@ -2,7 +2,33 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { toDirectImageUrl } from "@/lib/imageUrl";
+import { parseDriveFolderId, listDriveFolderImages, normalizeImageKey, normalizeFileKey, DriveImageFile } from "@/lib/googleDrive";
 import * as XLSX from "xlsx";
+
+/** 一個雲端圖片資料夾的檔名索引（同一個資料夾被好幾個系列共用時只讀一次） */
+interface FolderIndex {
+  label: string; // 第一個用到它的系列名稱，結果訊息用
+  byKey: Map<string, DriveImageFile>;
+  all: DriveImageFile[];
+  used: Set<string>;
+  duplicateIds: Set<string>;
+}
+
+/** 依序找第一個對得到的檔名，找到就標記為已使用 */
+function pickImage(folder: FolderIndex, candidates: string[]): DriveImageFile | null {
+  for (const c of candidates) {
+    const f = folder.byKey.get(normalizeImageKey(c));
+    if (f) {
+      folder.used.add(f.id);
+      return f;
+    }
+  }
+  return null;
+}
+
+function driveFileToImageUrl(f: DriveImageFile): string {
+  return toDirectImageUrl(`https://drive.google.com/file/d/${f.id}/view`);
+}
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +66,48 @@ export async function POST(req: Request) {
     if (rows.length === 0) return NextResponse.json({ error: "檔案裡沒有資料列" }, { status: 400 });
 
     const supabase = getSupabaseAdmin();
+
+    // 「圖片資料夾」欄：每個系列只要有一列填就好，系統依檔名自動對應圖片。
+    // 檔名規則：系列.jpg＝系列圖、商品名稱.jpg＝封面（沒款式的商品就是它的圖）、
+    // 款式.jpg 或 商品名稱_款式.jpg＝款式圖（後者優先）
+    const folderBySeriesName = new Map<string, FolderIndex | null>();
+    const folderCache = new Map<string, FolderIndex | null>();
+    const folderErrors: string[] = [];
+    const imageDuplicates: string[] = [];
+    for (const row of rows) {
+      const sName = String(row["系列名稱"] ?? "").trim();
+      const folderRaw = String(row["圖片資料夾"] ?? "").trim();
+      if (!sName || !folderRaw || folderBySeriesName.has(sName)) continue;
+      const folderId = parseDriveFolderId(folderRaw);
+      if (!folderId) {
+        folderErrors.push(`「${sName}」的圖片資料夾連結看不懂：${folderRaw}`);
+        folderBySeriesName.set(sName, null);
+        continue;
+      }
+      if (!folderCache.has(folderId)) {
+        try {
+          const files = await listDriveFolderImages(folderId);
+          const index: FolderIndex = { label: sName, byKey: new Map(), all: files, used: new Set(), duplicateIds: new Set() };
+          files.forEach((f) => {
+            const k = normalizeFileKey(f.name);
+            const existing = index.byKey.get(k);
+            if (existing) {
+              index.duplicateIds.add(f.id);
+              imageDuplicates.push(`${sName} 資料夾：${f.name} 跟 ${existing.name} 同名，使用 ${existing.name}`);
+            } else {
+              index.byKey.set(k, f);
+            }
+          });
+          folderCache.set(folderId, index);
+        } catch (e: any) {
+          folderErrors.push(`「${sName}」的圖片資料夾讀不到，請確認連結和共用設定（${e?.message || "未知錯誤"}）`);
+          folderCache.set(folderId, null);
+        }
+      }
+      folderBySeriesName.set(sName, folderCache.get(folderId) || null);
+    }
+    const imageMissing: string[] = [];
+    const folderCoverByKey = new Map<string, { seriesId: string; name: string; coverUrl: string }>();
 
     // 依「系列名稱」找出或建立系列（同一個分類底下同名的系列只會有一個）
     const seriesCache = new Map<string, string>(); // 系列名稱 -> series_id
@@ -157,6 +225,20 @@ export async function POST(req: Request) {
         coverImageByKey.set(coverKey, { seriesId, name, coverUrl: toDirectImageUrl(coverImageUrlRaw) });
       }
 
+      // 圖片資料夾：Excel 有直接填圖片網址的優先，沒填才用資料夾裡的圖
+      let folderImageUrl = "";
+      const folder = folderBySeriesName.get(seriesName) || null;
+      if (folder) {
+        const f = pickImage(folder, style ? [`${name}_${style}`, style] : [name]);
+        if (f) folderImageUrl = driveFileToImageUrl(f);
+        else if (!imageUrlRaw) imageMissing.push(`${seriesName} / ${name}${style ? `（${style}）` : ""}`);
+        if (!folderCoverByKey.has(coverKey)) {
+          const c = pickImage(folder, [name]);
+          if (c) folderCoverByKey.set(coverKey, { seriesId, name, coverUrl: driveFileToImageUrl(c) });
+        }
+      }
+      const effectiveImageUrl = imageUrlRaw ? toDirectImageUrl(imageUrlRaw) : folderImageUrl;
+
       // 同一個系列＋同商品名稱＋同款式視為同一筆商品：已存在就更新（用Excel的新資料覆蓋），不存在才新增
       const { data: existingProduct } = await supabase
         .from("products")
@@ -173,7 +255,7 @@ export async function POST(req: Request) {
           has_discount_flag: hasDiscountFlag,
         };
         // 圖片欄位留空時不覆蓋既有圖片（避免不小心把之前設定好的圖清掉）
-        if (imageUrlRaw) updates.image_url = toDirectImageUrl(imageUrlRaw);
+        if (effectiveImageUrl) updates.image_url = effectiveImageUrl;
         const { error: updateErr } = await supabase.from("products").update(updates).eq("id", existingProduct.id);
         if (updateErr) {
           failed.push(`第 ${rowNum} 列：${name}${style ? `（${style}）` : ""} — 更新失敗：${updateErr.message}`);
@@ -189,7 +271,7 @@ export async function POST(req: Request) {
           shipping_fee: shippingFee,
           has_discount_flag: hasDiscountFlag,
           cod_allowed: true,
-          image_url: imageUrlRaw ? toDirectImageUrl(imageUrlRaw) : null,
+          image_url: effectiveImageUrl || null,
           sort_order: await nextSortOrderFor(seriesId),
         });
         created++;
@@ -200,6 +282,28 @@ export async function POST(req: Request) {
     if (insertRows.length > 0) {
       const { error } = await supabase.from("products").insert(insertRows);
       if (error) return NextResponse.json({ error: "寫入資料庫失敗：" + error.message }, { status: 500 });
+    }
+
+    // 資料夾裡的封面圖：Excel 有填封面圖網址的商品以 Excel 為準
+    for (const [key, v] of folderCoverByKey.entries()) {
+      if (!coverImageByKey.has(key)) coverImageByKey.set(key, v);
+    }
+
+    // 系列圖：資料夾裡有「系列」這張圖就每次都覆蓋
+    for (const [sName, sId] of seriesCache.entries()) {
+      const folder = folderBySeriesName.get(sName) || null;
+      if (!folder) continue;
+      const f = pickImage(folder, ["系列"]);
+      if (f) await supabase.from("series").update({ image_url: driveFileToImageUrl(f) }).eq("id", sId);
+    }
+
+    // 資料夾裡沒對到任何商品的圖，列出來讓店家檢查檔名
+    const imageUnused: string[] = [];
+    for (const folder of folderCache.values()) {
+      if (!folder) continue;
+      folder.all.forEach((f) => {
+        if (!folder.used.has(f.id) && !folder.duplicateIds.has(f.id)) imageUnused.push(`${folder.label} 資料夾 / ${f.name}`);
+      });
     }
 
     // 封面圖統一同步到每個「系列＋商品名稱」底下的所有款式列
@@ -220,6 +324,10 @@ export async function POST(req: Request) {
       failed,
       seriesCount: seriesCache.size,
       seriesNames: Array.from(seriesCache.keys()),
+      imageMissing,
+      imageUnused,
+      imageDuplicates,
+      folderErrors,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "匯入失敗" }, { status: 500 });

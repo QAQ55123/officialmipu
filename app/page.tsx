@@ -1016,7 +1016,8 @@ export default function Home() {
     fetchCheckoutGiftQuota(selectedActive);
   }
 
-  async function submitCheckout() {
+  // paymentOverride：結帳頁畫面上實際生效的付款方式（取付不可用時畫面會自動退回匯款，送出要跟畫面一致）
+  async function submitCheckout(paymentOverride?: string) {
     if (submittingCheckout) return;
     if (!identity) {
       requireIdentity("checkout");
@@ -1035,7 +1036,7 @@ export default function Home() {
     const succeededPlanIds: string[] = [];
     const errors: string[] = [];
     // 一次結帳只送出一張訂單（滿贈跨系列合併計算，不再依系列拆單）
-    const payment = checkoutPayment;
+    const payment = paymentOverride || checkoutPayment;
     const wantsGift = checkoutWantsGift;
     const giftSelections = Object.entries(checkoutGiftPicks).filter(([, qty]) => qty > 0).map(([giftStyleId, qty]) => ({ giftStyleId, qty }));
     let submitOk = false;
@@ -2415,6 +2416,9 @@ export default function Home() {
                     const pickedTotal = Object.values(checkoutGiftPicks).reduce((s, n) => s + n, 0);
                     if (pickedTotal < checkoutGiftQuota.quota) giftNotFull = true;
                   }
+                  // 下方總計列要用「實際生效」的付款方式與組合狀態（取付不可用時會自動退回匯款，反之亦然），
+                  // 由下面的明細區塊算好後寫進來
+                  const checkoutView = { total: grandTotal, unavailable: false, payment: checkoutPayment };
 
                   return (
                     <>
@@ -2460,10 +2464,24 @@ export default function Home() {
                           (!hasGiftItems || (campaignGiftCodEnough && perUserGiftEnough)) &&
                           codRateEnabled;
                         const codDisabled = !codOffered;
+                        // 某個「付款方式 × 要不要滿贈」組合有沒有開放：一般商品都要查得到已啟用的匯率
+                        // （滿贈系列商品、獨立網頁專用價商品不套匯率，不受影響）
+                        const comboOpen = (pay: string, gift: boolean) =>
+                          entries.every((e, i) => groupItemsAreGift[i] || itemRateInfo(e.planId, e, pay, gift).enabled);
+                        const bankDisabled = !comboOpen("匯款", checkoutWantsGift);
                         const rawPayment = checkoutPayment;
-                        const payment = (rawPayment === "取付" && codDisabled) ? "匯款" : rawPayment;
+                        let payment = rawPayment;
+                        if (payment === "取付" && codDisabled) payment = "匯款";
+                        if (payment === "匯款" && bankDisabled && !codDisabled) payment = "取付";
                         const wantsGift = checkoutWantsGift;
+                        // 換成另一種滿贈選擇時，這個付款方式有沒有開放；沒開放就不讓顧客切換
+                        const giftToggleDisabled = hasRegularItems && !comboOpen(payment, !wantsGift);
+                        // 目前選的組合沒開放：不能用原價當台幣顯示（會變成1:1），金額改顯示「—」並擋住送出
+                        const comboUnavailable = hasRegularItems && !comboOpen(payment, wantsGift);
                         const groupTotal = entries.reduce((s, e) => s + itemAmount(e.planId, e, payment, wantsGift), 0);
+                        checkoutView.total = groupTotal;
+                        checkoutView.unavailable = comboUnavailable;
+                        checkoutView.payment = payment;
                         const quota = checkoutGiftQuota;
                         const giftLoading = checkoutGiftLoading;
                         const picks = checkoutGiftPicks;
@@ -2596,7 +2614,7 @@ export default function Home() {
                                   <button
                                     key={p}
                                     className={`src-btn ${payment === p ? "active" : ""}`}
-                                    disabled={p === "取付" && codDisabled}
+                                    disabled={(p === "取付" && codDisabled) || (p === "匯款" && bankDisabled)}
                                     onClick={() => {
                                       setCheckoutPayment(p);
                                       setCheckoutError("");
@@ -2618,6 +2636,9 @@ export default function Home() {
                                   })()}
                                 </div>
                               )}
+                              {bankDisabled && !codDisabled && (
+                                <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>目前這個商品組合不開放匯款/無卡，請改用取付</div>
+                              )}
 
                               <div style={{ marginTop: 12 }}>
                                 {(() => {
@@ -2629,10 +2650,16 @@ export default function Home() {
                                         <input
                                           type="checkbox"
                                           checked={wantsGift}
+                                          disabled={giftToggleDisabled}
                                           onChange={(e2) => { setCheckoutWantsGift(e2.target.checked); if (e2.target.checked) fetchCheckoutGiftQuota(entries, checkoutGiftPicks); }}
                                         />
                                         要滿贈
                                       </label>
+                                      {giftToggleDisabled && (
+                                        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                                          {wantsGift ? `${paymentLabel(payment)}目前必須選擇滿贈` : `${paymentLabel(payment)}目前不開放滿贈`}
+                                        </div>
+                                      )}
                                       {wantsGift && giftLoading && !quota && (
                                   <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>正在計算可選數量…</div>
                                 )}
@@ -2689,7 +2716,7 @@ export default function Home() {
                                         </div>
                                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                                           <span>￥{fmtOriginal(g.original)}</span>
-                                          <span style={{ fontWeight: 600 }}>NT$ {fmt(g.twd)}</span>
+                                          <span style={{ fontWeight: 600 }}>{key === "unavailable" ? "—" : `NT$ ${fmt(g.twd)}`}</span>
                                         </div>
                                       </div>
                                     ));
@@ -2727,8 +2754,13 @@ export default function Home() {
                                 })()}
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 8 }}>
                                   <span style={{ fontSize: 13, color: "var(--muted)" }}>小計</span>
-                                  <span style={{ fontWeight: 700, fontSize: 16 }}>NT$ {fmt(groupTotal)}</span>
+                                  <span style={{ fontWeight: 700, fontSize: 16 }}>{comboUnavailable ? "—" : `NT$ ${fmt(groupTotal)}`}</span>
                                 </div>
+                                {comboUnavailable && (
+                                  <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>
+                                    目前不開放「{paymentLabel(payment)}＋{wantsGift ? "要滿贈" : "不要滿贈"}」，請改選其他方式
+                                  </div>
+                                )}
                                 {checkoutError && (
                                   <div style={{ color: "#B3261E", fontSize: 12, marginTop: 6 }}>{checkoutError}</div>
                                 )}
@@ -2739,9 +2771,9 @@ export default function Home() {
                       })}
 
                       <div className="cart-checkout-bar">
-                        <span style={{ fontWeight: 600 }}>總計 NT$ {fmt(grandTotal)}</span>
-                        <button className="btn" disabled={submittingCheckout || giftNotFull} onClick={submitCheckout} title={giftNotFull ? "滿贈可選數量還沒選滿" : undefined}>
-                          {submittingCheckout ? "送出中…" : giftNotFull ? "滿贈還沒選滿" : "確認送出訂單"}
+                        <span style={{ fontWeight: 600 }}>總計 {checkoutView.unavailable ? "—" : `NT$ ${fmt(checkoutView.total)}`}</span>
+                        <button className="btn" disabled={submittingCheckout || giftNotFull || checkoutView.unavailable} onClick={() => submitCheckout(checkoutView.payment)} title={giftNotFull ? "滿贈可選數量還沒選滿" : undefined}>
+                          {submittingCheckout ? "送出中…" : checkoutView.unavailable ? "此組合未開放" : giftNotFull ? "滿贈還沒選滿" : "確認送出訂單"}
                         </button>
                       </div>
                     </>

@@ -4,7 +4,8 @@ const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 export const COST_SHEET_ID = process.env.GOOGLE_COST_SHEET_ID;
 export { SHEET_ID };
 
-function getAuth() {
+/** 服務帳號憑證（Sheets 同步、雲端資料夾讀圖共用同一組） */
+export function getGoogleCredentials(): { email: string; key: string } {
   const email = (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim();
   let key = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || "").trim();
   // 如果不小心把前後的雙引號也一起貼進去了（例如貼到 Vercel 後台環境變數欄位時），先拿掉
@@ -17,6 +18,11 @@ function getAuth() {
   if (!key.includes("BEGIN PRIVATE KEY")) {
     throw new Error("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY 格式看起來不正確（貼到 Vercel 後台時不需要加前後的雙引號，只要貼金鑰本身）");
   }
+  return { email, key };
+}
+
+function getAuth() {
+  const { email, key } = getGoogleCredentials();
   return new google.auth.JWT({
     email,
     key,
