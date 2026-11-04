@@ -5,6 +5,9 @@ import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
 import { signMemberSession, memberSessionCookieHeader } from "@/lib/memberAuth";
 import { syncMembersSheet } from "@/lib/sheetsSync";
+import { normalizeDisplayName, displayNameFormatError } from "@/lib/displayName";
+import { displayNameTakenError, usernameClashesDisplayName } from "@/lib/memberDisplayName";
+import { escapeLike } from "@/lib/util";
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -13,8 +16,12 @@ export async function POST(req: Request) {
   const confirmPassword = String(body.confirmPassword || "");
   const profileUrlRaw = String(body.profileUrl || "").trim();
   const email = String(body.email || "").trim().toLowerCase();
+  // 會員名稱：註冊時必填，匯出賣貨便用
+  const displayName = normalizeDisplayName(body.displayName);
 
   if (username.length < 1) return NextResponse.json({ error: "請輸入帳號" }, { status: 400 });
+  const displayNameErr = displayNameFormatError(displayName);
+  if (displayNameErr) return NextResponse.json({ error: displayNameErr }, { status: 400 });
   if (password.length < 6) return NextResponse.json({ error: "密碼至少要 6 個字" }, { status: 400 });
   if (password !== confirmPassword) return NextResponse.json({ error: "兩次輸入的密碼不一樣" }, { status: 400 });
   if (!profileUrlRaw) return NextResponse.json({ error: "請填寫個人頁網址" }, { status: 400 });
@@ -25,10 +32,16 @@ export async function POST(req: Request) {
 
   const supabase = getSupabaseAdmin();
 
-  const { data: existingUsername } = await supabase.from("members").select("id").ilike("username", username).maybeSingle();
+  const { data: existingUsername } = await supabase.from("members").select("id").ilike("username", escapeLike(username)).maybeSingle();
   if (existingUsername) return NextResponse.json({ error: "這個帳號已經被註冊了" }, { status: 409 });
+  if (await usernameClashesDisplayName(supabase, username)) {
+    return NextResponse.json({ error: "這個帳號跟其他會員的會員名稱相同，請換一個" }, { status: 409 });
+  }
+  // 自己的帳號跟自己的會員名稱一樣沒關係，所以這裡只檢查別人
+  const takenErr = await displayNameTakenError(supabase, displayName);
+  if (takenErr) return NextResponse.json({ error: takenErr }, { status: 409 });
 
-  const { data: existingEmail } = await supabase.from("members").select("id").ilike("email", email).maybeSingle();
+  const { data: existingEmail } = await supabase.from("members").select("id").ilike("email", escapeLike(email)).maybeSingle();
   if (existingEmail) return NextResponse.json({ error: "這個 Email 已經被註冊過了" }, { status: 409 });
 
   const { data: existingProfile } = await supabase.from("members").select("id").eq("profile_url_norm", profileUrlNorm).maybeSingle();
@@ -41,6 +54,7 @@ export async function POST(req: Request) {
     .from("members")
     .insert({
       username,
+      display_name: displayName,
       password_hash: passwordHash,
       profile_url: profileUrl,
       profile_url_norm: profileUrlNorm,
@@ -69,6 +83,7 @@ export async function POST(req: Request) {
   const res = NextResponse.json({
     ok: true,
     username: created.username,
+    displayName: created.display_name || null,
     profileUrl: created.profile_url,
     email: created.email,
     emailVerified: false,

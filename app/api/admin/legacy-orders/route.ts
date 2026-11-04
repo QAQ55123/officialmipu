@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
 import { refundCodQuota } from "@/lib/util";
+import { escapeLike } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -65,7 +66,7 @@ export async function PATCH(req: Request) {
 
   const supabase = getSupabaseAdmin();
 
-  const { data: member } = await supabase.from("members").select("*").ilike("username", targetUsername).maybeSingle();
+  const { data: member } = await supabase.from("members").select("*").ilike("username", escapeLike(targetUsername)).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到這個會員帳號" }, { status: 404 });
 
   const { data: order } = await supabase.from("orders").select("id, campaign_id, campaigns(name)").eq("order_no", orderNo).maybeSingle();

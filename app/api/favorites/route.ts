@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { escapeLike } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 async function findMemberId(supabase: ReturnType<typeof getSupabaseAdmin>, username: string) {
-  const { data } = await supabase.from("members").select("id").ilike("username", username).maybeSingle();
+  const { data } = await supabase.from("members").select("id").ilike("username", escapeLike(username)).maybeSingle();
   return data?.id || null;
 }
 

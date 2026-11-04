@@ -1629,6 +1629,7 @@ export default function AdminPage() {
       if (!r.ok) return setMemberLookupMsg(d.error || "查詢失敗");
       setMemberLookupResult(d.member);
       setMemberNewProfileUrl("");
+      setMemberNewDisplayName("");
     } catch {
       setMemberLookupMsg("網路連線失敗");
     }
@@ -1643,6 +1644,21 @@ export default function AdminPage() {
       setMemberLookupResult((prev: any) => ({ ...prev, profileUrl: d.profileUrl, pendingProfileUrl: null }));
       setMemberNewProfileUrl("");
       setMemberLookupMsg("已更新個人頁網址。");
+    } catch (e: any) {
+      setMemberLookupMsg("失敗：" + e.message);
+    }
+  }
+
+  const [memberNewDisplayName, setMemberNewDisplayName] = useState("");
+  async function saveMemberDisplayName() {
+    if (!memberLookupResult) return;
+    if (!memberNewDisplayName.trim()) return setMemberLookupMsg("請輸入新的會員名稱");
+    setMemberLookupMsg("儲存中…");
+    try {
+      const d = await callJson("/api/admin/members", "PATCH", { username: memberLookupResult.username, displayName: memberNewDisplayName });
+      setMemberLookupResult((prev: any) => ({ ...prev, displayName: d.displayName }));
+      setMemberNewDisplayName("");
+      setMemberLookupMsg("已更新會員名稱。");
     } catch (e: any) {
       setMemberLookupMsg("失敗：" + e.message);
     }
@@ -3490,7 +3506,7 @@ export default function AdminPage() {
         </div>
 
         <div className="auth-card">
-          <h3>查詢會員／修改個人頁網址／刪除會員</h3>
+          <h3>查詢會員／修改會員名稱、個人頁網址／刪除會員</h3>
           <div className="id-row">
             <span className="id-label">帳號</span>
             <input type="text" value={memberLookupUsername} onChange={(e) => setMemberLookupUsername(e.target.value)} onKeyDown={(e) => e.key === "Enter" && lookupMember()} />
@@ -3500,6 +3516,7 @@ export default function AdminPage() {
 
           {memberLookupResult && (
             <div style={{ borderTop: "1px solid #EDE9DC", paddingTop: 10, marginTop: 4 }}>
+              <div style={{ fontSize: 13, marginBottom: 4 }}>會員名稱：{memberLookupResult.displayName || "（尚未設定）"}</div>
               <div style={{ fontSize: 13, marginBottom: 4 }}>個人頁：<span style={{ wordBreak: "break-all" }}>{memberLookupResult.profileUrl}</span></div>
               {memberLookupResult.pendingProfileUrl && (
                 <div style={{ fontSize: 12, color: "#B08E5A", marginBottom: 4 }}>審核中：{memberLookupResult.pendingProfileUrl}</div>
@@ -3508,6 +3525,11 @@ export default function AdminPage() {
                 Email：{memberLookupResult.email}（{memberLookupResult.emailVerified ? "已驗證" : "尚未驗證"}）
               </div>
 
+              <div className="id-row">
+                <span className="id-label">新會員名稱</span>
+                <input type="text" value={memberNewDisplayName} onChange={(e) => setMemberNewDisplayName(e.target.value)} placeholder="1～20 個字，不能和其他會員重複" maxLength={40} />
+                <button className="btn small" onClick={saveMemberDisplayName}>更新</button>
+              </div>
               <div className="id-row">
                 <span className="id-label">新個人頁</span>
                 <input type="text" value={memberNewProfileUrl} onChange={(e) => setMemberNewProfileUrl(e.target.value)} placeholder="直接生效，不用審核" />

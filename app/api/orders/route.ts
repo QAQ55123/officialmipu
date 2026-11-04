@@ -4,6 +4,7 @@ import { genOrderNo, fmtMoney } from "@/lib/util";
 import { notifyDiscord } from "@/lib/discord";
 import { syncOrderToSheet } from "@/lib/sheetsSync";
 import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
+import { escapeLike } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
   }
   const finalWantsGift = wantsGift !== false;
 
-  const { data: member } = await supabase.from("members").select("*").ilike("username", finalUsername).maybeSingle();
+  const { data: member } = await supabase.from("members").select("*").ilike("username", escapeLike(finalUsername)).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到你的會員資料，請重新登入。" }, { status: 400 });
   if (!member.email_verified) {
     return NextResponse.json({ error: "請先驗證信箱後才能下單，可以到「編輯會員資料」重新寄送驗證信。" }, { status: 403 });
@@ -155,7 +156,7 @@ export async function POST(req: Request) {
         .select("id, order_items(product_name, style, subtotal, series_id)")
         .eq("campaign_id", campaign.id)
         .eq("payment", "取付")
-        .ilike("username", member.username);
+        .ilike("username", escapeLike(member.username));
 
       const { data: giftProds } = await supabase
         .from("products")
@@ -309,7 +310,7 @@ export async function GET(req: Request) {
   const { data: orders, error } = await supabase
     .from("orders")
     .select("*, series(name, image_url, is_legacy_archive), campaigns(fulfillment_status), order_items(*), order_gift_selections(*), shipping_batches(id, customer_shipping_fee, created_at, shipping_batch_items(qty, order_item_id, order_gift_selection_id))")
-    .ilike("username", username)
+    .ilike("username", escapeLike(username))
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

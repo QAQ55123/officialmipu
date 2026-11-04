@@ -101,3 +101,11 @@ export async function refundCodQuota(supabase: any, orderId: string): Promise<vo
 export function money(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
+
+/**
+ * 用 ilike 做「不分大小寫、但要完全一樣」的比對時，先把 \ % _ 轉成一般字元。
+ * 不轉的話 _ 和 % 會被當成萬用字元，例如 john_doe 也會對到 johnxdoe。
+ */
+export function escapeLike(s: string | null | undefined): string {
+  return String(s ?? "").replace(/[\\%_]/g, (c) => "\\" + c);
+}

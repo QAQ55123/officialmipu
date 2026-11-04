@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { sendEmail, resetPasswordContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
+import { escapeLike } from "@/lib/util";
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -9,7 +10,7 @@ export async function POST(req: Request) {
   if (!email) return NextResponse.json({ error: "請輸入 Email" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: admin } = await supabase.from("admins").select("*").ilike("email", email).maybeSingle();
+  const { data: admin } = await supabase.from("admins").select("*").ilike("email", escapeLike(email)).maybeSingle();
 
   // 不論帳號存不存在都回傳同樣的成功訊息，避免被拿來刺探哪些 Email 有註冊過
   if (admin) {

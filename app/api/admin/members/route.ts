@@ -3,6 +3,9 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireOwnerSession } from "@/lib/adminAuth";
 import { normFb } from "@/lib/util";
 import { syncMembersSheet } from "@/lib/sheetsSync";
+import { escapeLike } from "@/lib/util";
+import { normalizeDisplayName, displayNameFormatError } from "@/lib/displayName";
+import { displayNameTakenError } from "@/lib/memberDisplayName";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,12 +22,13 @@ export async function GET(req: Request) {
   if (!username) return NextResponse.json({ error: "請輸入帳號" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: member } = await supabase.from("members").select("*").ilike("username", username).maybeSingle();
+  const { data: member } = await supabase.from("members").select("*").ilike("username", escapeLike(username)).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到這個會員" }, { status: 404 });
 
   return NextResponse.json({
     member: {
       username: member.username,
+      displayName: member.display_name || null,
       profileUrl: member.profile_url,
       pendingProfileUrl: member.pending_profile_url,
       email: member.email,
@@ -47,7 +51,7 @@ export async function POST(req: Request) {
   if (!username || !profileUrlRaw) return NextResponse.json({ error: "請填寫帳號跟個人頁網址" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: member } = await supabase.from("members").select("*").ilike("username", username).maybeSingle();
+  const { data: member } = await supabase.from("members").select("*").ilike("username", escapeLike(username)).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到這個會員" }, { status: 404 });
 
   const profileUrl = /^https?:\/\//i.test(profileUrlRaw) ? profileUrlRaw : "https://" + profileUrlRaw;
@@ -78,7 +82,7 @@ export async function DELETE(req: Request) {
   if (!username) return NextResponse.json({ error: "請輸入帳號" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: member } = await supabase.from("members").select("id").ilike("username", username).maybeSingle();
+  const { data: member } = await supabase.from("members").select("id").ilike("username", escapeLike(username)).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到這個會員" }, { status: 404 });
 
   const { error } = await supabase.from("members").delete().eq("id", member.id);
@@ -86,4 +90,34 @@ export async function DELETE(req: Request) {
 
   syncMembersSheet().catch(() => {});
   return NextResponse.json({ ok: true });
+}
+
+/** 後台幫會員修改會員名稱（匯出賣貨便用） body: { username, displayName } */
+export async function PATCH(req: Request) {
+  try {
+    requireOwnerSession(req);
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 401 });
+  }
+  const body = await req.json();
+  const username = String(body.username || "").trim();
+  const displayName = normalizeDisplayName(body.displayName);
+  if (!username) return NextResponse.json({ error: "請輸入帳號" }, { status: 400 });
+  const formatErr = displayNameFormatError(displayName);
+  if (formatErr) return NextResponse.json({ error: formatErr }, { status: 400 });
+
+  const supabase = getSupabaseAdmin();
+  const { data: member } = await supabase.from("members").select("id").ilike("username", escapeLike(username)).maybeSingle();
+  if (!member) return NextResponse.json({ error: "找不到這個會員" }, { status: 404 });
+
+  const takenErr = await displayNameTakenError(supabase, displayName, member.id);
+  if (takenErr) return NextResponse.json({ error: takenErr }, { status: 409 });
+
+  const { error } = await supabase.from("members").update({ display_name: displayName }).eq("id", member.id);
+  if (error) {
+    if (/duplicate|unique/i.test(error.message)) return NextResponse.json({ error: "這個會員名稱已經有人使用" }, { status: 409 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  syncMembersSheet().catch(() => {});
+  return NextResponse.json({ ok: true, displayName });
 }

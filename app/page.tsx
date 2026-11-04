@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { sizedImageUrl } from "@/lib/imageUrl";
 import { Menu, Search, UserCircle, ShoppingCart, X, ChevronDown, ChevronRight, Heart, Bell } from "lucide-react";
 import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
+import { normalizeDisplayName, displayNameFormatError, DISPLAY_NAME_MAX } from "@/lib/displayName";
 import { paymentLabel } from "@/lib/util";
 
 type Category = { id: string; name: string; parentId: string | null };
@@ -31,7 +32,7 @@ const FULFILLMENT_STATUS_MAP: Record<string, { label: string; color: string }> =
   arrived: { label: "已到貨", color: "#fa4166" },
   distributing: { label: "已開賣場", color: "#16a34a" },
 };
-type Identity = { username: string; profileUrl: string; email: string; emailVerified: boolean; pendingProfileUrl?: string | null } | null;
+type Identity = { username: string; displayName?: string | null; profileUrl: string; email: string; emailVerified: boolean; pendingProfileUrl?: string | null } | null;
 type PendingAction = null | "order" | "history" | "favorites" | "checkout";
 
 const fmt = (n: number) => new Intl.NumberFormat("zh-TW").format(Math.round(n));
@@ -141,6 +142,7 @@ export default function Home() {
   const [regConfirmPassword, setRegConfirmPassword] = useState("");
   const [regProfileUrl, setRegProfileUrl] = useState("");
   const [regEmail, setRegEmail] = useState("");
+  const [regDisplayName, setRegDisplayName] = useState("");
   const [authMsg, setAuthMsg] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [registerDone, setRegisterDone] = useState(false);
@@ -295,6 +297,7 @@ export default function Home() {
         if (d.loggedIn) {
           const id: Identity = {
             username: d.username,
+            displayName: d.displayName || null,
             profileUrl: d.profileUrl,
             email: d.email,
             emailVerified: d.emailVerified,
@@ -414,6 +417,7 @@ export default function Home() {
     setRegConfirmPassword("");
     setRegProfileUrl("");
     setRegEmail("");
+    setRegDisplayName("");
   }
 
   function requireIdentity(action: PendingAction) {
@@ -436,7 +440,7 @@ export default function Home() {
       });
       const d = await r.json();
       if (!r.ok) return setAuthMsg(d.error || "登入失敗");
-      const id = { username: d.username, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl };
+      const id = { username: d.username, displayName: d.displayName || null, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl };
       setIdentity(id);
       setLoginPassword("");
       afterAuthSuccess(id);
@@ -450,6 +454,8 @@ export default function Home() {
   async function onRegister() {
     setAuthMsg("");
     if (regUsername.trim().length < 1) return setAuthMsg("請輸入帳號");
+    const regDisplayNameErr = displayNameFormatError(normalizeDisplayName(regDisplayName));
+    if (regDisplayNameErr) return setAuthMsg(regDisplayNameErr);
     if (regPassword.length < 6) return setAuthMsg("密碼至少要 6 個字");
     if (regPassword !== regConfirmPassword) return setAuthMsg("兩次輸入的密碼不一樣");
     if (!regProfileUrl.trim()) return setAuthMsg("請填寫個人頁網址");
@@ -462,6 +468,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: regUsername.trim(),
+          displayName: normalizeDisplayName(regDisplayName),
           password: regPassword,
           confirmPassword: regConfirmPassword,
           profileUrl: regProfileUrl.trim(),
@@ -472,7 +479,7 @@ export default function Home() {
       });
       const d = await r.json();
       if (!r.ok) return setAuthMsg(d.error || "註冊失敗");
-      const id = { username: d.username, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl };
+      const id = { username: d.username, displayName: d.displayName || null, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl };
       setIdentity(id);
       clearAuthForms();
       setRegisterVerifyEmailSent(d.verifyEmailSent !== false);
@@ -1224,7 +1231,7 @@ export default function Home() {
       });
       const d = await r.json();
       if (!r.ok) return setAccountProfileMsg(d.error || "更新失敗");
-      setIdentity({ username: d.username, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl });
+      setIdentity({ username: d.username, displayName: d.displayName || null, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl });
       setAccountNewEmail("");
       setAccountNewProfileUrl("");
       const parts: string[] = [];
@@ -1252,7 +1259,7 @@ export default function Home() {
       });
       const d = await r.json();
       if (!r.ok) return setAccountProfileMsg(d.error || "失敗");
-      setIdentity({ username: d.username, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl });
+      setIdentity({ username: d.username, displayName: d.displayName || null, profileUrl: d.profileUrl, email: d.email, emailVerified: d.emailVerified, pendingProfileUrl: d.pendingProfileUrl });
       setAccountProfileMsg(d.verifyEmailSent ? "驗證信已重新寄出，請去收信點連結驗證（記得也檢查一下垃圾郵件匣）。" : "這個信箱已經驗證過了。");
     } catch {
       setAccountProfileMsg("網路連線失敗，請再試一次");
@@ -1266,6 +1273,40 @@ export default function Home() {
     loadPlans(null, "");
     setSearchQuery("");
     syncUrl({});
+  }
+
+  // ---- 會員名稱（匯出賣貨便用）：編輯會員資料、登入後強制填寫的視窗共用 ----
+  const [accountDisplayNameInput, setAccountDisplayNameInput] = useState("");
+  const [accountDisplayNameMsg, setAccountDisplayNameMsg] = useState("");
+  const [requiredDisplayNameInput, setRequiredDisplayNameInput] = useState("");
+  const [requiredDisplayNameMsg, setRequiredDisplayNameMsg] = useState("");
+  const [savingDisplayName, setSavingDisplayName] = useState(false);
+
+  /** 成功回傳 null，失敗回傳錯誤訊息 */
+  async function saveDisplayName(raw: string): Promise<string | null> {
+    const name = normalizeDisplayName(raw);
+    const fmtErr = displayNameFormatError(name);
+    if (fmtErr) return fmtErr;
+    setSavingDisplayName(true);
+    try {
+      const r = await fetch("/api/auth/display-name", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName: name }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return d.error || "儲存失敗";
+      setIdentity((prev) => {
+        const next = prev ? { ...prev, displayName: d.displayName } : prev;
+        identityRef.current = next;
+        return next;
+      });
+      return null;
+    } catch {
+      return "網路連線失敗，請再試一次";
+    } finally {
+      setSavingDisplayName(false);
+    }
   }
 
   async function logout() {
@@ -1501,7 +1542,7 @@ export default function Home() {
                   <div className="mibu-hover-panel">
                     {identity ? (
                       <>
-                        <div className="mibu-hover-panel-title">{identity.username}</div>
+                        <div className="mibu-hover-panel-title">{identity.displayName || identity.username}</div>
                         <div className="mibu-hover-panel-row"><span>個人頁</span><span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{identity.profileUrl}</span></div>
                       </>
                     ) : (
@@ -1600,7 +1641,7 @@ export default function Home() {
                     <h2 className="section-title">登入</h2>
                     <div className="id-row">
                       <span className="id-label">帳號</span>
-                      <input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} />
+                      <input type="text" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onLogin()} placeholder="輸入帳號或信箱" />
                     </div>
                     <div className="id-row">
                       <span className="id-label">密碼</span>
@@ -1618,6 +1659,10 @@ export default function Home() {
                     <div className="id-row">
                       <span className="id-label">帳號</span>
                       <input type="text" value={regUsername} onChange={(e) => setRegUsername(e.target.value)} placeholder="帳號" />
+                    </div>
+                    <div className="id-row">
+                      <span className="id-label">會員名稱</span>
+                      <input type="text" value={regDisplayName} onChange={(e) => setRegDisplayName(e.target.value)} placeholder="出貨開賣貨便時顯示的名稱，1～20 個字" maxLength={40} />
                     </div>
                     <div className="id-row">
                       <span className="id-label">密碼</span>
@@ -2787,6 +2832,7 @@ export default function Home() {
                 <h2 className="section-title">編輯會員資料</h2>
                 <div className="auth-card" style={{ marginTop: 0 }}>
                   <div className="id-row"><span className="id-label">帳號</span><span>{identity.username}</span></div>
+                  <div className="id-row"><span className="id-label">會員名稱</span><span>{identity.displayName || "（尚未設定）"}</span></div>
                   <div className="id-row"><span className="id-label">個人頁</span><span style={{ wordBreak: "break-all" }}>{identity.profileUrl}</span></div>
                   {identity.pendingProfileUrl && (
                     <div className="id-row">
@@ -2812,6 +2858,27 @@ export default function Home() {
                   </div>
                 </div>
 
+                <div className="auth-card">
+                  <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>修改會員名稱</h3>
+                  <p style={{ fontSize: 12, color: "#8A8779", margin: "0 0 8px" }}>出貨開賣貨便時顯示的名稱，1～{DISPLAY_NAME_MAX} 個字，不能和其他會員重複。</p>
+                  <div className="id-row">
+                    <span className="id-label">新會員名稱</span>
+                    <input type="text" value={accountDisplayNameInput} onChange={(e) => { setAccountDisplayNameInput(e.target.value); setAccountDisplayNameMsg(""); }} placeholder={identity.displayName || "輸入會員名稱"} maxLength={40} />
+                  </div>
+                  <div className="auth-msg">{accountDisplayNameMsg}</div>
+                  <button
+                    className="btn"
+                    disabled={savingDisplayName}
+                    onClick={async () => {
+                      const err = await saveDisplayName(accountDisplayNameInput);
+                      if (err) return setAccountDisplayNameMsg(err);
+                      setAccountDisplayNameInput("");
+                      setAccountDisplayNameMsg("會員名稱已更新");
+                    }}
+                  >
+                    {savingDisplayName ? "儲存中…" : "更新"}
+                  </button>
+                </div>
                 <div className="auth-card">
                   <h3 style={{ margin: "0 0 4px", fontSize: 15 }}>修改信箱／個人頁網址</h3>
                   <div className="id-row">
@@ -2950,6 +3017,50 @@ export default function Home() {
             </div>
             <div className="announcement-modal-date">{new Date(announcementModal.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</div>
             <div className="announcement-modal-content">{announcementModal.content}</div>
+          </div>
+        </div>
+      )}
+
+      {/* 登入中但還沒設定會員名稱：強制填寫，沒有關閉按鈕、點外面也關不掉，只能存好或登出 */}
+      {identity && !identity.displayName && (
+        <div className="announcement-modal-overlay" style={{ zIndex: 200 }}>
+          <div className="announcement-modal-card" role="dialog" aria-modal="true" aria-labelledby="required-display-name-title">
+            <div id="required-display-name-title" className="announcement-modal-title" style={{ marginBottom: 6 }}>請設定會員名稱</div>
+            <p style={{ fontSize: 13, color: "#6B6858", margin: "0 0 12px", lineHeight: 1.6 }}>
+              出貨時會用這個名稱開立賣貨便，設定後才能繼續使用。1～{DISPLAY_NAME_MAX} 個字，不能和其他會員重複。
+            </p>
+            <div className="id-row">
+              <span className="id-label">會員名稱</span>
+              <input
+                type="text"
+                value={requiredDisplayNameInput}
+                maxLength={40}
+                autoFocus
+                onChange={(e) => { setRequiredDisplayNameInput(e.target.value); setRequiredDisplayNameMsg(""); }}
+                onKeyDown={async (e) => {
+                  if (e.key !== "Enter" || savingDisplayName) return;
+                  const err = await saveDisplayName(requiredDisplayNameInput);
+                  if (err) setRequiredDisplayNameMsg(err);
+                  else setRequiredDisplayNameInput("");
+                }}
+              />
+            </div>
+            <div className="auth-msg">{requiredDisplayNameMsg}</div>
+            <button
+              className="btn"
+              style={{ width: "100%" }}
+              disabled={savingDisplayName}
+              onClick={async () => {
+                const err = await saveDisplayName(requiredDisplayNameInput);
+                if (err) setRequiredDisplayNameMsg(err);
+                else setRequiredDisplayNameInput("");
+              }}
+            >
+              {savingDisplayName ? "儲存中…" : "儲存"}
+            </button>
+            <div style={{ textAlign: "center", marginTop: 10 }}>
+              <a style={{ fontSize: 13, color: "var(--muted)", cursor: "pointer" }} onClick={() => { setRequiredDisplayNameInput(""); setRequiredDisplayNameMsg(""); logout(); }}>登出</a>
+            </div>
           </div>
         </div>
       )}

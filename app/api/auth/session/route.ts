@@ -16,6 +16,7 @@ export async function GET(req: Request) {
   return NextResponse.json({
     loggedIn: true,
     username: member.username,
+    displayName: member.display_name || null,
     profileUrl: member.profile_url,
     pendingProfileUrl: member.pending_profile_url,
     email: member.email,

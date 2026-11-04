@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { escapeLike } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,7 +14,7 @@ export async function GET(req: Request) {
   const supabase = getSupabaseAdmin();
 
   // 帳號剛好完全一樣、已經是會員了 → 請他直接登入
-  const { data: existingMember } = await supabase.from("members").select("id").ilike("username", nickname).maybeSingle();
+  const { data: existingMember } = await supabase.from("members").select("id").ilike("username", escapeLike(nickname)).maybeSingle();
   if (existingMember) {
     return NextResponse.json({ alreadyRegistered: true });
   }
@@ -21,7 +22,7 @@ export async function GET(req: Request) {
   const { data: legacyRows, error } = await supabase
     .from("legacy_identities")
     .select("*")
-    .ilike("fb_nickname", nickname)
+    .ilike("fb_nickname", escapeLike(nickname))
     .is("claimed_by_member_id", null);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

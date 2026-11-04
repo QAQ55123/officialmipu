@@ -5,6 +5,8 @@ import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
 import { signMemberSession, memberSessionCookieHeader } from "@/lib/memberAuth";
 import { syncMembersSheet, syncMemberOrdersByCampaign } from "@/lib/sheetsSync";
+import { escapeLike } from "@/lib/util";
+import { usernameClashesDisplayName } from "@/lib/memberDisplayName";
 
 /** 舊會員確認身份後，設定新帳密、正式建立帳號，並把該身份底下的舊訂單改指定成新帳號 */
 export async function POST(req: Request) {
@@ -29,10 +31,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "這筆資料已經被認領過了，如果這是你本人的帳號，請直接登入或使用忘記密碼" }, { status: 409 });
   }
 
-  const { data: existingUsername } = await supabase.from("members").select("id").ilike("username", username).maybeSingle();
+  const { data: existingUsername } = await supabase.from("members").select("id").ilike("username", escapeLike(username)).maybeSingle();
   if (existingUsername) return NextResponse.json({ error: "這個帳號已經被註冊了，換一個試試看" }, { status: 409 });
+  if (await usernameClashesDisplayName(supabase, username)) {
+    return NextResponse.json({ error: "這個帳號跟其他會員的會員名稱相同，請換一個" }, { status: 409 });
+  }
 
-  const { data: existingEmail } = await supabase.from("members").select("id").ilike("email", email).maybeSingle();
+  const { data: existingEmail } = await supabase.from("members").select("id").ilike("email", escapeLike(email)).maybeSingle();
   if (existingEmail) return NextResponse.json({ error: "這個 Email 已經被註冊過了" }, { status: 409 });
 
   const profileUrl = identity.fb_profile_url;

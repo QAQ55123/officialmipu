@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireBotSecret } from "@/lib/botAuth";
 import { syncMembersSheet } from "@/lib/sheetsSync";
+import { escapeLike } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function POST(req: Request) {
   const { data: order } = await supabase.from("orders").select("username").eq("order_no", orderNo).maybeSingle();
   if (!order) return NextResponse.json({ status: "order_not_found" });
 
-  const { data: member } = await supabase.from("members").select("*").ilike("username", order.username).maybeSingle();
+  const { data: member } = await supabase.from("members").select("*").ilike("username", escapeLike(order.username)).maybeSingle();
   if (!member) return NextResponse.json({ status: "no_member" });
 
   if (member.discord_user_id && member.discord_user_id !== discordUserId) {

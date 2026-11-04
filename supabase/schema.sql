@@ -105,6 +105,9 @@ create unique index if not exists idx_members_username on members (lower(usernam
 create unique index if not exists idx_members_email on members (lower(email));
 create unique index if not exists idx_members_profile_url_norm on members (profile_url_norm);
 create index if not exists idx_members_discord_user_id on members (discord_user_id);
+-- 會員名稱：匯出賣貨便時顯示的名稱，1~20 個字、不分大小寫不能重複（舊會員是空的，登入後會被要求填寫）
+alter table members add column if not exists display_name text;
+create unique index if not exists idx_members_display_name on members (lower(display_name)) where display_name is not null;
 
 -- 收藏清單（會員收藏的系列）
 create table if not exists favorites (

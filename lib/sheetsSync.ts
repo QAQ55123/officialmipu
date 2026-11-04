@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from "./supabase";
 import { overwriteSheet, deleteSheetTabIfExists, requireSheetId } from "./googleSheets";
 import { syncOrderRealtimeToPlanTab, syncAllCampaignOrderTabs } from "./planSheetSync";
 import { syncCostSheetForCampaign, syncCostSummary, type CostTabRefs } from "./costSheetSync";
+import { escapeLike } from "@/lib/util";
 
 /** 訂單建立當下即時同步（呼叫端是客人下單流程，這裡「刻意」吞掉錯誤，
  *  Sheet 同步失敗不該讓客人沒辦法下單；真正的失敗原因會印在伺服器 log 裡，
@@ -72,6 +73,7 @@ export async function syncMembersSheet() {
   const { data } = await supabase.from("members").select("*").order("created_at", { ascending: true });
   const rows = (data || []).map((m) => [
     m.username,
+    m.display_name || "",
     m.profile_url,
     m.email,
     m.email_verified ? "已驗證" : "未驗證",
@@ -79,7 +81,7 @@ export async function syncMembersSheet() {
     m.discord_username || "",
     m.discord_user_id || "",
   ]);
-  await overwriteSheet("會員", ["帳號", "個人頁網址", "Email", "信箱驗證", "註冊時間", "DC帳號名稱", "DC使用者ID"], rows);
+  await overwriteSheet("會員", ["帳號", "會員名稱", "個人頁網址", "Email", "信箱驗證", "註冊時間", "DC帳號名稱", "DC使用者ID"], rows);
 }
 
 /** 系列資料同上，整份重寫 */
@@ -115,7 +117,7 @@ export async function syncMemberOrdersByCampaign(memberId: string) {
   const { data: orders } = await supabase
     .from("orders")
     .select("campaign_id, campaigns(name)")
-    .ilike("username", member.username)
+    .ilike("username", escapeLike(member.username))
     .not("campaign_id", "is", null);
 
   const campaignMap = new Map<string, string>();

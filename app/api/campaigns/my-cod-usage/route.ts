@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { getMemberSession } from "@/lib/memberAuth";
+import { escapeLike } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export async function GET(req: Request) {
     .select("id, order_items(product_name, style, subtotal, series_id)")
     .eq("campaign_id", campaignId)
     .eq("payment", "取付")
-    .ilike("username", member.username);
+    .ilike("username", escapeLike(member.username));
 
   const { data: giftProds } = await supabase
     .from("products")

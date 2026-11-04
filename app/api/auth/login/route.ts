@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { hashMemberPw, verifyMemberPw } from "@/lib/util";
 import { signMemberSession, memberSessionCookieHeader } from "@/lib/memberAuth";
+import { escapeLike } from "@/lib/util";
 
 export async function POST(req: Request) {
   const body = await req.json();
+  // 前台登入可以輸入帳號或信箱：先當帳號找，找不到而且有 @ 才當信箱找
   const username = String(body.username || "").trim();
   const password = String(body.password || "");
   const newPassword = body.newPassword ? String(body.newPassword) : "";
@@ -12,7 +14,11 @@ export async function POST(req: Request) {
   if (!username || !password) return NextResponse.json({ error: "請輸入帳號密碼" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: member } = await supabase.from("members").select("*").ilike("username", username).maybeSingle();
+  let { data: member } = await supabase.from("members").select("*").ilike("username", escapeLike(username)).maybeSingle();
+  if (!member && username.includes("@")) {
+    const byEmail = await supabase.from("members").select("*").ilike("email", escapeLike(username)).maybeSingle();
+    member = byEmail.data;
+  }
   if (!member) return NextResponse.json({ error: "帳號或密碼錯誤" }, { status: 401 });
 
   const ok = await verifyMemberPw(password, member.password_hash);
@@ -27,6 +33,7 @@ export async function POST(req: Request) {
   const res = NextResponse.json({
     ok: true,
     username: member.username,
+    displayName: member.display_name || null,
     profileUrl: member.profile_url,
     pendingProfileUrl: member.pending_profile_url,
     email: member.email,

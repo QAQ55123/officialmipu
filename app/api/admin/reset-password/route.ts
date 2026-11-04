@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { hashMemberPw } from "@/lib/util";
 import { requireOwnerSession } from "@/lib/adminAuth";
+import { escapeLike } from "@/lib/util";
 
 /** body: { username } → 密碼重設為 0000 */
 export async function POST(req: Request) {
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
   if (!username) return NextResponse.json({ error: "請提供帳號" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: member } = await supabase.from("members").select("*").ilike("username", username).maybeSingle();
+  const { data: member } = await supabase.from("members").select("*").ilike("username", escapeLike(username)).maybeSingle();
   if (!member) return NextResponse.json({ error: "找不到會員" }, { status: 404 });
 
   const newHash = await hashMemberPw("0000");

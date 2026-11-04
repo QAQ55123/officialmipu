@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { verifyAdminPw, signSession, sessionCookieHeader } from "@/lib/adminAuth";
+import { escapeLike } from "@/lib/util";
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -9,7 +10,7 @@ export async function POST(req: Request) {
   if (!username || !password) return NextResponse.json({ error: "請輸入帳號密碼" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: admin } = await supabase.from("admins").select("*").ilike("username", username).maybeSingle();
+  const { data: admin } = await supabase.from("admins").select("*").ilike("username", escapeLike(username)).maybeSingle();
   if (!admin) return NextResponse.json({ error: "帳號或密碼錯誤" }, { status: 401 });
 
   const ok = await verifyAdminPw(password, admin.password_hash);

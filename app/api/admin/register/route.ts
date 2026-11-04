@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { hashAdminPw, isOwnerInviteCode, signSession, sessionCookieHeader } from "@/lib/adminAuth";
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
+import { escapeLike } from "@/lib/util";
 
 export async function POST(req: Request) {
   const body = await req.json();
@@ -36,9 +37,9 @@ export async function POST(req: Request) {
     inviteCodeRowId = codeRow.id;
   }
 
-  const { data: existingUsername } = await supabase.from("admins").select("id").ilike("username", username).maybeSingle();
+  const { data: existingUsername } = await supabase.from("admins").select("id").ilike("username", escapeLike(username)).maybeSingle();
   if (existingUsername) return NextResponse.json({ error: "這個帳號已經被註冊了" }, { status: 409 });
-  const { data: existingEmail } = await supabase.from("admins").select("id").ilike("email", email).maybeSingle();
+  const { data: existingEmail } = await supabase.from("admins").select("id").ilike("email", escapeLike(email)).maybeSingle();
   if (existingEmail) return NextResponse.json({ error: "這個 Email 已經被註冊過了" }, { status: 409 });
 
   const passwordHash = await hashAdminPw(password);

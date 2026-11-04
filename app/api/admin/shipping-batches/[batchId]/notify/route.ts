@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { sendEmail, shipmentNoticeContent } from "@/lib/resend";
+import { escapeLike } from "@/lib/util";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export async function POST(req: Request, { params }: { params: { batchId: string
   const { data: member } = await supabase
     .from("members")
     .select("email, email_verified")
-    .ilike("username", order.username)
+    .ilike("username", escapeLike(order.username))
     .maybeSingle();
   if (!member?.email) {
     return NextResponse.json({ error: "這位顧客沒有登記信箱（可能是還沒認領的舊訂單），無法寄送通知" }, { status: 400 });

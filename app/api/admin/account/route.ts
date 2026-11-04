@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, verifyAdminPw } from "@/lib/adminAuth";
 import { sendEmail, verifyEmailContent } from "@/lib/resend";
 import { genToken, hoursFromNow, getSiteUrl } from "@/lib/tokens";
+import { escapeLike } from "@/lib/util";
 
 export async function POST(req: Request) {
   let session;
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, email: admin.email, emailVerified: false, verifyEmailSent: true });
   }
 
-  const { data: existing } = await supabase.from("admins").select("id").ilike("email", newEmail).neq("id", admin.id).maybeSingle();
+  const { data: existing } = await supabase.from("admins").select("id").ilike("email", escapeLike(newEmail)).neq("id", admin.id).maybeSingle();
   if (existing) return NextResponse.json({ error: "這個 Email 已經被其他管理者使用" }, { status: 409 });
 
   const verifyToken = genToken();

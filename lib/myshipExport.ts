@@ -13,7 +13,7 @@ const MAX_ROWS_PER_PRODUCT = 50; // 賣貨便規定：一個商品最多 50 個�
 const MYSHIP_PRICE_MAX = 20000;
 
 /**
- * 產生賣貨便批次上架用的資料：每位顧客一個「規格」，價格是他這次要付的金額。
+ * 產生賣貨便批次上架用的資料：每位顧客一個「規格」（同一人多張訂單合併），規格名稱是會員名稱，價格是他這次要付的金額。
  * 金額＝商品小計＋應收運費－已收金額（也就是尚欠），跟成本表的客戶明細算法一致。
  */
 export async function computeMyshipExport(campaignId: string): Promise<MyshipExportResult> {
@@ -36,18 +36,43 @@ export async function computeMyshipExport(campaignId: string): Promise<MyshipExp
     feeByOrder.set(b.order_id, (feeByOrder.get(b.order_id) || 0) + (Number(b.customer_shipping_fee) || 0));
   });
 
-  const overLimit: string[] = [];
-  const rows: MyshipRow[] = [];
+  // 同一位顧客在這個檔期的多張訂單合併成一列、金額加總（訂單上的帳號不分大小寫視為同一人）
+  const byCustomer = new Map<string, { username: string; amount: number }>();
   (orders || []).forEach((o: any) => {
     const itemsTotal = (o.order_items || []).reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0);
     const fee = feeByOrder.get(o.id) || 0;
     const paid = Number(o.paid_amount) || 0;
-    const amount = Math.max(0, Math.ceil(itemsTotal + fee - paid));
+    const owed = itemsTotal + fee - paid;
+    const key = String(o.username || "").trim().toLowerCase();
+    const cur = byCustomer.get(key) || { username: String(o.username || "").trim(), amount: 0 };
+    cur.amount += owed;
+    byCustomer.set(key, cur);
+  });
+
+  // 規格名稱用會員名稱；沒有會員名稱的（例如沒對到會員的舊訂單）用訂單上的帳號
+  const displayNameByUsername = new Map<string, string>();
+  // 只查這個檔期有下單的人（一次撈全部會員會被 Supabase 預設的 1000 筆上限截斷）
+  const orderUsernames = Array.from(new Set((orders || []).map((o: any) => String(o.username || "").trim()).filter(Boolean)));
+  for (let i = 0; i < orderUsernames.length; i += 200) {
+    const { data: members } = await supabase
+      .from("members")
+      .select("username, display_name")
+      .in("username", orderUsernames.slice(i, i + 200));
+    (members || []).forEach((m: any) => {
+      if (m.display_name) displayNameByUsername.set(String(m.username).trim().toLowerCase(), m.display_name);
+    });
+  }
+
+  const overLimit: string[] = [];
+  const rows: MyshipRow[] = [];
+  byCustomer.forEach(({ username, amount: owed }, key) => {
+    const name = displayNameByUsername.get(key) || username;
+    const amount = Math.max(0, Math.ceil(owed));
     if (amount > MYSHIP_PRICE_MAX) {
-      overLimit.push(`${o.username}（NT$${amount}）`);
+      overLimit.push(`${name}（NT$${amount}）`);
       return;
     }
-    rows.push({ account: o.username, amount });
+    rows.push({ account: name, amount });
   });
   rows.sort((a, b) => a.account.localeCompare(b.account));
 
