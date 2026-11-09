@@ -3,6 +3,8 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
 import { resolveTxnRate, ceilToTwd } from "@/lib/txnRate";
+import { computeStyleLimits, picksFeasible } from "@/lib/giftQuota";
+import { loadCampaignGiftRules, orderItemAmounts } from "@/lib/orderGiftContext";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +109,36 @@ export async function PATCH(req: Request) {
       fx_rate: rate,
       has_discount_flag_snapshot: !!product.has_discount_flag,
     });
+  }
+
+  // 改完商品後，已選的滿贈不能超過新的可選數量（照顧客結帳同一套規則）；超過就擋，請先到滿贈區塊減少
+  if (order.wants_gift !== false && order.campaign_id) {
+    const { data: sels } = await supabase.from("order_gift_selections").select("gift_style_id, style_name_snapshot, qty").eq("order_id", order.id);
+    const picks: Record<string, number> = {};
+    (sels || []).forEach((g: any) => {
+      if (g.gift_style_id) picks[g.gift_style_id] = (picks[g.gift_style_id] || 0) + (Number(g.qty) || 0);
+    });
+    const wanted = Object.values(picks).reduce((s, v) => s + v, 0);
+    if (wanted > 0) {
+      const giftRules = await loadCampaignGiftRules(supabase, order.campaign_id);
+      const amounts = await orderItemAmounts(supabase, newItemRows.map((r) => ({ ...r, product_name: r.product_name })));
+      if (!picksFeasible(amounts, giftRules.vendorCap, picks, giftRules.rules)) {
+        const { totalPossible, limits } = computeStyleLimits(amounts, giftRules.vendorCap, {}, giftRules.rules);
+        if (wanted > totalPossible) {
+          return NextResponse.json(
+            { error: `改完後可選總量剩 ${totalPossible} 個，但目前已選 ${wanted} 個滿贈，請先到滿贈區塊減少 ${wanted - totalPossible} 個` },
+            { status: 400 }
+          );
+        }
+        const over = giftRules.styles
+          .filter((st) => (picks[st.id] || 0) > (limits[st.id] || 0))
+          .map((st) => `${st.styleName} 最多 ${limits[st.id] || 0} 個（目前 ${picks[st.id]} 個）`);
+        return NextResponse.json(
+          { error: `改完後滿贈超過款式上限：${over.length > 0 ? over.join("、") : "請到滿贈區塊調整"}，請先到滿贈區塊減少` },
+          { status: 400 }
+        );
+      }
+    }
   }
 
   const { error: delErr } = await supabase.from("order_items").delete().eq("order_id", order.id);

@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import { toDirectImageUrl } from "@/lib/imageUrl";
 import { paymentLabel } from "@/lib/util";
+import { computeStyleLimits, picksFeasible } from "@/lib/giftQuota";
 
 type Category = { id: string; name: string; parent_id: string | null; created_at?: string; sort_order?: number; isGiftCategory?: boolean };
 type SeriesAdmin = {
@@ -864,6 +865,60 @@ export default function AdminPage() {
   const [orderLookupMsg, setOrderLookupMsg] = useState("");
   const [orderPlanProducts, setOrderPlanProducts] = useState<ProductAdmin[]>([]);
   const [editingOrderItems, setEditingOrderItems] = useState(false);
+  // ---- 後台編輯訂單滿贈 ----
+  const [editingGifts, setEditingGifts] = useState(false);
+  const [giftEditData, setGiftEditData] = useState<any>(null);
+  const [giftEditWants, setGiftEditWants] = useState(true);
+  const [giftEditPicks, setGiftEditPicks] = useState<Record<string, number>>({});
+  const [giftEditMsg, setGiftEditMsg] = useState("");
+  const [savingGifts, setSavingGifts] = useState(false);
+
+  const fmtAmount = (n: number) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+
+  async function openGiftEditor() {
+    if (!orderLookupResult) return;
+    setGiftEditMsg("載入中…");
+    setEditingGifts(true);
+    try {
+      const r = await fetch(`/api/admin/orders/${encodeURIComponent(orderLookupResult.orderNo)}/gifts`, { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) { setGiftEditMsg(d.error || "載入失敗"); return; }
+      setGiftEditData(d);
+      setGiftEditWants(!!d.wantsGift);
+      setGiftEditPicks(d.picks || {});
+      setGiftEditMsg("");
+    } catch {
+      setGiftEditMsg("網路連線失敗");
+    }
+  }
+
+  function closeGiftEditor() {
+    setEditingGifts(false);
+    setGiftEditData(null);
+    setGiftEditMsg("");
+  }
+
+  async function saveGiftEdit() {
+    if (!orderLookupResult || !giftEditData) return;
+    setSavingGifts(true);
+    setGiftEditMsg("");
+    try {
+      const r = await fetch(`/api/admin/orders/${encodeURIComponent(orderLookupResult.orderNo)}/gifts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wantsGift: giftEditWants, picks: giftEditWants ? giftEditPicks : {} }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setGiftEditMsg(d.error || "儲存失敗"); return; }
+      closeGiftEditor();
+      await lookupOrder();
+      setOrderLookupMsg(["滿贈已更新。", d.codNotice, d.syncWarning].filter(Boolean).join(" "));
+    } catch {
+      setGiftEditMsg("網路連線失敗");
+    } finally {
+      setSavingGifts(false);
+    }
+  }
   const [editItemRows, setEditItemRows] = useState<{ name: string; style: string; qty: string; seriesId: string }[]>([]);
   // 出貨通知：每個批次各自記賣場網址（每個檔期的賣貨便連結不一樣，每次都要當場填）
   const [notifyShopUrl, setNotifyShopUrl] = useState<Record<string, string>>({});
@@ -1682,6 +1737,8 @@ export default function AdminPage() {
     setOrderLookupMsg("");
     setOrderLookupResult(null);
     setEditingOrderItems(false);
+    setEditingGifts(false);
+    setGiftEditData(null);
     setOrderPlanProducts([]);
     if (!orderLookupNo.trim()) return setOrderLookupMsg("請輸入訂單編號");
     try {
@@ -3602,10 +3659,89 @@ export default function AdminPage() {
 
                       {/* 顧客選的滿贈，讓店家在後台直接確認（尤其是匯入的舊訂單要能核對） */}
                       <div style={{ marginTop: 12, borderTop: "1px solid #EDE9DC", paddingTop: 10 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                          滿贈{orderLookupResult.wantsGift === false ? "（顧客未選擇滿贈）" : ""}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>
+                            滿贈{orderLookupResult.wantsGift === false ? "（顧客未選擇滿贈）" : ""}
+                          </div>
+                          {currentRole === "owner" && !editingGifts && (
+                            <button className="btn small secondary" onClick={openGiftEditor}>編輯滿贈</button>
+                          )}
                         </div>
-                        {(orderLookupResult.gifts || []).length === 0 ? (
+                        {editingGifts ? (() => {
+                          const d = giftEditData;
+                          if (!d) return <div style={{ fontSize: 12, color: giftEditMsg && giftEditMsg !== "載入中…" ? "#B3261E" : "#8A8779" }}>{giftEditMsg} {giftEditMsg !== "載入中…" && <button className="btn small secondary" onClick={closeGiftEditor}>關閉</button>}</div>;
+                          const rules = (d.styles || []).map((st: any) => ({ id: st.id, thresholdAmount: st.thresholdAmount, perStyleCap: st.perStyleCap }));
+                          const picks: Record<string, number> = giftEditWants ? giftEditPicks : {};
+                          const amounts: number[] = d.itemAmounts || [];
+                          const hasRules = rules.length > 0 && amounts.length > 0;
+                          const base = hasRules ? computeStyleLimits(amounts, d.vendorCap, {}, rules) : { limits: {} as Record<string, number>, totalPossible: 0 };
+                          const totalPossible = base.totalPossible;
+                          const limitsNow = hasRules ? computeStyleLimits(amounts, d.vendorCap, picks, rules).limits : {};
+                          const used = Object.values(picks).reduce((a: number, b: number) => a + (Number(b) || 0), 0);
+                          const baseUnit = rules.length > 0 ? Math.min(...rules.map((r: any) => r.thresholdAmount)) : 0;
+                          const canAdd = (id: string) => hasRules && used < totalPossible && picksFeasible(amounts, d.vendorCap, { ...picks, [id]: (picks[id] || 0) + 1 }, rules);
+                          const batchBlocked = Object.entries(d.batchedByStyle || {}).filter(([id, q]) => (picks[id] || 0) < Number(q));
+                          const toggled = giftEditWants !== !!d.wantsGift;
+                          const priceBlocked = toggled && !!d.toggleError;
+                          return (
+                            <div>
+                              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, margin: "4px 0 8px" }}>
+                                <input type="checkbox" checked={giftEditWants} onChange={(e) => setGiftEditWants(e.target.checked)} /> 要滿贈
+                              </label>
+                              <div style={{ fontSize: 13, marginBottom: 4, opacity: giftEditWants ? 1 : 0.45 }}>
+                                可選總量 <strong>{used}</strong> / {totalPossible}
+                                <span style={{ fontSize: 12, color: "#8A8779" }}>　（商品原幣小計 ￥{fmtAmount(d.originalSubtotal || 0)}，基礎單位 {baseUnit || "—"}{d.vendorCap < Number.MAX_SAFE_INTEGER ? `，平台上限 ${d.vendorCap}` : ""}）</span>
+                              </div>
+                              {(d.styles || []).length === 0 && <div style={{ fontSize: 12, color: "#8A8779" }}>這個檔期還沒有登記滿贈款式</div>}
+                              {(d.styles || []).map((st: any) => {
+                                const v = picks[st.id] || 0;
+                                // 跟顧客結帳同一套判斷：還沒選任何滿贈時這款能不能選（金額不夠＝未達門檻）
+                                const unlocked = (base.limits[st.id] || 0) > 0;
+                                const locked = !giftEditWants || !unlocked;
+                                const batchedQ = Number((d.batchedByStyle || {})[st.id] || 0);
+                                const batchNos = ((d.batchNoByStyle || {})[st.id] || []).map((n: number) => `第 ${n} 批`).join("、");
+                                return (
+                                  <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #EDE9DC", opacity: locked ? 0.45 : 1 }}>
+                                    {st.imageUrl ? <img src={st.imageUrl} alt="" style={{ width: 30, height: 30, objectFit: "cover", borderRadius: 4 }} /> : <span style={{ width: 30, height: 30, borderRadius: 4, background: "#F2E9D8", display: "inline-block" }} />}
+                                    <div style={{ minWidth: 0 }}>
+                                      <div style={{ fontSize: 14 }}>{st.styleName}</div>
+                                      <div style={{ fontSize: 12, color: "#8A8779" }}>
+                                        門檻 ￥{st.thresholdAmount}・此款上限 {unlocked ? Math.min(limitsNow[st.id] ?? 0, v + Math.max(0, totalPossible - used)) : 0}{!unlocked ? "（未達門檻）" : ""}
+                                        {batchedQ > 0 ? `・已在出貨批次${batchNos ? ` ${batchNos}` : ""} ${batchedQ} 個` : ""}
+                                      </div>
+                                    </div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                                      <button className="btn small secondary" aria-label="減少" disabled={locked || v <= 0} onClick={() => setGiftEditPicks((p) => ({ ...p, [st.id]: Math.max(0, (p[st.id] || 0) - 1) }))}>−</button>
+                                      <span style={{ minWidth: 20, textAlign: "center" }}>{v}</span>
+                                      <button className="btn small secondary" aria-label="增加" disabled={locked || !canAdd(st.id)} onClick={() => setGiftEditPicks((p) => ({ ...p, [st.id]: (p[st.id] || 0) + 1 }))}>+</button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {giftEditWants && used > 0 && used >= totalPossible && <div style={{ fontSize: 12, color: "#B3261E", marginTop: 6 }}>已達可選總量上限</div>}
+                              {batchBlocked.map(([id, q]) => {
+                                const name = (d.styles || []).find((st: any) => st.id === id)?.styleName || "這個滿贈";
+                                const nos = ((d.batchNoByStyle || {})[id] || []).map((n: number) => `第 ${n} 批`).join("、");
+                                return <div key={id} style={{ fontSize: 12, color: "#B3261E", marginTop: 6 }}>{name}已經在出貨批次{nos ? ` ${nos}` : ""}（{String(q)} 個），請先把它移出批次，才能減少數量或取消滿贈</div>;
+                              })}
+                              <div style={{ background: priceBlocked ? "#FCEBEB" : "#FAEEDA", color: priceBlocked ? "#A32D2D" : "#854F0B", borderRadius: 8, padding: "8px 10px", fontSize: 13, marginTop: 8 }}>
+                                {!toggled
+                                  ? "交易組合沒變，金額不會重算"
+                                  : priceBlocked
+                                  ? d.toggleError
+                                  : <>
+                                      {giftEditWants ? "改成要滿贈：金額改用「有滿贈」的匯率重算" : "改成不要滿贈：滿贈會清空，金額改用「無滿贈」的匯率重算"}
+                                      <br />商品合計 NT${fmtAmount(d.currentTotal)} → <strong>NT${fmtAmount(d.toggledTotal ?? d.currentTotal)}</strong>（尚欠金額跟著調整）
+                                    </>}
+                              </div>
+                              {giftEditMsg && <div style={{ fontSize: 12, color: "#B3261E", marginTop: 6 }}>{giftEditMsg}</div>}
+                              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                                <button className="btn small" onClick={saveGiftEdit} disabled={savingGifts || batchBlocked.length > 0 || priceBlocked}>{savingGifts ? "儲存中…" : "儲存滿贈"}</button>
+                                <button className="btn small secondary" onClick={closeGiftEditor} disabled={savingGifts}>取消</button>
+                              </div>
+                            </div>
+                          );
+                        })() : (orderLookupResult.gifts || []).length === 0 ? (
                           <div style={{ fontSize: 12, color: "#8A8779" }}>這張訂單沒有滿贈紀錄</div>
                         ) : (
                           orderLookupResult.gifts.map((g: any, i: number) => (

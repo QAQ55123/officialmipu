@@ -320,3 +320,32 @@ export function computeStyleLimits(
 
   return { limits, totalPossible };
 }
+
+/**
+ * 這組滿贈選擇在這批商品金額下「拿不拿得到」——跟顧客結帳時同一套拆法判斷：
+ * 只要有任何一種代表性拆單方式能把每個款式的數量都配齊，就算可以。
+ * 後台編輯訂單滿贈、編輯訂單商品時用來擋超過上限的情況。
+ */
+export function picksFeasible(
+  itemAmounts: number[],
+  vendorOrderGiftCap: number,
+  picks: Record<string, number>,
+  styles: GiftStyleRule[]
+): boolean {
+  const wanted = Object.values(picks).reduce((s, v) => s + (Number(v) || 0), 0);
+  if (wanted <= 0) return true;
+  if (itemAmounts.length === 0 || styles.length === 0) return false;
+  // 總量上限：顧客結帳頁選滿「可選總量」後就不能再加，這裡同樣擋
+  if (wanted > computeStyleLimits(itemAmounts, vendorOrderGiftCap, {}, styles).totalPossible) return false;
+  const thresholds = Array.from(new Set(styles.map((s) => s.thresholdAmount)));
+  const baseUnit = Math.min(...thresholds);
+  const overCapAmounts: number[] = [];
+  const splittableAmounts: number[] = [];
+  for (const amount of itemAmounts) {
+    if (Math.floor(amount / baseUnit) > vendorOrderGiftCap) overCapAmounts.push(vendorOrderGiftCap * baseUnit);
+    else splittableAmounts.push(amount);
+  }
+  const partitions = (splittableAmounts.length > 0 ? candidatePartitions(splittableAmounts, thresholds) : [[]])
+    .map((p) => [...p, ...overCapAmounts]);
+  return partitions.some((p) => canFill(p, vendorOrderGiftCap, picks, styles));
+}
