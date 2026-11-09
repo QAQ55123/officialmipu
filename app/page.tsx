@@ -1495,7 +1495,12 @@ export default function Home() {
                 >
                   <Menu size={20} />
                 </button>
-                <span className="mibu-logo" onClick={goHome} style={{ cursor: "pointer" }}>米舖-官方周邊代購</span>
+                <span className="mibu-logo" onClick={goHome} style={{ cursor: "pointer" }}>
+                  {/* 電腦版一行「米舖-官方周邊代購」；手機版空間不夠，改成「米舖」「官方周邊代購」上下兩行 */}
+                  <span className="mibu-logo-main">米舖</span>
+                  <span className="mibu-logo-sep">-</span>
+                  <span className="mibu-logo-sub">官方周邊代購</span>
+                </span>
               </div>
               <div className="mibu-right-group">
                 <div className="mibu-search-desktop">
@@ -2306,7 +2311,7 @@ export default function Home() {
                         const showAltPrice = isAltSite && hasAltSitePrice(e);
                         return (
                           <div key={key} style={{ borderBottom: isLast ? "none" : "1px dashed var(--line)" }}>
-                          <div className="cart-item-row" style={{ borderBottom: "none" }}>
+                          <div className="cart-item-row cart-item-row-cart" style={{ borderBottom: "none" }}>
                             <div className="cart-item-left">
                               <input
                                 type="checkbox"

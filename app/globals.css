@@ -169,13 +169,31 @@ html, body {
   padding: 0 20px; gap: 12px;
 }
 .mibu-logo-group { display: flex; align-items: center; gap: 10px; }
-.mibu-logo { font-size: 17px; font-weight: 600; color: var(--primary); letter-spacing: 1px; }
+.mibu-logo { font-size: 17px; font-weight: 600; color: var(--primary); letter-spacing: 1px; white-space: nowrap; }
 .mibu-icon-btn { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 20px; padding: 4px; display: flex; }
 .mibu-icon-btn:hover { color: var(--text); }
 .mibu-right-group { display: flex; align-items: center; gap: 16px; }
 .mibu-auth-link {
   font-size: 13px; color: var(--primary); font-weight: 500; cursor: pointer;
   border: 1px solid var(--line); padding: 6px 14px; border-radius: 999px; white-space: nowrap; background: none;
+}
+/* 手機版：右邊圖示加登入按鈕佔掉大部分寬度，標題改成上下兩行、字縮小，圖示間距也縮小 */
+@media (max-width: 760px) {
+  .mibu-header-row { padding: 0 12px; gap: 8px; }
+  .mibu-logo-group { gap: 6px; min-width: 0; flex: 0 1 auto; }
+  .mibu-logo { display: flex; flex-direction: column; line-height: 1.2; letter-spacing: 0; }
+  .mibu-logo-main { font-size: 15px; }
+  .mibu-logo-sep { display: none; }
+  .mibu-logo-sub { font-size: 10.5px; font-weight: 500; color: var(--muted); }
+  .mibu-right-group { gap: 10px; flex: 0 0 auto; }
+  .mibu-auth-link { padding: 6px 10px; font-size: 12.5px; }
+}
+/* 更窄的手機（iPhone 11 Pro 375、部分 Android 360）沒登入時多了「登入 / 註冊」按鈕，再把圖示間距收緊 */
+@media (max-width: 400px) {
+  .mibu-header-row { padding: 0 10px; }
+  .mibu-right-group { gap: 4px; }
+  .mibu-right-group .mibu-icon-btn { padding: 2px; }
+  .mibu-auth-link { padding: 5px 8px; font-size: 12px; margin-left: 2px; }
 }
 .mibu-cart-wrap { position: relative; display: flex; }
 .mibu-cart-badge {
@@ -515,6 +533,16 @@ html, body {
   cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; padding: 4px;
 }
 .cart-item-remove:hover { color: #B3261E; }
+/* 購物車頁手機版：一列放不下，改成兩行——第一行勾選框、圖片、名稱；第二行數量、金額、移除
+   （第二行左邊留白＝勾選框18 + 間距12 + 圖片56 + 間距12，讓數量框對齊名稱） */
+@media (max-width: 640px) {
+  .cart-item-row-cart { flex-wrap: wrap; row-gap: 8px; }
+  .cart-item-row-cart .cart-item-left { flex: 1 1 100%; }
+  .cart-item-row-cart .cart-item-info { flex: 1 1 auto; }
+  .cart-item-row-cart .cart-item-name { white-space: normal; word-break: break-word; }
+  .cart-item-row-cart .cart-item-right { width: 100%; box-sizing: border-box; padding-left: 98px; gap: 12px; }
+  .cart-item-row-cart .cart-item-price { margin-left: auto; width: auto; }
+}
 
 .cart-group-footer {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
