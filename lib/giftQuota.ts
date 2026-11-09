@@ -148,108 +148,169 @@ function candidatePartitions(amounts: number[], thresholds: number[]): number[][
   return results;
 }
 
-/** 這個拆法下，能不能滿足顧客已經選的組合 */
-function canFill(
-  groupAmounts: number[],
-  vendorOrderGiftCap: number,
-  picks: Record<string, number>,
-  styles: GiftStyleRule[]
-): boolean {
-  const remaining: Record<string, number> = {};
-  styles.forEach((s) => (remaining[s.id] = picks[s.id] || 0));
-  if (Object.values(remaining).every((v) => v <= 0)) return true;
+// ─────────────────────────────────────────────────────────────────────────────
+// 精確分配：判斷「這些滿贈放不放得進這幾張採購單」
+//
+// 舊做法是一張單一張單依序塞（門檻高的先），不會回頭重排，遇到「每款每單限 1 個」
+// 時常會誤判放不下（例：徽章選 2 個必須兩張單各放一個，但第一張單的門檻名額先被別款佔走），
+// 結果顧客看到「可選 10 / 11」卻怎麼選都加不上去、送不出訂單。
+//
+// 現在改用最大流（網路流）一次把所有已選款式同時分配，只要存在任何一種放法就一定找得到。
+// 網路：起點 → 款式（顧客選的數量）→ 每張單的各門檻名額（每款每單上限）
+//       → 每張單（同門檻名額數 floor(單金額 ÷ 門檻)）→ 終點（每單總量 min(floor(單金額 ÷ 基礎單位), 廠商上限)）
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // 門檻高的先配（比較難滿足）
-  const sorted = [...styles].sort((a, b) => b.thresholdAmount - a.thresholdAmount);
-  for (const amount of groupAmounts) {
-    let groupCount = 0; // 這張採購單已經放了幾個贈品，不能超過廠商單筆上限
-    // 每個門檻在這一組能開出幾個名額（同門檻的不同款式共用這批名額）
-    const slotsLeft: Record<number, number> = {};
-    for (const s of sorted) {
-      if (slotsLeft[s.thresholdAmount] === undefined) {
-        slotsLeft[s.thresholdAmount] = Math.floor(amount / s.thresholdAmount);
+const BIG = 1e9;
+
+class FlowNet {
+  private head: number[] = [];
+  private to: number[] = [];
+  private cap: number[] = [];
+  private next: number[] = [];
+  nodeCount = 0;
+
+  addNode(): number {
+    this.head.push(-1);
+    return this.nodeCount++;
+  }
+
+  /** 回傳這條邊的編號，之後可以調整容量 */
+  addEdge(u: number, v: number, c: number): number {
+    const id = this.to.length;
+    this.to.push(v); this.cap.push(c); this.next.push(this.head[u]); this.head[u] = id;
+    this.to.push(u); this.cap.push(0); this.next.push(this.head[v]); this.head[v] = id + 1;
+    return id;
+  }
+
+  addCap(edgeId: number, extra: number) {
+    this.cap[edgeId] += extra;
+  }
+
+  /** Edmonds–Karp：從目前的殘餘網路繼續增廣，回傳這次增加的流量 */
+  augment(s: number, t: number): number {
+    let total = 0;
+    for (;;) {
+      const prevEdge = new Array(this.nodeCount).fill(-1);
+      const seen = new Array(this.nodeCount).fill(false);
+      seen[s] = true;
+      const queue = [s];
+      for (let qi = 0; qi < queue.length && !seen[t]; qi++) {
+        const u = queue[qi];
+        for (let e = this.head[u]; e !== -1; e = this.next[e]) {
+          const v = this.to[e];
+          if (!seen[v] && this.cap[e] > 0) {
+            seen[v] = true;
+            prevEdge[v] = e;
+            queue.push(v);
+          }
+        }
       }
-    }
-    for (const s of sorted) {
-      if (remaining[s.id] <= 0 || groupCount >= vendorOrderGiftCap) continue;
-      if (amount < s.thresholdAmount) continue;
-      const give = Math.min(
-        s.perStyleCap,
-        remaining[s.id],
-        vendorOrderGiftCap - groupCount,
-        slotsLeft[s.thresholdAmount]
-      );
-      if (give <= 0) continue;
-      remaining[s.id] -= give;
-      groupCount += give;
-      slotsLeft[s.thresholdAmount] -= give;
+      if (!seen[t]) return total;
+      let f = Infinity;
+      for (let v = t; v !== s; v = this.to[prevEdge[v] ^ 1]) f = Math.min(f, this.cap[prevEdge[v]]);
+      for (let v = t; v !== s; v = this.to[prevEdge[v] ^ 1]) {
+        this.cap[prevEdge[v]] -= f;
+        this.cap[prevEdge[v] ^ 1] += f;
+      }
+      total += f;
     }
   }
-  return Object.values(remaining).every((v) => v <= 0);
 }
 
-/** 這個拆法下，某個款式最多能拿幾個（在已選的基礎上再加） */
-function maxForStyle(
+/** 建立某一種拆法（每張單的金額）的分配網路；sourceCap 是每個款式從起點流出的上限 */
+function buildAssignment(
   groupAmounts: number[],
   vendorOrderGiftCap: number,
-  picks: Record<string, number>,
+  baseUnit: number,
   styles: GiftStyleRule[],
-  target: GiftStyleRule
-): number {
-  const remaining: Record<string, number> = {};
-  styles.forEach((s) => (remaining[s.id] = picks[s.id] || 0));
-  const groupUsed = new Array(groupAmounts.length).fill(0);
-  const targetUsedPerGroup = new Array(groupAmounts.length).fill(0);
-  // 每組每個門檻還剩幾個名額（同門檻的不同款式共用）
-  const slotsLeft: Record<number, number>[] = groupAmounts.map((amount) => {
-    const m: Record<number, number> = {};
-    styles.forEach((s) => {
-      if (m[s.thresholdAmount] === undefined) m[s.thresholdAmount] = Math.floor(amount / s.thresholdAmount);
-    });
-    return m;
+  sourceCap: (s: GiftStyleRule) => number
+) {
+  const net = new FlowNet();
+  const S = net.addNode();
+  const T = net.addNode();
+  const styleEdge: Record<string, number> = {};
+  const styleNode: Record<string, number> = {};
+  styles.forEach((s) => {
+    styleNode[s.id] = net.addNode();
+    styleEdge[s.id] = net.addEdge(S, styleNode[s.id], Math.max(0, sourceCap(s)));
   });
+  const thresholds = Array.from(new Set(styles.map((s) => s.thresholdAmount)));
+  groupAmounts.forEach((amount) => {
+    const groupCapacity = Math.min(Math.floor(amount / baseUnit), vendorOrderGiftCap);
+    if (groupCapacity <= 0) return;
+    const g = net.addNode();
+    net.addEdge(g, T, groupCapacity);
+    thresholds.forEach((t) => {
+      if (amount < t) return;
+      const slot = net.addNode();
+      net.addEdge(slot, g, Math.floor(amount / t)); // 同門檻的不同款式共用這批名額
+      styles.forEach((s) => {
+        if (s.thresholdAmount === t) net.addEdge(styleNode[s.id], slot, s.perStyleCap); // 每款每單上限
+      });
+    });
+  });
+  return { net, S, T, styleEdge };
+}
 
-  // 先把已選的配置進去（門檻高的優先）
-  const sorted = [...styles].sort((a, b) => b.thresholdAmount - a.thresholdAmount);
-  for (let gi = 0; gi < groupAmounts.length; gi++) {
-    for (const s of sorted) {
-      if (remaining[s.id] <= 0 || groupUsed[gi] >= vendorOrderGiftCap) continue;
-      if (groupAmounts[gi] < s.thresholdAmount) continue;
-      const give = Math.min(
-        s.perStyleCap,
-        remaining[s.id],
-        vendorOrderGiftCap - groupUsed[gi],
-        slotsLeft[gi][s.thresholdAmount]
-      );
-      if (give <= 0) continue;
-      remaining[s.id] -= give;
-      groupUsed[gi] += give;
-      slotsLeft[gi][s.thresholdAmount] -= give;
-      if (s.id === target.id) targetUsedPerGroup[gi] += give;
-    }
-  }
-  if (Object.values(remaining).some((v) => v > 0)) return -1; // 這個拆法根本滿足不了已選的
+function sumPicks(picks: Record<string, number>, styles: GiftStyleRule[]): number {
+  return styles.reduce((sum, s) => sum + Math.max(0, Number(picks[s.id]) || 0), 0);
+}
 
-  // 剩下的空間，這個款式還能再放幾個
-  // 三層限制取最小：每款上限（扣掉已放的）、該組總量剩餘、該門檻名額剩餘
-  let extra = 0;
-  const alreadyPicked = picks[target.id] || 0;
-  for (let gi = 0; gi < groupAmounts.length; gi++) {
-    if (groupAmounts[gi] < target.thresholdAmount) continue;
-    const usedByTargetInThisGroup = targetUsedPerGroup[gi] || 0;
-    const room = Math.min(
-      target.perStyleCap - usedByTargetInThisGroup,
-      vendorOrderGiftCap - groupUsed[gi],
-      slotsLeft[gi][target.thresholdAmount]
-    );
-    if (room > 0) extra += room;
+/** 這種拆法放不放得下目前選的全部滿贈 */
+function canFillExact(groupAmounts: number[], cap: number, baseUnit: number, picks: Record<string, number>, styles: GiftStyleRule[]): boolean {
+  const need = sumPicks(picks, styles);
+  if (need <= 0) return true;
+  const { net, S, T } = buildAssignment(groupAmounts, cap, baseUnit, styles, (s) => Number(picks[s.id]) || 0);
+  return net.augment(S, T) >= need;
+}
+
+/** 在放得下目前選擇的前提下，某個款式最多能拿幾個（含已選的）；放不下回傳 -1 */
+function maxForStyleExact(groupAmounts: number[], cap: number, baseUnit: number, picks: Record<string, number>, styles: GiftStyleRule[], target: GiftStyleRule): number {
+  const need = sumPicks(picks, styles);
+  const { net, S, T, styleEdge } = buildAssignment(groupAmounts, cap, baseUnit, styles, (s) => Number(picks[s.id]) || 0);
+  if (net.augment(S, T) < need) return -1;
+  // 其他款式的流量已經滿了，再把這個款式的起點放寬，繼續增廣多出來的就是它還能再拿的數量
+  net.addCap(styleEdge[target.id], BIG);
+  const extra = net.augment(S, T);
+  return (Number(picks[target.id]) || 0) + extra;
+}
+
+/** 這種拆法最多能放幾個滿贈（不限款式怎麼選） */
+function maxTotalExact(groupAmounts: number[], cap: number, baseUnit: number, styles: GiftStyleRule[]): number {
+  const { net, S, T } = buildAssignment(groupAmounts, cap, baseUnit, styles, () => BIG);
+  return net.augment(S, T);
+}
+
+/** 依顧客結帳同一套規則產生代表性拆法：單件超過廠商上限的自成一單，其他的互相湊組（去掉重複的拆法） */
+function partitionsFor(itemAmounts: number[], vendorOrderGiftCap: number, styles: GiftStyleRule[]): { partitions: number[][]; baseUnit: number } {
+  const thresholds = Array.from(new Set(styles.map((s) => s.thresholdAmount)));
+  const baseUnit = Math.min(...thresholds);
+  // 公式A：單件金額大到超過廠商上限時，這一件永遠自成一張採購單（跟別人湊組也拿不到更多），
+  // 而且超出的部分是死金額，有效金額被壓成「廠商上限 × 基礎單位」。
+  // 例：單價750、上限5、基礎100 → floor(750/100)=7 > 5，有效金額500，門檻300是 floor(500/300)=1 個。
+  const overCapAmounts: number[] = [];
+  const splittableAmounts: number[] = [];
+  for (const amount of itemAmounts) {
+    if (Math.floor(amount / baseUnit) > vendorOrderGiftCap) overCapAmounts.push(vendorOrderGiftCap * baseUnit);
+    else splittableAmounts.push(amount);
   }
-  return alreadyPicked + extra;
+  const raw = (splittableAmounts.length > 0 ? candidatePartitions(splittableAmounts, thresholds) : [[]]).map((p) => [...p, ...overCapAmounts]);
+  const seen = new Set<string>();
+  const partitions: number[][] = [];
+  for (const p of raw) {
+    const key = [...p].sort((a, b) => b - a).join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    partitions.push(p);
+  }
+  return { partitions, baseUnit };
 }
 
 /**
  * 算出每個款式的上限（已選的 + 還能再選的）。
  * 顧客每按一次加減就呼叫一次，用來即時更新畫面、鎖住不能再加的按鈕。
+ * totalPossible：這批商品理論上最多能拿到幾個贈品（「可選 x / y 個」的 y）。
+ * 兩者用同一套精確分配計算，保證「只要總數還沒滿，就一定有某一款能再加」。
  */
 export function computeStyleLimits(
   itemAmounts: number[],
@@ -257,72 +318,33 @@ export function computeStyleLimits(
   picks: Record<string, number>,
   styles: GiftStyleRule[]
 ): { limits: Record<string, number>; totalPossible: number } {
-  const thresholds = Array.from(new Set(styles.map((s) => s.thresholdAmount)));
-  const baseUnit = Math.min(...thresholds);
-
-  // 公式A：單件金額大到超過廠商上限時，這一件永遠自成一張採購單（跟別人湊組也拿不到更多），
-  // 而且超出的部分是死金額，有效金額被壓成「廠商上限 × 基礎單位」。
-  // 例：單價750、上限5、基礎100 → floor(750/100)=7 > 5，有效金額500，門檻300是 floor(500/300)=1 個。
-  // 750x3 就是 3 張各自獨立的採購單（各拿5個），不是 2250 合成一張（只拿5個）。
-  const overCapAmounts: number[] = [];
-  const splittableAmounts: number[] = [];
-  for (const amount of itemAmounts) {
-    if (Math.floor(amount / baseUnit) > vendorOrderGiftCap) overCapAmounts.push(vendorOrderGiftCap * baseUnit);
-    else splittableAmounts.push(amount);
-  }
-
-  // 可拆單的商品互相湊組；超上限的每件各自一組，固定加在後面
-  const partitions = (splittableAmounts.length > 0 ? candidatePartitions(splittableAmounts, thresholds) : [[]])
-    .map((p) => [...p, ...overCapAmounts]);
-  const viable = partitions.filter((p) => canFill(p, vendorOrderGiftCap, picks, styles));
-
   const limits: Record<string, number> = {};
+  if (styles.length === 0 || itemAmounts.length === 0) {
+    styles.forEach((s) => (limits[s.id] = Number(picks[s.id]) || 0));
+    return { limits, totalPossible: 0 };
+  }
+  const { partitions, baseUnit } = partitionsFor(itemAmounts, vendorOrderGiftCap, styles);
+  const viable = partitions.filter((p) => canFillExact(p, vendorOrderGiftCap, baseUnit, picks, styles));
+
   for (const s of styles) {
-    let best = picks[s.id] || 0;
+    let best = Number(picks[s.id]) || 0;
     for (const p of viable) {
-      const v = maxForStyle(p, vendorOrderGiftCap, picks, styles, s);
+      const v = maxForStyleExact(p, vendorOrderGiftCap, baseUnit, picks, styles, s);
       if (v > best) best = v;
     }
     limits[s.id] = best;
   }
 
-  // 這批商品理論上最多能拿到幾個贈品（給畫面顯示參考）
-  // 這批商品理論上最多能拿到幾個贈品（給畫面顯示參考）
-  // 每一組（＝一張採購單）能放的贈品數：把該組解鎖的款式逐一放進去，
-  // 每款最多 perStyleCap 個，整組不超過廠商單筆上限
   let totalPossible = 0;
   for (const p of partitions) {
-    let n = 0;
-    for (const amount of p) {
-      // 這一組能放的贈品數，同樣受三層限制：
-      // ① 該組總量 = min(floor(組金額 ÷ 基礎單位), 廠商上限)
-      // ② 該門檻的名額數 = floor(組金額 ÷ 門檻)，同門檻款式共用
-      // ③ 每款上限
-      const groupCapacity = Math.min(Math.floor(amount / baseUnit), vendorOrderGiftCap);
-      const slotsLeft: Record<number, number> = {};
-      styles.forEach((s) => {
-        if (slotsLeft[s.thresholdAmount] === undefined) slotsLeft[s.thresholdAmount] = Math.floor(amount / s.thresholdAmount);
-      });
-      let groupCount = 0;
-      // 門檻低的先放（低門檻名額多，能塞滿比較多贈品）
-      for (const s of [...styles].sort((a, b) => a.thresholdAmount - b.thresholdAmount)) {
-        if (groupCount >= groupCapacity) break;
-        if (amount < s.thresholdAmount) continue;
-        const give = Math.min(s.perStyleCap, groupCapacity - groupCount, slotsLeft[s.thresholdAmount]);
-        if (give <= 0) continue;
-        groupCount += give;
-        slotsLeft[s.thresholdAmount] -= give;
-      }
-      n += groupCount;
-    }
+    const n = maxTotalExact(p, vendorOrderGiftCap, baseUnit, styles);
     if (n > totalPossible) totalPossible = n;
   }
-
   return { limits, totalPossible };
 }
 
 /**
- * 這組滿贈選擇在這批商品金額下「拿不拿得到」——跟顧客結帳時同一套拆法判斷：
+ * 這組滿贈選擇在這批商品金額下「拿不拿得到」——跟顧客結帳時同一套拆法與精確分配：
  * 只要有任何一種代表性拆單方式能把每個款式的數量都配齊，就算可以。
  * 後台編輯訂單滿贈、編輯訂單商品時用來擋超過上限的情況。
  */
@@ -332,20 +354,11 @@ export function picksFeasible(
   picks: Record<string, number>,
   styles: GiftStyleRule[]
 ): boolean {
-  const wanted = Object.values(picks).reduce((s, v) => s + (Number(v) || 0), 0);
-  if (wanted <= 0) return true;
+  if (sumPicks(picks, styles) <= 0) return true;
+  // 選了不在這個檔期的款式
+  const ids = new Set(styles.map((s) => s.id));
+  if (Object.entries(picks).some(([id, q]) => (Number(q) || 0) > 0 && !ids.has(id))) return false;
   if (itemAmounts.length === 0 || styles.length === 0) return false;
-  // 總量上限：顧客結帳頁選滿「可選總量」後就不能再加，這裡同樣擋
-  if (wanted > computeStyleLimits(itemAmounts, vendorOrderGiftCap, {}, styles).totalPossible) return false;
-  const thresholds = Array.from(new Set(styles.map((s) => s.thresholdAmount)));
-  const baseUnit = Math.min(...thresholds);
-  const overCapAmounts: number[] = [];
-  const splittableAmounts: number[] = [];
-  for (const amount of itemAmounts) {
-    if (Math.floor(amount / baseUnit) > vendorOrderGiftCap) overCapAmounts.push(vendorOrderGiftCap * baseUnit);
-    else splittableAmounts.push(amount);
-  }
-  const partitions = (splittableAmounts.length > 0 ? candidatePartitions(splittableAmounts, thresholds) : [[]])
-    .map((p) => [...p, ...overCapAmounts]);
-  return partitions.some((p) => canFill(p, vendorOrderGiftCap, picks, styles));
+  const { partitions, baseUnit } = partitionsFor(itemAmounts, vendorOrderGiftCap, styles);
+  return partitions.some((p) => canFillExact(p, vendorOrderGiftCap, baseUnit, picks, styles));
 }
