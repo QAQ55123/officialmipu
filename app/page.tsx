@@ -350,12 +350,22 @@ export default function Home() {
     setPlansLoading(false);
   }
 
+  function scrollToTop() {
+    try {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch {
+      window.scrollTo(0, 0);
+    }
+  }
+
   function selectCategory(id: string | null) {
     setSelectedCategoryId(id);
     // 點其他分類時清空搜尋，顯示這個分類的全部系列（不沿用上一次的關鍵字）
     setSearchQuery("");
     loadPlans(id, "");
     setMobileDrawerOpen(false);
+    // 分類目錄跟系列列表一起捲動：點了下方的分類後要捲回最上面，才看得到系列
+    scrollToTop();
     syncUrl(id ? { view: "plans", category: id } : {});
     // 選到有子分類的分類時，自動展開，不用另外去點小箭頭
     if (id && categories.some((c) => c.parentId === id)) {
@@ -1275,6 +1285,7 @@ export default function Home() {
     loadPlans(null, "");
     setSearchQuery("");
     syncUrl({});
+    scrollToTop();
   }
 
   // ---- 會員名稱（匯出賣貨便用）：編輯會員資料、登入後強制填寫的視窗共用 ----
