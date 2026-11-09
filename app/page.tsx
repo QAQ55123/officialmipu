@@ -352,7 +352,9 @@ export default function Home() {
 
   function selectCategory(id: string | null) {
     setSelectedCategoryId(id);
-    loadPlans(id, searchQuery);
+    // 點其他分類時清空搜尋，顯示這個分類的全部系列（不沿用上一次的關鍵字）
+    setSearchQuery("");
+    loadPlans(id, "");
     setMobileDrawerOpen(false);
     syncUrl(id ? { view: "plans", category: id } : {});
     // 選到有子分類的分類時，自動展開，不用另外去點小箭頭
