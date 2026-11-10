@@ -2404,14 +2404,30 @@ export default function Home() {
 
                 {globalCart.length > 0 && (
                   <div className="cart-checkout-bar">
-                    <span>
-                      已選 <strong>{selectedCartKeys.size}</strong> 項商品　
-                      合計 <strong>￥ {fmtOriginal(
-                        globalCart
-                          .filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)))
-                          .reduce((s, e) => s + e.qty * e.price, 0)
-                      )}</strong>
-                    </span>
+                    {(() => {
+                      // 一般商品是人民幣、滿贈系列商品（店家拿出來賣的贈品）本來就是台幣，合計要分開，不能相加
+                      const selected = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)));
+                      const isGiftSeries = (e: GlobalCartEntry) =>
+                        !!cartPlanStatus[e.planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.linkedGiftStyleId;
+                      const rmbItems = selected.filter((e) => !isGiftSeries(e));
+                      const twdItems = selected.filter((e) => isGiftSeries(e));
+                      const rmbTotal = rmbItems.reduce((s, e) => s + e.qty * e.price, 0);
+                      const twdTotal = twdItems.reduce((s, e) => s + e.qty * e.price, 0);
+                      return (
+                        <span>
+                          已選 <strong>{selectedCartKeys.size}</strong> 項商品
+                          合計{" "}
+                          {twdItems.length > 0 && rmbItems.length === 0 ? (
+                            <strong>NT$ {fmt(twdTotal)}</strong>
+                          ) : (
+                            <>
+                              <strong>￥ {fmtOriginal(rmbTotal)}</strong>
+                              {twdItems.length > 0 && <> ＋ <strong>NT$ {fmt(twdTotal)}</strong></>}
+                            </>
+                          )}
+                        </span>
+                      );
+                    })()}
                     <button className="btn" disabled={selectedCartKeys.size === 0 || !campaignOpen} onClick={goToCheckout}>
                       {campaignOpen ? "前往結帳" : "目前非開放購買"}
                     </button>
