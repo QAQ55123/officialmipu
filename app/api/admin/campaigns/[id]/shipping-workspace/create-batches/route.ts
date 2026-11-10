@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 
@@ -97,5 +98,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (failed.length > 0) {
     return NextResponse.json({ error: `部分批次建立失敗：${failed.join("；")}`, createdCount }, { status: 500 });
   }
+  if (createdCount > 0) scheduleCostSync(params.id);
   return NextResponse.json({ ok: true, createdCount });
 }

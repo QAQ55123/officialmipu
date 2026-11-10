@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { scheduleCostSync, campaignIdOfOrderNo } from "@/lib/costSync";
 
 /** PATCH：填寫這批的內部物流成本（店家自己付給物流商的錢，不轉嫁顧客）。body: { internalCost, note } */
 export async function PATCH(req: Request, { params }: { params: { orderNo: string; batchId: string } }) {
@@ -30,5 +31,6 @@ export async function DELETE(req: Request, { params }: { params: { orderNo: stri
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("shipping_batches").delete().eq("id", params.batchId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  scheduleCostSync(await campaignIdOfOrderNo(supabase, params.orderNo));
   return NextResponse.json({ ok: true });
 }

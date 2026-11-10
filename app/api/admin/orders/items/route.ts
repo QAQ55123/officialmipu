@@ -5,6 +5,7 @@ import { syncOrderRealtimeToPlanTab } from "@/lib/planSheetSync";
 import { resolveTxnRate, ceilToTwd } from "@/lib/txnRate";
 import { computeStyleLimits, picksFeasible } from "@/lib/giftQuota";
 import { loadCampaignGiftRules, orderItemAmounts } from "@/lib/orderGiftContext";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +153,7 @@ export async function PATCH(req: Request) {
   if (order.campaign_id && campaignName) {
     try {
       await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      scheduleCostSync(order.campaign_id);
     } catch (e: any) {
       syncWarning = "訂單商品內容已更新，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

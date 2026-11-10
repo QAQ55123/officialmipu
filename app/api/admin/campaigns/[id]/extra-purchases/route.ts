@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { money } from "@/lib/util";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -127,5 +128,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (body.orderNumber) {
     await supabase.from("extra_purchase_order_numbers").insert({ extra_purchase_id: purchase.id, order_number: String(body.orderNumber) });
   }
+  scheduleCostSync(params.id); // 額外採購成本變了
   return NextResponse.json({ extraPurchase: purchase });
 }

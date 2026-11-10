@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "./supabase";
 import { overwriteSheet, deleteSheetTabIfExists, requireSheetId } from "./googleSheets";
 import { syncOrderRealtimeToPlanTab, syncAllCampaignOrderTabs } from "./planSheetSync";
-import { syncCostSheetForCampaign, syncCostSummary, type CostTabRefs } from "./costSheetSync";
+import { syncCostSheetForCampaign, syncCostSummary } from "./costSheetSync";
 import { escapeLike } from "@/lib/util";
 
 /** 訂單建立當下即時同步（呼叫端是客人下單流程，這裡「刻意」吞掉錯誤，
@@ -12,12 +12,18 @@ export async function syncOrderToSheet(params: { campaignId: string; campaignNam
     await syncOrderRealtimeToPlanTab(params.campaignId, params.campaignName);
   } catch (e) {
     console.error("Google Sheet 訂單同步失敗：", e);
-    return; // 訂單分頁都沒同步成功，成本表也不用試了（成本表是讀訂單分頁內容統計的）
   }
+  await syncCampaignCostSheet(params.campaignId);
+}
+
+/**
+ * 只同步「這一個檔期」的成本表，再更新總覽（總覽用標籤找數字，不必重跑其他檔期）。
+ * 給自動同步用：顧客下單、後台改訂單／付款／出貨批次／物流重量／額外採購之後呼叫。錯誤只記 log。
+ */
+export async function syncCampaignCostSheet(campaignId: string) {
   try {
-    await syncCostSheetForCampaign(params.campaignId);
-    // 總覽是跨檔期彙總，任何一個檔期的成本表變了都要重算一次
-    await syncAllCostSummaryOnly();
+    await syncCostSheetForCampaign(campaignId);
+    await syncCostSummary();
   } catch (e) {
     console.error("Google Sheet 成本表同步失敗：", e);
   }
@@ -29,38 +35,20 @@ export async function syncAllOrdersSheet() {
   await syncAllCampaignOrderTabs();
 }
 
-/** 只重算「總覽」分頁：重新掃一次所有檔期的成本表位置，不重寫各檔期的內容 */
-async function syncAllCostSummaryOnly() {
-  const supabase = getSupabaseAdmin();
-  const { data: campaigns } = await supabase.from("campaigns").select("id, name");
-  const refs: CostTabRefs[] = [];
-  for (const c of campaigns || []) {
-    try {
-      refs.push(await syncCostSheetForCampaign(c.id));
-    } catch {
-      // 某個檔期失敗就跳過，總覽仍然更新其他檔期
-    }
-  }
-  await syncCostSummary(refs);
-}
-
-/** 刷新成本試算表：每個檔期一個分頁（商品明細／收入／成本／總覽），
- *  資料直接從資料庫統計，不依賴訂單分頁的內容 */
+/** 刷新成本試算表（後台「完整同步」按鈕）：每個檔期各重寫一次，最後更新總覽 */
 export async function syncAllOrdersCostSheet() {
   const supabase = getSupabaseAdmin();
   const { data: campaigns } = await supabase.from("campaigns").select("id, name");
   const failed: string[] = [];
-  const refs: CostTabRefs[] = [];
   for (const c of campaigns || []) {
     try {
-      refs.push(await syncCostSheetForCampaign(c.id));
+      await syncCostSheetForCampaign(c.id);
     } catch (e: any) {
       failed.push(`${c.name}：${e?.message || "同步失敗"}`);
     }
   }
-  // 各檔期成本表寫完之後，再更新「總覽」分頁（它用跨分頁公式引用各檔期的數字）
   try {
-    await syncCostSummary(refs);
+    await syncCostSummary();
   } catch (e: any) {
     failed.push(`總覽：${e?.message || "同步失敗"}`);
   }

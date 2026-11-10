@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab } from "@/lib/planSheetSync";
 import { refundCodQuota } from "@/lib/util";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,7 @@ export async function POST(req: Request) {
   for (const [campaignId, campaignName] of campaignMap) {
     try {
       await syncOrderRealtimeToPlanTab(campaignId, campaignName);
+      scheduleCostSync(campaignId);
     } catch (e: any) {
       syncWarnings.push(`「${campaignName}」同步失敗：${e?.message || "未知錯誤"}`);
     }

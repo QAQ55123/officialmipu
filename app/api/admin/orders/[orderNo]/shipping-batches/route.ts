@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { scheduleCostSync, campaignIdOfOrderNo } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -111,5 +112,7 @@ export async function POST(req: Request, { params }: { params: { orderNo: string
     .insert(rows.map((r) => ({ ...r, shipping_batch_id: batch.id })));
   if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 });
 
+  // 應收運費變了，背景更新這個檔期的成本表
+  scheduleCostSync(await campaignIdOfOrderNo(supabase, params.orderNo));
   return NextResponse.json({ ok: true, batchId: batch.id, customerShippingFee: totalShippingFee });
 }

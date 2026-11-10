@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireOwnerSession } from "@/lib/adminAuth";
 import { syncOrderRealtimeToPlanTab } from "@/lib/planSheetSync";
 import { refundCodQuota } from "@/lib/util";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -62,6 +63,7 @@ export async function POST(req: Request) {
   if (order.campaign_id && campaignName) {
     try {
       await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      scheduleCostSync(order.campaign_id);
     } catch (e: any) {
       syncWarning = "已核准取消，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

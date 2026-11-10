@@ -283,6 +283,9 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   addRow(pad(["總收入(NT$)", "", `=C${totalIncomeRow}`]));
   addRow(pad(["總成本(NT$)", "", `=C${totalCostRow}`]));
   const netProfitRow = addRow(pad(["淨利潤(NT$)", "", `=C${totalIncomeRow}-C${totalCostRow}`]));
+  // 已收／未收合計：給最上面的「總覽」分頁用標籤找到（總覽不再記行號，所以同步一個檔期時不用重跑其他檔期）
+  addRow(pad(["已收合計(NT$)", "", firstCustomerRow ? `=SUM(H${firstCustomerRow}:H${lastCustomerRow})` : 0]));
+  addRow(pad(["未收合計(NT$)", "", firstCustomerRow ? `=SUM(I${firstCustomerRow}:I${lastCustomerRow})` : 0]));
   addRow(pad(["淨利潤率", "", `=IF(C${totalIncomeRow}=0,"",C${netProfitRow}/C${totalIncomeRow})`]));
 
   // ── 額外採購明細（方便核對）──
@@ -322,36 +325,42 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
 }
 
 /**
- * 「總覽」分頁：把所有檔期的收入／成本／淨利潤彙總成一張表，
- * 每一格都用跨分頁公式引用各檔期的成本表，所以檔期成本表更新後總覽會自動跟著變。
+ * 「總覽」分頁：把所有檔期的收入／成本／淨利潤彙總成一張表。
+ * 每一格用公式「到那個檔期的分頁找寫著『總收入』等標籤的那一列」，不記行號——
+ * 所以某個檔期的成本表重寫後總覽會自動拿到新數字，同步一個檔期時不用為了更新總覽重跑其他檔期。
+ * 這裡只需要知道「有哪些檔期分頁」，不碰各檔期的內容。
  */
-export async function syncCostSummary(refs: CostTabRefs[]): Promise<void> {
+export async function syncCostSummary(): Promise<void> {
   const costId = requireCostSheetId();
   // 總覽固定放在第一個分頁，打開試算表就先看到
   const { sheets, sheetId } = await ensureSheetExists(costId, "總覽", 0);
 
+  // 有成本分頁的檔期才列（還沒同步過的檔期沒有分頁，公式會抓不到）；依開放時間由舊到新
+  const supabase = getSupabaseAdmin();
+  const { data: campaigns } = await supabase.from("campaigns").select("name, opens_at").order("opens_at", { ascending: true });
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: costId, fields: "sheets.properties.title" });
+  const existingTabs = new Set((meta.data.sheets || []).map((sh: any) => sh.properties?.title));
+  const tabNames = (campaigns || []).map((c: any) => c.name).filter((n: string) => existingTabs.has(n));
+
   const header = ["檔期", "銷售(收入)", "進貨成本", "淨利潤", "已收款金額", "未收款金額", "淨利潤率"];
   const data: (string | number)[][] = [header];
+  const pick = (ref: string, label: string) => `=IFERROR(INDEX(${ref}C:C,MATCH("${label}",${ref}A:A,0)),0)`;
 
-  refs.forEach((r, i) => {
+  tabNames.forEach((tabName: string, i: number) => {
     const row = i + 2;
-    const ref = `'${r.tabName.replace(/'/g, "''")}'!`;
-    const custEndRow = r.custStartRow + r.custCount - 1;
-    // 已收＝客戶明細的H欄、未收＝I欄（客戶明細欄位：A帳號 B會員名稱 C訂單編號 D商品小計 E應收運費 F應收總額 G交易方式 H已收 I尚欠 J滿贈選擇）
-    const paidF = r.custCount > 0 ? `=SUM(${ref}H${r.custStartRow}:H${custEndRow})` : 0;
-    const owingF = r.custCount > 0 ? `=SUM(${ref}I${r.custStartRow}:I${custEndRow})` : 0;
+    const ref = `'${tabName.replace(/'/g, "''")}'!`;
     data.push([
-      r.tabName,
-      `=${ref}C${r.incomeRow}`,
-      `=${ref}C${r.costRow}`,
-      `=${ref}C${r.profitRow}`,
-      paidF,
-      owingF,
+      tabName,
+      pick(ref, "總收入"),
+      pick(ref, "總成本(NT$)"),
+      pick(ref, "淨利潤(NT$)"),
+      pick(ref, "已收合計(NT$)"),
+      pick(ref, "未收合計(NT$)"),
       `=IF(B${row}=0,"",D${row}/B${row})`,
     ]);
   });
 
-  const n = refs.length;
+  const n = tabNames.length;
   if (n > 0) {
     const first = 2;
     const last = 1 + n;

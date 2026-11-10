@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,7 @@ export async function POST(req: Request, { params }: { params: { id: string; pur
     if (!orderNumber) return NextResponse.json({ error: "請輸入廠商訂單編號" }, { status: 400 });
     const { error } = await supabase.from("extra_purchase_order_numbers").insert({ extra_purchase_id: purchase.id, order_number: orderNumber });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
 
@@ -82,6 +84,7 @@ export async function POST(req: Request, { params }: { params: { id: string; pur
       weight_kg: w != null && isFinite(w) ? w : null,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
 
@@ -102,6 +105,7 @@ export async function POST(req: Request, { params }: { params: { id: string; pur
     }
     const { error } = await supabase.from("extra_purchase_shipment_items").insert({ shipment_id: shipmentId, extra_purchase_item_id: extraPurchaseItemId, qty });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
 
@@ -124,6 +128,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string; pu
     }
     const { error } = await supabase.from("extra_purchase_shipments").update(updates).eq("id", String(body.shipmentId));
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
 
@@ -146,6 +151,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string; pu
     }
     const { error } = await supabase.from("extra_purchase_shipment_items").update(updates).eq("id", shipmentItemId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
 
@@ -161,11 +167,13 @@ export async function DELETE(req: Request, { params }: { params: { id: string; p
   if (body.shipmentItemId) {
     const { error } = await supabase.from("extra_purchase_shipment_items").delete().eq("id", String(body.shipmentItemId));
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
   if (body.shipmentId) {
     const { error } = await supabase.from("extra_purchase_shipments").delete().eq("id", String(body.shipmentId));
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
   if (body.orderNumberId) {
@@ -175,6 +183,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string; p
       .eq("id", String(body.orderNumberId))
       .eq("extra_purchase_id", params.purchaseId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    scheduleCostSync(params.id); // 額外採購／物流重量變了
     return NextResponse.json({ ok: true });
   }
   return NextResponse.json({ error: "缺少要刪除的項目" }, { status: 400 });

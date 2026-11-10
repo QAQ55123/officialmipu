@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export async function DELETE(req: Request, { params }: { params: { id: string; purchaseId: string } }) {
   try {
@@ -11,5 +12,6 @@ export async function DELETE(req: Request, { params }: { params: { id: string; p
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("vendor_extra_purchases").delete().eq("id", params.purchaseId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  scheduleCostSync(params.id); // 額外採購／物流重量變了
   return NextResponse.json({ ok: true });
 }

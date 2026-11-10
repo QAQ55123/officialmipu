@@ -5,6 +5,7 @@ import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 import { computeStyleLimits, picksFeasible } from "@/lib/giftQuota";
 import { loadCampaignGiftRules, orderItemAmounts } from "@/lib/orderGiftContext";
 import { syncOrderRealtimeToPlanTab } from "@/lib/planSheetSync";
+import { scheduleCostSync } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
 
@@ -274,6 +275,7 @@ export async function PUT(req: Request, { params }: { params: { orderNo: string 
   if (campaignName) {
     try {
       await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
+      scheduleCostSync(order.campaign_id);
     } catch (e: any) {
       syncWarning = "滿贈已更新，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

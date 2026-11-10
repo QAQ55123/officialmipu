@@ -5,6 +5,7 @@ import { notifyDiscord } from "@/lib/discord";
 import { syncOrderToSheet } from "@/lib/sheetsSync";
 import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 import { escapeLike } from "@/lib/util";
+import { runInBackground } from "@/lib/background";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -307,10 +308,11 @@ export async function POST(req: Request) {
     ],
   });
 
-  syncOrderToSheet({
+  // 回應顧客之後繼續在背景同步（交給 waitUntil，Vercel 才不會在回應送出後中斷它）
+  runInBackground("下單後同步 Google Sheet", () => syncOrderToSheet({
     campaignId: campaign.id,
     campaignName: campaign.name,
-  }).catch(() => {});
+  }).catch(() => {}));
 
   return NextResponse.json({ ok: true, orderNo: order.order_no, count: rows.length, total: orderTotal });
 }
