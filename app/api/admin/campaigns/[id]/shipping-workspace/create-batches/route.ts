@@ -30,11 +30,29 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   });
 
   // 運費：一般商品用 products.shipping_fee，滿贈固定0
-  const itemIds = picks.filter((p) => p.type === "item").map((p) => p.id);
-  const { data: orderItems } = itemIds.length
-    ? await supabase.from("order_items").select("id, product_name, style, series_id").in("id", itemIds)
-    : { data: [] };
-  const { data: products } = await supabase.from("products").select("name, style, series_id, shipping_fee");
+  // 只查這次要出貨的品項、以及它們所屬系列的商品（之前一次撈全站商品，超過 Supabase 預設的 1000 筆時
+  // 後面的商品會查不到，運費變成 0）；每批查詢再用分頁撈完，避免單一批也超過 1000 筆
+  const itemIds = Array.from(new Set(picks.filter((p) => p.type === "item").map((p) => p.id)));
+  const orderItems: any[] = [];
+  for (let i = 0; i < itemIds.length; i += 200) {
+    const { data } = await supabase.from("order_items").select("id, product_name, style, series_id").in("id", itemIds.slice(i, i + 200));
+    orderItems.push(...(data || []));
+  }
+  const seriesIds = Array.from(new Set(orderItems.map((it: any) => it.series_id).filter(Boolean)));
+  const products: any[] = [];
+  for (let i = 0; i < seriesIds.length; i += 50) {
+    const chunk = seriesIds.slice(i, i + 50);
+    for (let from = 0; ; from += 1000) {
+      const { data } = await supabase
+        .from("products")
+        .select("name, style, series_id, shipping_fee")
+        .in("series_id", chunk)
+        .order("id", { ascending: true })
+        .range(from, from + 999);
+      products.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+  }
   const feeByKey = new Map(
     (products || []).map((p: any) => [`${p.series_id}||${p.name}||${p.style || ""}`, Number(p.shipping_fee) || 0])
   );

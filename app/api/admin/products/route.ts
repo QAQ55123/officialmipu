@@ -39,6 +39,7 @@ export async function GET(req: Request) {
       coverImageUrl: p.cover_image_url || null,
       altSiteBankPrice: p.alt_site_bank_price != null ? Number(p.alt_site_bank_price) : null,
       altSiteCodPrice: p.alt_site_cod_price != null ? Number(p.alt_site_cod_price) : null,
+      isSoldOut: !!p.is_sold_out,
     })),
   });
 }
@@ -122,6 +123,8 @@ export async function PUT(req: Request) {
       cover_image_url: body.coverImageUrl || null,
       alt_site_bank_price: body.altSiteBankPrice !== undefined && body.altSiteBankPrice !== "" && body.altSiteBankPrice !== null ? Number(body.altSiteBankPrice) : null,
       alt_site_cod_price: body.altSiteCodPrice !== undefined && body.altSiteCodPrice !== "" && body.altSiteCodPrice !== null ? Number(body.altSiteCodPrice) : null,
+      // 缺貨只在有傳的時候才改（商品編輯表單不會傳，不會被誤改回有貨）
+      ...(body.isSoldOut !== undefined ? { is_sold_out: !!body.isSoldOut } : {}),
     })
     .eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

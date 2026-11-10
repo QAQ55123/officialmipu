@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
-import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { syncOrderRealtimeToPlanTab } from "@/lib/planSheetSync";
 import { refundCodQuota } from "@/lib/util";
 import { escapeLike } from "@/lib/util";
 
@@ -83,7 +83,6 @@ export async function PATCH(req: Request) {
   if (order.campaign_id && campaignName) {
     try {
       await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
-      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "訂單擁有者已改派，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }
@@ -125,7 +124,6 @@ export async function DELETE(req: Request) {
   if (order.campaign_id && campaignName) {
     try {
       await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
-      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "訂單已刪除，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

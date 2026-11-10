@@ -12,7 +12,7 @@ type Plan = {
   categoryId?: string | null; categoryName?: string | null; categoryParentId?: string | null;
   promoImages?: string[];
 };
-type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; };
+type Product = { id: string; name: string; style: string; price: number; imageUrl?: string; hasDiscountFlag?: boolean; codAllowed?: boolean; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; isSoldOut?: boolean; };
 type CartItem = { name: string; style: string; qty: number };
 type GlobalCartEntry = {
   planId: string;
@@ -240,7 +240,7 @@ export default function Home() {
     } catch {}
   }, [globalCart]);
 
-  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; price: number; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null; altSiteBankPrice: number | null; altSiteCodPrice: number | null }[] }>>({});
+  const [cartPlanStatus, setCartPlanStatus] = useState<Record<string, { name: string; found: boolean; products: { id: string; name: string; style: string; price: number; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null; altSiteBankPrice: number | null; altSiteCodPrice: number | null; isSoldOut: boolean }[] }>>({});
   const [cartPaymentByPlan, setCartPaymentByPlan] = useState<Record<string, string>>({});
   const [checkoutingPlanId, setCheckoutingPlanId] = useState<string | null>(null);
   const [selectedCartKeys, setSelectedCartKeys] = useState<Set<string>>(new Set());
@@ -812,6 +812,8 @@ export default function Home() {
       return { name, style, qty };
     });
     if (items.length === 0) return showToast("請至少選擇一項商品");
+    const soldOutItem = items.find((it) => products.find((pp) => pp.name === it.name && pp.style === it.style)?.isSoldOut);
+    if (soldOutItem) return showToast(`${soldOutItem.name}${soldOutItem.style ? `（${soldOutItem.style}）` : ""} 已缺貨，請先把數量改成 0`);
 
     setGlobalCart((prev) => {
       const next = [...prev];
@@ -869,7 +871,7 @@ export default function Home() {
         if (plan) {
           next[id] = {
             name: plan.name, found: true,
-            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", price: Number(p.price), hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, linkedGiftStyleId: p.linkedGiftStyleId || null, altSiteBankPrice: p.altSiteBankPrice ?? null, altSiteCodPrice: p.altSiteCodPrice ?? null })),
+            products: (products || []).map((p: any) => ({ id: p.id, name: p.name, style: p.style || "", price: Number(p.price), hasDiscountFlag: !!p.hasDiscountFlag, codAllowed: p.codAllowed !== false, linkedGiftStyleId: p.linkedGiftStyleId || null, altSiteBankPrice: p.altSiteBankPrice ?? null, altSiteCodPrice: p.altSiteCodPrice ?? null, isSoldOut: !!p.isSoldOut })),
           };
         } else {
           next[id] = { name: "", found: false, products: [] };
@@ -921,6 +923,29 @@ export default function Home() {
     return live ? live.found : true; // 還沒問過的話先當作可選，畫面上也不會顯示成失效
   }
 
+  /** 這個款式現在缺貨（後台勾了缺貨）：購物車裡不能勾選結帳 */
+  function isCartEntrySoldOut(e: GlobalCartEntry) {
+    return !!cartPlanStatus[e.planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.isSoldOut;
+  }
+
+  /** 可以勾選結帳：系列還在、款式沒缺貨 */
+  function isCartEntryBuyable(e: GlobalCartEntry) {
+    return isGroupActive(e.planId) && !isCartEntrySoldOut(e);
+  }
+
+  // 勾選之後才變缺貨的款式，自動取消勾選，底部的「已選幾項、合計」才不會算到它
+  useEffect(() => {
+    const soldOutKeys = globalCart.filter((e) => isCartEntrySoldOut(e)).map((e) => cartItemKey(e.planId, e.productName, e.style));
+    if (soldOutKeys.length === 0) return;
+    setSelectedCartKeys((prev) => {
+      if (!soldOutKeys.some((k) => prev.has(k))) return prev;
+      const next = new Set(prev);
+      soldOutKeys.forEach((k) => next.delete(k));
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartPlanStatus, globalCart]);
+
   function toggleCartItemSelect(key: string) {
     setSelectedCartKeys((prev) => {
       const next = new Set(prev);
@@ -931,7 +956,7 @@ export default function Home() {
   }
 
   function toggleSelectAllCart() {
-    const selectableKeys = globalCart.filter((e) => isGroupActive(e.planId)).map((e) => cartItemKey(e.planId, e.productName, e.style));
+    const selectableKeys = globalCart.filter((e) => isCartEntryBuyable(e)).map((e) => cartItemKey(e.planId, e.productName, e.style));
     const allSelected = selectableKeys.length > 0 && selectableKeys.every((k) => selectedCartKeys.has(k));
     setSelectedCartKeys(allSelected ? new Set() : new Set(selectableKeys));
   }
@@ -996,8 +1021,8 @@ export default function Home() {
   }
 
   function goToCheckout() {
-    const selectedActive = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isGroupActive(e.planId));
-    if (selectedActive.length === 0) return showToast("請先勾選要結帳的商品（已失效的系列無法結帳）");
+    const selectedActive = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isCartEntryBuyable(e));
+    if (selectedActive.length === 0) return showToast("請先勾選要結帳的商品（已失效的系列、缺貨的款式無法結帳）");
     syncUrl({ view: "checkout" });
     setView("checkout");
     refreshCampaignStatus(); // 重新抓取付上限狀態，避免瀏覽過程中被別人的訂單打滿，畫面卻還顯示舊的可以按
@@ -1046,7 +1071,7 @@ export default function Home() {
       showToast("請先驗證信箱後才能下單");
       return;
     }
-    const selectedEntries = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isGroupActive(e.planId));
+    const selectedEntries = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isCartEntryBuyable(e));
     const planIds = Array.from(new Set(selectedEntries.map((e) => e.planId)));
     if (planIds.length === 0) return;
 
@@ -1962,7 +1987,7 @@ export default function Home() {
                           {productNames.map((pname) => (
                             <button
                               key={pname}
-                              className={`style-pill ${activeProductName === pname ? "active" : ""}`}
+                              className={`style-pill ${activeProductName === pname ? "active" : ""} ${grouped[pname].every((s) => s.isSoldOut) ? "sold-out" : ""}`}
                               onClick={() => {
                                 setSelectedProductName(pname);
                                 // 切換到別的商品時，回到「還沒選款式」的狀態，主視覺才會顯示那個商品的封面圖
@@ -1974,7 +1999,12 @@ export default function Home() {
                               }}
                             >
                               {pname}
-                              {productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>}
+                              {/* 這個商品的所有款式都缺貨，商品膠囊也標缺貨（還是可以點進去看款式） */}
+                              {grouped[pname].every((s) => s.isSoldOut) ? (
+                                <span className="sold-out-badge">缺貨</span>
+                              ) : (
+                                productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>
+                              )}
                             </button>
                           ))}
                         </div>
@@ -1985,12 +2015,17 @@ export default function Home() {
                           {activeStyles.map((s) => (
                             <button
                               key={s.style}
-                              className={`style-pill ${currentStyle === s.style ? "active" : ""}`}
-                              onClick={() => setSelectedStyleByProduct((prev) => ({ ...prev, [activeProductName]: s.style }))}
+                              className={`style-pill ${currentStyle === s.style ? "active" : ""} ${s.isSoldOut ? "sold-out" : ""}`}
+                              disabled={!!s.isSoldOut}
+                              onClick={() => { if (!s.isSoldOut) setSelectedStyleByProduct((prev) => ({ ...prev, [activeProductName]: s.style })); }}
                             >
                               {s.style || "單一款式"}
-                              {(cart[`${s.name}||${s.style}`] || 0) > 0 && (
-                                <span className="style-pill-badge">{cart[`${s.name}||${s.style}`]}</span>
+                              {s.isSoldOut ? (
+                                <span className="sold-out-badge">缺貨</span>
+                              ) : (
+                                (cart[`${s.name}||${s.style}`] || 0) > 0 && (
+                                  <span className="style-pill-badge">{cart[`${s.name}||${s.style}`]}</span>
+                                )
                               )}
                             </button>
                           ))}
@@ -2244,8 +2279,8 @@ export default function Home() {
                   <div className="cart-toolbar">
                     <label className="cart-checkbox-label">
                       <input type="checkbox" className="cart-checkbox" onChange={toggleSelectAllCart} checked={
-                        globalCart.filter((e) => isGroupActive(e.planId)).length > 0 &&
-                        globalCart.filter((e) => isGroupActive(e.planId)).every((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)))
+                        globalCart.filter((e) => isCartEntryBuyable(e)).length > 0 &&
+                        globalCart.filter((e) => isCartEntryBuyable(e)).every((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)))
                       } />
                       <span>全選（{selectedCartKeys.size} 項已選）</span>
                     </label>
@@ -2320,15 +2355,16 @@ export default function Home() {
                         const isGiftConv = !!cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.linkedGiftStyleId;
                         const currencySymbol = isGiftConv ? "NT$" : "￥";
                         const showAltPrice = isAltSite && hasAltSitePrice(e);
+                        const soldOut = !isInactive && isCartEntrySoldOut(e);
                         return (
-                          <div key={key} style={{ borderBottom: isLast ? "none" : "1px dashed var(--line)" }}>
+                          <div key={key} style={{ borderBottom: isLast ? "none" : "1px dashed var(--line)", opacity: soldOut ? 0.6 : 1 }}>
                           <div className="cart-item-row cart-item-row-cart" style={{ borderBottom: "none" }}>
                             <div className="cart-item-left">
                               <input
                                 type="checkbox"
                                 className="cart-checkbox"
-                                disabled={isInactive}
-                                checked={selectedCartKeys.has(key)}
+                                disabled={isInactive || soldOut}
+                                checked={!soldOut && selectedCartKeys.has(key)}
                                 onChange={() => toggleCartItemSelect(key)}
                               />
                               {e.imageUrl ? (
@@ -2337,7 +2373,11 @@ export default function Home() {
                                 <div className="cart-item-img cart-item-img-empty" />
                               )}
                               <div className="cart-item-info">
-                                <span className="cart-item-name">{e.productName}{e.style ? `（${e.style}）` : ""}</span>
+                                <span className="cart-item-name">
+                                  {e.productName}{e.style ? `（${e.style}）` : ""}
+                                  {soldOut && <span className="sold-out-tag">缺貨</span>}
+                                </span>
+                                {soldOut && <span style={{ fontSize: 12, color: "#A32D2D" }}>此款式已缺貨，無法結帳，請移除</span>}
                                 {cartPlanStatus[planId]?.products.find((p) => p.name === e.productName && p.style === e.style)?.hasDiscountFlag && (
                                   <span style={{ display: "inline-block", fontSize: 11, color: "#6B4E8E", background: "#ECE6F2", padding: "2px 10px", borderRadius: 999 }}>滿減商品</span>
                                 )}
@@ -2351,7 +2391,7 @@ export default function Home() {
                               </div>
                             </div>
                             <div className="cart-item-right">
-                              {!isInactive ? (
+                              {!isInactive && !soldOut ? (
                                 <div className="stepper">
                                   <button className="step-btn" disabled={e.qty <= 1} onClick={() => changeCartQty(planId, e.productName, e.style, -1)}>－</button>
                                   <input
@@ -2448,7 +2488,7 @@ export default function Home() {
                 <a className="checkout-back-link" onClick={openCart}><span aria-hidden="true">←</span>返回購物車</a>
 
                 {(() => {
-                  const selectedEntries = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isGroupActive(e.planId));
+                  const selectedEntries = globalCart.filter((e) => selectedCartKeys.has(cartItemKey(e.planId, e.productName, e.style)) && isCartEntryBuyable(e));
                   const grouped = selectedEntries.reduce<Record<string, GlobalCartEntry[]>>((acc, e) => {
                     acc[e.planId] = acc[e.planId] || [];
                     acc[e.planId].push(e);

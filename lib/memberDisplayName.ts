@@ -25,3 +25,20 @@ export async function usernameClashesDisplayName(supabase: any, username: string
   const { data } = await supabase.from("members").select("id").ilike("display_name", escapeLike(username)).limit(1);
   return !!(data && data.length > 0);
 }
+
+/**
+ * 一批帳號 → 會員名稱（Google Sheet 同步、成本表用）。
+ * 分批查（一次撈全部會員會被 Supabase 預設的 1000 筆上限截斷）；沒有會員名稱或對不到會員的不放進結果。
+ * key 是小寫帳號。
+ */
+export async function displayNamesByUsername(supabase: any, usernames: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const list = Array.from(new Set(usernames.map((u) => String(u || "").trim()).filter(Boolean)));
+  for (let i = 0; i < list.length; i += 200) {
+    const { data } = await supabase.from("members").select("username, display_name").in("username", list.slice(i, i + 200));
+    (data || []).forEach((m: any) => {
+      if (m.display_name) result.set(String(m.username).trim().toLowerCase(), m.display_name);
+    });
+  }
+  return result;
+}

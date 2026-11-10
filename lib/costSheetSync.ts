@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { money } from "@/lib/util";
 import { extraShipmentWeightKg } from "@/lib/extraPurchaseArrival";
+import { displayNamesByUsername } from "@/lib/memberDisplayName";
 import {
 
   requireCostSheetId,
@@ -26,6 +27,8 @@ import {
 
 /** 這些列的標籤是系統產生的，讀回舊值時用來辨識哪些是店家手填的欄位 */
 const MANUAL_LABELS = ["匯率", "每公斤運費(NT$)", "其他成本"];
+/** 成本分頁的欄數（客戶明細最寬：帳號、會員名稱、訂單編號、商品小計、應收運費、應收總額、已收、尚欠、滿贈選擇） */
+const COLUMN_COUNT = 9;
 
 export interface CostTabRefs {
   tabName: string;
@@ -160,10 +163,10 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   const manualValues = new Map<string, any>();
   try {
     const [valuesRes, formulasRes] = await Promise.all([
-      sheets.spreadsheets.values.get({ spreadsheetId: costId, range: `${tabName}!A1:H200` }),
+      sheets.spreadsheets.values.get({ spreadsheetId: costId, range: `${tabName}!A1:I200` }),
       sheets.spreadsheets.values.get({
         spreadsheetId: costId,
-        range: `${tabName}!A1:H200`,
+        range: `${tabName}!A1:I200`,
         valueRenderOption: "FORMULA",
       }),
     ]);
@@ -194,7 +197,7 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   };
   const pad = (arr: (string | number)[]) => {
     const r = [...arr];
-    while (r.length < 8) r.push("");
+    while (r.length < COLUMN_COUNT) r.push("");
     return r;
   };
 
@@ -206,7 +209,9 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
 
   // ── 客戶明細：規格書3.3節要求「顧客姓名獨立成一欄，跟該筆訂單的滿贈選擇並列」──
   addRow(pad(["【客戶明細】"]));
-  addRow(pad(["客戶", "訂單編號", "商品小計", "應收運費", "應收總額", "已收", "尚欠", "滿贈選擇"]));
+  // 欄位：A帳號 B會員名稱 C訂單編號 D商品小計 E應收運費 F應收總額 G已收 H尚欠 I滿贈選擇
+  addRow(pad(["帳號", "會員名稱", "訂單編號", "商品小計", "應收運費", "應收總額", "已收", "尚欠", "滿贈選擇"]));
+  const displayNames = await displayNamesByUsername(supabase, (orders || []).map((o: any) => o.username));
   const customerRowNumbers: number[] = [];
   (orders || []).forEach((o: any) => {
     const itemsSubtotal = (o.order_items || []).reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0);
@@ -216,11 +221,12 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
       .map((g: any) => `${g.style_name_snapshot} x${g.qty}`)
       .join("、");
     // 台幣金額一律無條件進位（規格書2.6節：匯率換算的結果進位），不能出現小數
-    const r = addRow(pad([o.username, o.order_no, Math.ceil(itemsSubtotal), Math.ceil(shippingFee), "", Math.ceil(paid), "", giftText]));
+    const memberName = displayNames.get(String(o.username || "").trim().toLowerCase()) || "";
+    const r = addRow(pad([o.username, memberName, o.order_no, Math.ceil(itemsSubtotal), Math.ceil(shippingFee), "", Math.ceil(paid), "", giftText]));
     customerRowNumbers.push(r);
-    // 應收總額＝商品小計＋應收運費；尚欠＝應收總額−已收（兩者都進位，避免公式算出小數）
-    data[r - 1][4] = `=CEILING(C${r}+D${r})`;
-    data[r - 1][6] = `=CEILING(E${r}-F${r})`;
+    // 應收總額(F)＝商品小計(D)＋應收運費(E)；尚欠(H)＝應收總額(F)−已收(G)（兩者都進位，避免公式算出小數）
+    data[r - 1][5] = `=CEILING(D${r}+E${r})`;
+    data[r - 1][7] = `=CEILING(F${r}-G${r})`;
   });
   const firstCustomerRow = customerRowNumbers[0];
   const lastCustomerRow = customerRowNumbers[customerRowNumbers.length - 1];
@@ -229,10 +235,10 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   // ── 收入 ──
   addRow(pad(["【收入】"]));
   const incomeProductRow = addRow(
-    pad(["商品收入", "", firstCustomerRow ? `=CEILING(SUM(C${firstCustomerRow}:C${lastCustomerRow}))` : 0])
+    pad(["商品收入", "", firstCustomerRow ? `=CEILING(SUM(D${firstCustomerRow}:D${lastCustomerRow}))` : 0])
   );
   const incomeShippingRow = addRow(
-    pad(["顧客運費", "", firstCustomerRow ? `=CEILING(SUM(D${firstCustomerRow}:D${lastCustomerRow}))` : 0])
+    pad(["顧客運費", "", firstCustomerRow ? `=CEILING(SUM(E${firstCustomerRow}:E${lastCustomerRow}))` : 0])
   );
   const totalIncomeRow = addRow(pad(["總收入", "", `=CEILING(C${incomeProductRow}+C${incomeShippingRow})`]));
   addRow(pad([]));
@@ -274,7 +280,6 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
 
   // 清空範圍要貼合實際欄數（新分頁預設只有 A~Z 共26欄，用預設值容易超出範圍報錯），
   // 列數取「舊資料可能的長度」與「這次要寫的長度」的較大值，確保舊內容被清乾淨
-  const COLUMN_COUNT = 8;
   const clearRows = Math.max(data.length + 50, 200);
   const requests: BatchRequest[] = [
     // 先確保分頁夠大：新分頁預設 1000 列 x 26 欄，資料多的時候要先擴充，不然寫入會超出範圍
@@ -317,9 +322,9 @@ export async function syncCostSummary(refs: CostTabRefs[]): Promise<void> {
     const row = i + 2;
     const ref = `'${r.tabName.replace(/'/g, "''")}'!`;
     const custEndRow = r.custStartRow + r.custCount - 1;
-    // 已收＝客戶明細的F欄、未收＝G欄（客戶明細欄位：A客戶 B訂單編號 C商品小計 D應收運費 E應收總額 F已收 G尚欠）
-    const paidF = r.custCount > 0 ? `=SUM(${ref}F${r.custStartRow}:F${custEndRow})` : 0;
-    const owingF = r.custCount > 0 ? `=SUM(${ref}G${r.custStartRow}:G${custEndRow})` : 0;
+    // 已收＝客戶明細的G欄、未收＝H欄（客戶明細欄位：A帳號 B會員名稱 C訂單編號 D商品小計 E應收運費 F應收總額 G已收 H尚欠 I滿贈選擇）
+    const paidF = r.custCount > 0 ? `=SUM(${ref}G${r.custStartRow}:G${custEndRow})` : 0;
+    const owingF = r.custCount > 0 ? `=SUM(${ref}H${r.custStartRow}:H${custEndRow})` : 0;
     data.push([
       r.tabName,
       `=${ref}C${r.incomeRow}`,

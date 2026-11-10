@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
-import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { syncOrderRealtimeToPlanTab } from "@/lib/planSheetSync";
 import { resolveTxnRate, ceilToTwd } from "@/lib/txnRate";
 import { computeStyleLimits, picksFeasible } from "@/lib/giftQuota";
 import { loadCampaignGiftRules, orderItemAmounts } from "@/lib/orderGiftContext";
@@ -152,7 +152,6 @@ export async function PATCH(req: Request) {
   if (order.campaign_id && campaignName) {
     try {
       await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
-      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "訂單商品內容已更新，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

@@ -4,7 +4,7 @@ import { requireAdminSession, requireOwnerSession } from "@/lib/adminAuth";
 import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 import { computeStyleLimits, picksFeasible } from "@/lib/giftQuota";
 import { loadCampaignGiftRules, orderItemAmounts } from "@/lib/orderGiftContext";
-import { syncOrderRealtimeToPlanTab, syncOnePlanCostTab } from "@/lib/planSheetSync";
+import { syncOrderRealtimeToPlanTab } from "@/lib/planSheetSync";
 
 export const dynamic = "force-dynamic";
 
@@ -274,7 +274,6 @@ export async function PUT(req: Request, { params }: { params: { orderNo: string 
   if (campaignName) {
     try {
       await syncOrderRealtimeToPlanTab(order.campaign_id, campaignName);
-      await syncOnePlanCostTab(order.campaign_id, campaignName);
     } catch (e: any) {
       syncWarning = "滿贈已更新，但同步到 Google Sheet 失敗：" + (e?.message || "未知錯誤");
     }

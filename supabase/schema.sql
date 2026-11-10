@@ -107,6 +107,8 @@ create unique index if not exists idx_members_profile_url_norm on members (profi
 create index if not exists idx_members_discord_user_id on members (discord_user_id);
 -- 會員名稱：匯出賣貨便時顯示的名稱，1~20 個字、不分大小寫不能重複（舊會員是空的，登入後會被要求填寫）
 alter table members add column if not exists display_name text;
+-- 商品（款式）缺貨：前台照樣顯示但不能加入購物車、不能下單；不刪除商品，已下單的出貨運費照常計算
+alter table products add column if not exists is_sold_out boolean not null default false;
 create unique index if not exists idx_members_display_name on members (lower(display_name)) where display_name is not null;
 
 -- 收藏清單（會員收藏的系列）

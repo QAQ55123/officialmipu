@@ -11,7 +11,7 @@ type SeriesAdmin = {
   promoImages?: string[]; sortOrder?: number; isVisible?: boolean;
   categoryIds?: string[]; // 這個系列掛在哪些分類底下（可以多個）
 };
-type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; seriesName?: string };
+type ProductAdmin = { id: string; seriesId: string; name: string; style: string; price: number; imageUrl: string | null; hasDiscountFlag?: boolean; codAllowed?: boolean; shippingFee?: number; linkedGiftStyleId?: string | null; coverImageUrl?: string | null; altSiteBankPrice?: number | null; altSiteCodPrice?: number | null; seriesName?: string; isSoldOut?: boolean };
 
 const emptyCategoryForm = { id: "", name: "", parentId: "", isGiftCategory: false };
 const emptyPlanForm = { id: "", name: "", imageUrl: "", visibleTo: [] as string[], categoryId: "", categoryIds: [] as string[], promoImages: [] as string[], isVisible: true };
@@ -709,7 +709,7 @@ export default function AdminPage() {
   const [productRowImageUrlInputs, setProductRowImageUrlInputs] = useState<Record<number, string>>({});
   const [draggedProductId, setDraggedProductId] = useState<string | null>(null);
   // 商品清單直接編輯：改了哪幾筆的哪些欄位，按「儲存全部」才一起送出
-  const [productEdits, setProductEdits] = useState<Record<string, { price?: string; shippingFee?: string }>>({});
+  const [productEdits, setProductEdits] = useState<Record<string, { price?: string; shippingFee?: string; isSoldOut?: boolean }>>({});
   const [savingProductEdits, setSavingProductEdits] = useState(false);
   const [draggedCategoryId, setDraggedCategoryId] = useState<string | null>(null);
   const [draggedPlanId, setDraggedPlanId] = useState<string | null>(null);
@@ -1436,7 +1436,7 @@ export default function AdminPage() {
     await Promise.all([loadProducts(p.id), loadAllProductsForCopy()]);
   }
 
-  function setProductEdit(id: string, field: "price" | "shippingFee", value: string) {
+  function setProductEdit(id: string, field: "price" | "shippingFee" | "isSoldOut", value: string | boolean) {
     setProductEdits((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
   }
 
@@ -1465,6 +1465,7 @@ export default function AdminPage() {
           coverImageUrl: p.coverImageUrl || null,
           altSiteBankPrice: p.altSiteBankPrice,
           altSiteCodPrice: p.altSiteCodPrice,
+          isSoldOut: edit.isSoldOut !== undefined ? edit.isSoldOut : !!p.isSoldOut,
         });
       } catch (e: any) {
         failed.push(`${p.name}${p.style ? `（${p.style}）` : ""}：${e.message}`);
@@ -2713,7 +2714,7 @@ export default function AdminPage() {
             <div className="auth-card">
               <h3>批次匯入商品</h3>
               <p style={{ fontSize: 13, color: "#8A8779", margin: "0 0 12px" }}>
-                欄位：系列名稱｜系列圖片網址｜商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址｜封面圖網址。
+                欄位：系列名稱｜系列圖片網址｜商品名稱｜款式｜金額｜運費金額｜是否滿減(v)｜圖片網址｜封面圖網址。選用欄位「是否缺貨」：填 v＝缺貨、留空＝有貨；Excel 沒有這一欄就不會更動缺貨狀態。
                 一列＝一個具體款式，同名商品會自動歸到同一組。系統會依「系列名稱」在你選的分類底下自動建立或沿用系列，
                 一次可以匯入好幾個不同系列的商品。金額填人民幣(￥)、運費填台幣(NT$)。圖片網址支援 Google 雲端硬碟分享連結。
                 <strong>重複匯入同一筆商品（同系列＋同商品名稱＋同款式）會更新既有資料，不會重複建立；圖片欄位留空時不會覆蓋掉原本設定好的圖片。</strong>
@@ -3340,6 +3341,18 @@ export default function AdminPage() {
                             onClick={(e) => e.stopPropagation()}
                             style={{ width: 66, padding: "4px 6px", border: "1px solid var(--line)", borderRadius: 6, fontSize: 13, background: productEdits[p.id]?.shippingFee !== undefined ? "#FFF8E5" : "var(--card)" }}
                           />
+                          {/* 缺貨：前台照樣顯示但不能買；跟金額、運費一樣改完按「儲存全部」 */}
+                          <label
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, marginLeft: 4, padding: "2px 6px", borderRadius: 6, color: (productEdits[p.id]?.isSoldOut ?? !!p.isSoldOut) ? "#A32D2D" : "#8A8779", background: productEdits[p.id]?.isSoldOut !== undefined ? "#FFF8E5" : "transparent" }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={productEdits[p.id]?.isSoldOut ?? !!p.isSoldOut}
+                              onChange={(e) => setProductEdit(p.id, "isSoldOut", e.target.checked)}
+                            />
+                            缺貨
+                          </label>
                         </div>
                       </div>
                     </div>

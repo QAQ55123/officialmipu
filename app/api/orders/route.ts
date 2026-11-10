@@ -59,7 +59,7 @@ export async function POST(req: Request) {
 
   // 價目表對照（避免前端竄改價格），順便記錄圖片快照跟2.6/2.4節需要的滿減標記／取付開關
   const { data: products } = await supabase.from("products").select("*").in("series_id", seriesIds);
-  const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null; altSiteBankPrice: number | null; altSiteCodPrice: number | null }> = {};
+  const productMap: Record<string, { price: number; imageUrl: string | null; hasDiscountFlag: boolean; codAllowed: boolean; linkedGiftStyleId: string | null; altSiteBankPrice: number | null; altSiteCodPrice: number | null; isSoldOut: boolean }> = {};
   (products || []).forEach((p) => {
     productMap[`${p.series_id}||${p.name}||${p.style || ""}`] = {
       price: Number(p.price),
@@ -69,8 +69,23 @@ export async function POST(req: Request) {
       linkedGiftStyleId: p.linked_gift_style_id || null,
       altSiteBankPrice: p.alt_site_bank_price != null ? Number(p.alt_site_bank_price) : null,
       altSiteCodPrice: p.alt_site_cod_price != null ? Number(p.alt_site_cod_price) : null,
+      isSoldOut: !!p.is_sold_out,
     };
   });
+
+  // 缺貨的款式不能下單（顧客頁面開著的時候剛好被設成缺貨，前端還沒更新到）
+  const soldOutNames: string[] = [];
+  for (const it of items) {
+    if ((Number(it.qty) || 0) <= 0) continue;
+    const p = productMap[`${it.seriesId}||${it.name}||${it.style || ""}`];
+    if (p?.isSoldOut) soldOutNames.push(`${it.name}${it.style ? `（${it.style}）` : ""}`);
+  }
+  if (soldOutNames.length > 0) {
+    return NextResponse.json(
+      { error: `以下商品已缺貨，請從購物車移除後再送出：${soldOutNames.join("、")}` },
+      { status: 400 }
+    );
+  }
 
   // 2.4節：取付時，個別不開放取付的商品要擋住（列出品項讓顧客調整，不是整張訂單一起擋）
   if (payment === "取付") {

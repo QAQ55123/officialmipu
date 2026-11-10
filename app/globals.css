@@ -462,6 +462,19 @@ html, body {
   font-size: 11px; font-weight: 600; min-width: 18px; height: 18px; border-radius: 999px;
   display: flex; align-items: center; justify-content: center; padding: 0 4px;
 }
+/* 缺貨：膠囊右上角紅色小標，膠囊本身變淡、虛線框、不能點 */
+.style-pills { row-gap: 14px; padding-top: 4px; }
+.style-pill.sold-out { color: var(--muted); background: var(--bg); border-style: dashed; cursor: not-allowed; }
+.style-pill.sold-out.active { color: #fff; background: var(--primary); border-style: solid; cursor: pointer; }
+.style-pill.sold-out:hover { border-color: var(--line); }
+.sold-out-badge {
+  position: absolute; top: -9px; right: -8px; background: #E24B4A; color: #fff;
+  font-size: 10px; font-weight: 600; line-height: 1; padding: 3px 6px; border-radius: 999px; white-space: nowrap;
+}
+.sold-out-tag {
+  display: inline-block; margin-left: 6px; font-size: 11px; color: #A32D2D; background: #FCEBEB;
+  padding: 1px 8px; border-radius: 999px; vertical-align: 1px;
+}
 .stepper-lg .step-btn { width: 36px; height: 36px; font-size: 18px; }
 .stepper-lg .qty { width: 52px; height: 36px; font-size: 15px; }
 

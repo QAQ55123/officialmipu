@@ -62,6 +62,9 @@ export async function POST(req: Request) {
     const wb = XLSX.read(buf, { type: "buffer" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Record<string, any>[];
+    // 「是否缺貨」是選用欄位：Excel 有這一欄才處理（v＝缺貨、留空＝有貨），
+    // 以前沒有這一欄的檔案完全不動缺貨狀態（defval:"" 讓每一列都會帶著所有標題欄位，所以看第一列就知道有沒有這欄）
+    const hasSoldOutColumn = rows.length > 0 && Object.prototype.hasOwnProperty.call(rows[0], "是否缺貨");
 
     if (rows.length === 0) return NextResponse.json({ error: "檔案裡沒有資料列" }, { status: 400 });
 
@@ -185,6 +188,7 @@ export async function POST(req: Request) {
       const discountRaw = String(row["是否滿減"] ?? "").trim().toLowerCase();
       const imageUrlRaw = String(row["圖片網址"] ?? "").trim();
       const coverImageUrlRaw = String(row["封面圖網址"] ?? "").trim();
+      const isSoldOut = hasSoldOutColumn ? ["v", "ｖ", "✓", "y", "yes", "是"].includes(String(row["是否缺貨"] ?? "").trim().toLowerCase()) : null;
 
       if (!seriesName) {
         failed.push(`第 ${rowNum} 列：缺少系列名稱，略過`);
@@ -254,6 +258,7 @@ export async function POST(req: Request) {
           shipping_fee: shippingFee,
           has_discount_flag: hasDiscountFlag,
         };
+        if (isSoldOut !== null) updates.is_sold_out = isSoldOut;
         // 圖片欄位留空時不覆蓋既有圖片（避免不小心把之前設定好的圖清掉）
         if (effectiveImageUrl) updates.image_url = effectiveImageUrl;
         const { error: updateErr } = await supabase.from("products").update(updates).eq("id", existingProduct.id);
@@ -270,6 +275,7 @@ export async function POST(req: Request) {
           price,
           shipping_fee: shippingFee,
           has_discount_flag: hasDiscountFlag,
+          is_sold_out: isSoldOut === true,
           cod_allowed: true,
           image_url: effectiveImageUrl || null,
           sort_order: await nextSortOrderFor(seriesId),
