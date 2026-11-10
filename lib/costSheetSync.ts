@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { money } from "@/lib/util";
+import { money, paymentLabel } from "@/lib/util";
 import { extraShipmentWeightKg } from "@/lib/extraPurchaseArrival";
 import { displayNamesByUsername } from "@/lib/memberDisplayName";
 import {
@@ -27,8 +27,8 @@ import {
 
 /** 這些列的標籤是系統產生的，讀回舊值時用來辨識哪些是店家手填的欄位 */
 const MANUAL_LABELS = ["匯率", "每公斤運費(NT$)", "其他成本"];
-/** 成本分頁的欄數（客戶明細最寬：帳號、會員名稱、訂單編號、商品小計、應收運費、應收總額、已收、尚欠、滿贈選擇） */
-const COLUMN_COUNT = 9;
+/** 成本分頁的欄數（客戶明細最寬：帳號、會員名稱、訂單編號、商品小計、應收運費、應收總額、交易方式、已收、尚欠、滿贈選擇） */
+const COLUMN_COUNT = 10;
 
 export interface CostTabRefs {
   tabName: string;
@@ -54,7 +54,7 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   // ── 收入面：這個檔期所有訂單的商品明細 ──────────────────────────
   const { data: orders } = await supabase
     .from("orders")
-    .select("id, order_no, username, paid_amount, order_items(product_name, style, qty, unit_price, subtotal, unit_price_original, series_name_snapshot), order_gift_selections(style_name_snapshot, qty)")
+    .select("id, order_no, username, payment, paid_amount, created_at, order_items(product_name, style, qty, unit_price, subtotal, unit_price_original, series_name_snapshot), order_gift_selections(style_name_snapshot, qty)")
     .eq("campaign_id", campaignId);
 
   const orderIds = (orders || []).map((o: any) => o.id);
@@ -163,10 +163,10 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
   const manualValues = new Map<string, any>();
   try {
     const [valuesRes, formulasRes] = await Promise.all([
-      sheets.spreadsheets.values.get({ spreadsheetId: costId, range: `${tabName}!A1:I200` }),
+      sheets.spreadsheets.values.get({ spreadsheetId: costId, range: `${tabName}!A1:J200` }),
       sheets.spreadsheets.values.get({
         spreadsheetId: costId,
-        range: `${tabName}!A1:I200`,
+        range: `${tabName}!A1:J200`,
         valueRenderOption: "FORMULA",
       }),
     ]);
@@ -209,11 +209,26 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
 
   // ── 客戶明細：規格書3.3節要求「顧客姓名獨立成一欄，跟該筆訂單的滿贈選擇並列」──
   addRow(pad(["【客戶明細】"]));
-  // 欄位：A帳號 B會員名稱 C訂單編號 D商品小計 E應收運費 F應收總額 G已收 H尚欠 I滿贈選擇
-  addRow(pad(["帳號", "會員名稱", "訂單編號", "商品小計", "應收運費", "應收總額", "已收", "尚欠", "滿贈選擇"]));
+  // 欄位：A帳號 B會員名稱 C訂單編號 D商品小計 E應收運費 F應收總額 G交易方式 H已收 I尚欠 J滿贈選擇
+  addRow(pad(["帳號", "會員名稱", "訂單編號", "商品小計", "應收運費", "應收總額", "交易方式", "已收", "尚欠", "滿贈選擇"]));
   const displayNames = await displayNamesByUsername(supabase, (orders || []).map((o: any) => o.username));
   const customerRowNumbers: number[] = [];
+  // 同一個帳號的訂單排在一起：客戶之間依「第一次下單時間」排，同一人的訂單之間依下單時間排
+  const accountKey = (o: any) => String(o.username || "").trim().toLowerCase();
+  const timeOf = (o: any) => new Date(o.created_at || 0).getTime();
+  const firstOrderTime = new Map<string, number>();
   (orders || []).forEach((o: any) => {
+    const k = accountKey(o);
+    const t = timeOf(o);
+    if (!firstOrderTime.has(k) || t < firstOrderTime.get(k)!) firstOrderTime.set(k, t);
+  });
+  const sortedOrders = [...(orders || [])].sort(
+    (a: any, b: any) =>
+      firstOrderTime.get(accountKey(a))! - firstOrderTime.get(accountKey(b))! ||
+      accountKey(a).localeCompare(accountKey(b)) ||
+      timeOf(a) - timeOf(b)
+  );
+  sortedOrders.forEach((o: any) => {
     const itemsSubtotal = (o.order_items || []).reduce((s: number, it: any) => s + (Number(it.subtotal) || 0), 0);
     const shippingFee = shippingFeeByOrder.get(o.id) || 0;
     const paid = Number(o.paid_amount) || 0;
@@ -222,11 +237,11 @@ export async function syncCostSheetForCampaign(campaignId: string): Promise<Cost
       .join("、");
     // 台幣金額一律無條件進位（規格書2.6節：匯率換算的結果進位），不能出現小數
     const memberName = displayNames.get(String(o.username || "").trim().toLowerCase()) || "";
-    const r = addRow(pad([o.username, memberName, o.order_no, Math.ceil(itemsSubtotal), Math.ceil(shippingFee), "", Math.ceil(paid), "", giftText]));
+    const r = addRow(pad([o.username, memberName, o.order_no, Math.ceil(itemsSubtotal), Math.ceil(shippingFee), "", paymentLabel(o.payment), Math.ceil(paid), "", giftText]));
     customerRowNumbers.push(r);
-    // 應收總額(F)＝商品小計(D)＋應收運費(E)；尚欠(H)＝應收總額(F)−已收(G)（兩者都進位，避免公式算出小數）
+    // 應收總額(F)＝商品小計(D)＋應收運費(E)；尚欠(I)＝應收總額(F)−已收(H)（兩者都進位，避免公式算出小數）
     data[r - 1][5] = `=CEILING(D${r}+E${r})`;
-    data[r - 1][7] = `=CEILING(F${r}-G${r})`;
+    data[r - 1][8] = `=CEILING(F${r}-H${r})`;
   });
   const firstCustomerRow = customerRowNumbers[0];
   const lastCustomerRow = customerRowNumbers[customerRowNumbers.length - 1];
@@ -322,9 +337,9 @@ export async function syncCostSummary(refs: CostTabRefs[]): Promise<void> {
     const row = i + 2;
     const ref = `'${r.tabName.replace(/'/g, "''")}'!`;
     const custEndRow = r.custStartRow + r.custCount - 1;
-    // 已收＝客戶明細的G欄、未收＝H欄（客戶明細欄位：A帳號 B會員名稱 C訂單編號 D商品小計 E應收運費 F應收總額 G已收 H尚欠 I滿贈選擇）
-    const paidF = r.custCount > 0 ? `=SUM(${ref}G${r.custStartRow}:G${custEndRow})` : 0;
-    const owingF = r.custCount > 0 ? `=SUM(${ref}H${r.custStartRow}:H${custEndRow})` : 0;
+    // 已收＝客戶明細的H欄、未收＝I欄（客戶明細欄位：A帳號 B會員名稱 C訂單編號 D商品小計 E應收運費 F應收總額 G交易方式 H已收 I尚欠 J滿贈選擇）
+    const paidF = r.custCount > 0 ? `=SUM(${ref}H${r.custStartRow}:H${custEndRow})` : 0;
+    const owingF = r.custCount > 0 ? `=SUM(${ref}I${r.custStartRow}:I${custEndRow})` : 0;
     data.push([
       r.tabName,
       `=${ref}C${r.incomeRow}`,
