@@ -1913,7 +1913,13 @@ export default function Home() {
                   const productNames = Object.keys(grouped);
                   if (productNames.length === 0) return null;
 
-                  const activeProductName = selectedProductName && grouped[selectedProductName] ? selectedProductName : productNames[0];
+                  // 全部款式都缺貨的商品不能點；預設停在第一個還有貨的商品（整個系列都缺貨才停在第一個）
+                  const isProductSoldOut = (pname: string) => grouped[pname].every((s) => s.isSoldOut);
+                  const firstAvailable = productNames.find((n) => !isProductSoldOut(n)) || productNames[0];
+                  const activeProductName =
+                    selectedProductName && grouped[selectedProductName] && !isProductSoldOut(selectedProductName)
+                      ? selectedProductName
+                      : firstAvailable;
                   const activeStyles = grouped[activeProductName];
                   // 還沒選款式時 currentStyle 會是 undefined，主視覺要顯示商品封面圖、數量跟加入購物車要鎖住
                   const currentStyle = selectedStyleByProduct[activeProductName];
@@ -1987,8 +1993,10 @@ export default function Home() {
                           {productNames.map((pname) => (
                             <button
                               key={pname}
-                              className={`style-pill ${activeProductName === pname ? "active" : ""} ${grouped[pname].every((s) => s.isSoldOut) ? "sold-out" : ""}`}
+                              className={`style-pill ${activeProductName === pname ? "active" : ""} ${isProductSoldOut(pname) ? "sold-out" : ""}`}
+                              disabled={isProductSoldOut(pname) && activeProductName !== pname}
                               onClick={() => {
+                                if (isProductSoldOut(pname)) return;
                                 setSelectedProductName(pname);
                                 // 切換到別的商品時，回到「還沒選款式」的狀態，主視覺才會顯示那個商品的封面圖
                                 setSelectedStyleByProduct((prev) => {
@@ -1999,8 +2007,8 @@ export default function Home() {
                               }}
                             >
                               {pname}
-                              {/* 這個商品的所有款式都缺貨，商品膠囊也標缺貨（還是可以點進去看款式） */}
-                              {grouped[pname].every((s) => s.isSoldOut) ? (
+                              {/* 這個商品的所有款式都缺貨：商品膠囊也標缺貨、不能點 */}
+                              {isProductSoldOut(pname) ? (
                                 <span className="sold-out-badge">缺貨</span>
                               ) : (
                                 productQtyTotal(pname) > 0 && <span className="style-pill-badge">{productQtyTotal(pname)}</span>
