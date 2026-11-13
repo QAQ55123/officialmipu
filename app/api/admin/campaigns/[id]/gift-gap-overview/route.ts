@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { computeGiftGap } from "@/lib/giftGap";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,87 +19,20 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
   const supabase = getSupabaseAdmin();
 
-  const { data: giftStyles, error: gsErr } = await supabase.from("gift_styles").select("id, style_name, threshold_amount").eq("campaign_id", params.id);
-  if (gsErr) return NextResponse.json({ error: gsErr.message }, { status: 500 });
-
-  const { data: orders } = await supabase.from("orders").select("id").eq("campaign_id", params.id);
-  const orderIds = (orders || []).map((o) => o.id);
-
-  const { data: selections } = orderIds.length
-    ? await supabase.from("order_gift_selections").select("gift_style_id, qty").in("order_id", orderIds)
-    : { data: [] };
-  const promisedByStyle = new Map<string, number>();
-  (selections || []).forEach((s: any) => {
-    if (!s.gift_style_id) return;
-    promisedByStyle.set(s.gift_style_id, (promisedByStyle.get(s.gift_style_id) || 0) + s.qty);
-  });
-
-  // 「當商品賣出去的滿贈」也要算進保底：顧客是付錢買的沒錯，但店家一樣得跟廠商拿到那個實體贈品，
-  // 不算進缺口的話採購數量會少估。這些商品在 products 上有 linked_gift_style_id 標記。
-  const { data: giftProducts } = await supabase
-    .from("products")
-    .select("name, style, linked_gift_style_id")
-    .not("linked_gift_style_id", "is", null);
-  if (giftProducts && giftProducts.length > 0 && orderIds.length > 0) {
-    const styleIdByProductKey = new Map(
-      giftProducts.map((p: any) => [`${p.name}||${p.style || ""}`, p.linked_gift_style_id])
-    );
-    const { data: soldItems } = await supabase
-      .from("order_items")
-      .select("product_name, style, qty")
-      .in("order_id", orderIds);
-    (soldItems || []).forEach((it: any) => {
-      const styleId = styleIdByProductKey.get(`${it.product_name}||${it.style || ""}`);
-      if (!styleId) return;
-      promisedByStyle.set(styleId, (promisedByStyle.get(styleId) || 0) + it.qty);
-    });
+  try {
+    // 缺口算法跟「自動分配」共用 lib/giftGap.ts，兩邊算出來一定一樣
+    const rows = await computeGiftGap(supabase, params.id);
+    const overview = rows.map((r) => ({
+      giftStyleId: r.giftStyleId,
+      styleName: r.styleName,
+      thresholdAmount: r.thresholdAmount,
+      promised: r.promised,
+      allocated: r.allocated,
+      extra: r.extra,
+      diff: -r.gap, // 正=餘，負=缺
+    }));
+    return NextResponse.json({ overview });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
-
-  const { data: batches } = await supabase.from("vendor_purchase_batches").select("id").eq("campaign_id", params.id);
-  const batchIds = (batches || []).map((b) => b.id);
-  const { data: allocations } = batchIds.length
-    ? await supabase.from("vendor_purchase_batch_gifts").select("gift_style_id, qty").in("batch_id", batchIds)
-    : { data: [] };
-  const allocatedByStyle = new Map<string, number>();
-  (allocations || []).forEach((a: any) => {
-    allocatedByStyle.set(a.gift_style_id, (allocatedByStyle.get(a.gift_style_id) || 0) + a.qty);
-  });
-
-  // 額外採購改成「一張單可以買多個款式」，數量記在款式明細上
-  const { data: extraPurchases } = await supabase
-    .from("vendor_extra_purchases")
-    .select("gift_style_id, qty, extra_purchase_items(gift_style_id, qty)")
-    .eq("campaign_id", params.id);
-  const extraByStyle = new Map<string, number>();
-  (extraPurchases || []).forEach((e: any) => {
-    const details = e.extra_purchase_items || [];
-    if (details.length > 0) {
-      details.forEach((d: any) => {
-        if (!d.gift_style_id) return;
-        extraByStyle.set(d.gift_style_id, (extraByStyle.get(d.gift_style_id) || 0) + d.qty);
-      });
-      return;
-    }
-    // 還沒搬移的舊資料（一筆＝一個款式）
-    if (!e.gift_style_id) return;
-    extraByStyle.set(e.gift_style_id, (extraByStyle.get(e.gift_style_id) || 0) + e.qty);
-  });
-
-  const overview = (giftStyles || []).map((s) => {
-    const promised = promisedByStyle.get(s.id) || 0;
-    const allocated = allocatedByStyle.get(s.id) || 0;
-    const extra = extraByStyle.get(s.id) || 0;
-    const diff = allocated + extra - promised; // 正=餘，負=缺
-    return {
-      giftStyleId: s.id,
-      styleName: s.style_name,
-      thresholdAmount: s.threshold_amount,
-      promised,
-      allocated,
-      extra,
-      diff,
-    };
-  });
-
-  return NextResponse.json({ overview });
 }

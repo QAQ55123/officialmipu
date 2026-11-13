@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { computeGiftGap } from "@/lib/giftGap";
 import { splitByDiscountTiers, type SplitPiece, type DiscountTier, type GiftValueRule } from "@/lib/purchaseSplit";
 
 /**
@@ -167,43 +168,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const topPlatformGiftCap = Number(platforms[0]?.order_gift_cap) || 0;
   const groups = splitByDiscountTiers(pieces, tiers, giftRules, topPlatformGiftCap);
 
-  // 3.3節：自動分配滿贈。先算出各款式的缺口（顧客保底需求 − 已經配置掉的），
+  // 3.3節：自動分配滿贈。先算出各款式的缺口（顧客需要 − 已配到採購單 − 額外採購），
   // 缺最多的優先分配；缺口補完就停，剩餘名額留給店家自行決定（不自動配滿）。
-  const { data: campaignOrders } = await supabase.from("orders").select("id").eq("campaign_id", params.id);
-  const allOrderIds = (campaignOrders || []).map((o: any) => o.id);
-  const { data: giftSelections } = allOrderIds.length
-    ? await supabase.from("order_gift_selections").select("gift_style_id, qty").in("order_id", allOrderIds)
-    : { data: [] };
-  const promisedByStyle = new Map<string, number>();
-  (giftSelections || []).forEach((s: any) => {
-    if (!s.gift_style_id) return;
-    promisedByStyle.set(s.gift_style_id, (promisedByStyle.get(s.gift_style_id) || 0) + s.qty);
-  });
-  // 「當商品賣出去的滿贈」一樣要跟廠商拿貨，也要算進保底
-  const { data: giftSaleProductsForGap } = await supabase
-    .from("products")
-    .select("name, style, linked_gift_style_id")
-    .not("linked_gift_style_id", "is", null);
-  if (giftSaleProductsForGap && giftSaleProductsForGap.length > 0 && allOrderIds.length > 0) {
-    const styleIdByKey = new Map(giftSaleProductsForGap.map((p: any) => [`${p.name}||${p.style || ""}`, p.linked_gift_style_id]));
-    const { data: soldItems } = await supabase.from("order_items").select("product_name, style, qty").in("order_id", allOrderIds);
-    (soldItems || []).forEach((it: any) => {
-      const sid = styleIdByKey.get(`${it.product_name}||${it.style || ""}`);
-      if (!sid) return;
-      promisedByStyle.set(sid, (promisedByStyle.get(sid) || 0) + it.qty);
-    });
-  }
-  // 既有採購單已經配置掉的數量
-  const { data: existingBatches } = await supabase.from("vendor_purchase_batches").select("id").eq("campaign_id", params.id);
-  const existingBatchIds = (existingBatches || []).map((b: any) => b.id);
-  const { data: existingGifts } = existingBatchIds.length
-    ? await supabase.from("vendor_purchase_batch_gifts").select("gift_style_id, qty").in("batch_id", existingBatchIds)
-    : { data: [] };
+  // 缺口算法跟拆單頁的「缺口總覽」共用 lib/giftGap.ts，兩邊一定一致。
   const remainingGapByStyle = new Map<string, number>();
-  promisedByStyle.forEach((qty, styleId) => remainingGapByStyle.set(styleId, qty));
-  (existingGifts || []).forEach((g: any) => {
-    remainingGapByStyle.set(g.gift_style_id, (remainingGapByStyle.get(g.gift_style_id) || 0) - g.qty);
-  });
+  (await computeGiftGap(supabase, params.id)).forEach((r) => remainingGapByStyle.set(r.giftStyleId, r.gap));
 
   let createdCount = 0;
   let assignedGiftCount = 0;
