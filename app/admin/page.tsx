@@ -69,7 +69,7 @@ export default function AdminPage() {
   });
   const emptyCampaignForm = {
     id: "", name: "", opensAt: "", closesAt: "",
-    codCampaignCap: "", giftCodCampaignCap: "", perUserCodCap: "", perUserGiftCodCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "", splitCalcFxRate: "", shippingCostPerKg: "",
+    codCampaignCap: "", giftCodCampaignCap: "", perUserCodCap: "", perUserGiftCodCap: "", giftBaseUnit: "100", vendorOrderGiftCap: "", checkoutGiftPlatformId: "", splitCalcFxRate: "", shippingCostPerKg: "", fulfillmentStatus: "",
     rates: emptyCampaignRates(),
   };
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -507,6 +507,7 @@ export default function AdminPage() {
       shippingCostPerKg: c.shipping_cost_per_kg != null ? String(c.shipping_cost_per_kg) : "",
       giftBaseUnit: String(c.gift_base_unit ?? 100),
       vendorOrderGiftCap: c.vendor_order_gift_cap != null ? String(c.vendor_order_gift_cap) : "",
+      fulfillmentStatus: c.fulfillment_status || "",
       rates,
     });
     setCampaignMsg("");
@@ -539,6 +540,7 @@ export default function AdminPage() {
           shipping_cost_per_kg: campaignForm.shippingCostPerKg === "" ? null : Number(campaignForm.shippingCostPerKg),
           gift_base_unit: Number(campaignForm.giftBaseUnit) || 100,
           vendor_order_gift_cap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
+          fulfillment_status: campaignForm.fulfillmentStatus || null,
           ...rateFields,
         });
       } else {
@@ -555,6 +557,7 @@ export default function AdminPage() {
           shippingCostPerKg: campaignForm.shippingCostPerKg === "" ? null : Number(campaignForm.shippingCostPerKg),
           giftBaseUnit: Number(campaignForm.giftBaseUnit) || 100,
           vendorOrderGiftCap: campaignForm.vendorOrderGiftCap === "" ? null : Number(campaignForm.vendorOrderGiftCap),
+          fulfillmentStatus: campaignForm.fulfillmentStatus || null,
           rates: rateFields,
         });
       }
@@ -2800,6 +2803,16 @@ export default function AdminPage() {
               <div className="id-row"><span className="id-label">名稱</span><input type="text" value={campaignForm.name} onChange={(e) => setCampaignForm((f) => ({ ...f, name: e.target.value }))} placeholder="例如：XX訂購" /></div>
               <div className="id-row"><span className="id-label">開放起始</span><input type="datetime-local" value={campaignForm.opensAt} onChange={(e) => setCampaignForm((f) => ({ ...f, opensAt: e.target.value }))} /></div>
               <div className="id-row"><span className="id-label">開放結束</span><input type="datetime-local" value={campaignForm.closesAt} onChange={(e) => setCampaignForm((f) => ({ ...f, closesAt: e.target.value }))} /></div>
+              <div className="id-row">
+                <span className="id-label">檔期狀態</span>
+                <select value={campaignForm.fulfillmentStatus} onChange={(e) => setCampaignForm((f) => ({ ...f, fulfillmentStatus: e.target.value }))}>
+                  <option value="">未設定</option>
+                  <option value="purchased">商品已購買</option>
+                  <option value="shipping">運輸中</option>
+                  <option value="arrived">已到貨</option>
+                  <option value="distributing">已開賣場</option>
+                </select>
+              </div>
               <div className="id-row"><span className="id-label">取付檔期總上限</span><input type="number" value={campaignForm.codCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, codCampaignCap: e.target.value }))} placeholder="留空＝不限" /></div>
               <div className="id-row"><span className="id-label">滿贈系列取付額度上限</span><input type="number" value={campaignForm.giftCodCampaignCap} onChange={(e) => setCampaignForm((f) => ({ ...f, giftCodCampaignCap: e.target.value }))} placeholder="留空＝不限，跟上面的一般商品取付上限分開累計" /></div>
               <div className="id-row">

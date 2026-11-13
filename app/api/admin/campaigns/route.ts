@@ -56,6 +56,7 @@ export async function POST(req: Request) {
     shipping_cost_per_kg: body.shippingCostPerKg ?? null,
     gift_base_unit: body.giftBaseUnit ?? 100,
     vendor_order_gift_cap: body.vendorOrderGiftCap ?? null,
+    fulfillment_status: body.fulfillmentStatus ?? null,
   };
   for (const f of RATE_FIELDS) {
     if (body.rates && f in body.rates) insertRow[f] = body.rates[f];

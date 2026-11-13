@@ -6,6 +6,7 @@ import { syncOrderToSheet } from "@/lib/sheetsSync";
 import { resolveTxnRate, ceilToTwd, CampaignRates } from "@/lib/txnRate";
 import { escapeLike } from "@/lib/util";
 import { runInBackground } from "@/lib/background";
+import { getMemberSession } from "@/lib/memberAuth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -319,9 +320,12 @@ export async function POST(req: Request) {
 
 /** 查詢歷史訂單：?username=... */
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const username = (searchParams.get("username") || "").trim();
-  if (!username) return NextResponse.json({ error: "請提供 username" }, { status: 400 });
+  // 只能看自己的訂單：帳號一律取自登入狀態（簽章過的 cookie），不採用網址上帶的 username，
+  // 否則任何人把網址上的帳號換掉就能看到別人的訂單。
+  const session = getMemberSession(req);
+  if (!session) return NextResponse.json({ error: "請先登入" }, { status: 401 });
+  const username = String(session.username || "").trim();
+  if (!username) return NextResponse.json({ error: "請先登入" }, { status: 401 });
 
   const supabase = getSupabaseAdmin();
   const { data: orders, error } = await supabase

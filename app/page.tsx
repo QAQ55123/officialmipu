@@ -1169,10 +1169,10 @@ export default function Home() {
     setView("history");
     setCategoryQuickOpen(false);
     setHistoryLoading(true);
-    const params = new URLSearchParams();
-    params.set("username", id.username);
-    const r = await fetch(`/api/orders?${params.toString()}`, { cache: "no-store" });
-    const d = await r.json();
+    // 帳號由伺服器從登入狀態判斷，只會回傳自己的訂單
+    const r = await fetch(`/api/orders`, { cache: "no-store" });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) showToast(d.error || "讀取訂單失敗");
     setHistory(d.orders || []);
     setExpandedOrders(new Set((d.orders || []).map((o: any) => o.orderNo))); // 預設全部展開
     setHistoryLoading(false);
