@@ -1,11 +1,13 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { callJson, fetchJson } from "@/lib/adminClient";
 
 type WorkItem = {
   type: "item" | "gift";
   id: string;
+  orderId: string; // 屬於哪一張訂單（同一位顧客的多張訂單合併在一張卡）
+  orderNo: string;
   seriesName: string;
   name: string;
   style: string;
@@ -20,15 +22,17 @@ type WorkItem = {
 };
 type ShippedBatch = {
   id: string;
-  batchNo: number;
+  orderId: string;
+  orderNo: string;
+  batchNo: number; // 以顧客為單位編號，跟賣貨便匯出的 N.0 對得起來
   customerShippingFee: number;
   myshipOrdered: boolean; // 顧客已在賣貨便下單：匯出賣貨便時這批數量填 0
   items: { label: string; qty: number }[];
 };
 type Customer = {
-  orderId: string;
-  orderNo: string;
+  key: string; // 帳號（小寫），同一位顧客的所有訂單合併
   username: string;
+  orders: { orderId: string; orderNo: string }[];
   shippedBatchCount: number;
   notArrivedCount: number;
   overShippedCount: number;
@@ -38,7 +42,7 @@ type Customer = {
 };
 
 /**
- * 出貨作業：列出這個檔期「至少有一件已到貨」的顧客，每位顧客的所有品項都顯示狀態，
+ * 出貨作業：列出這個檔期「至少有一件已到貨」的顧客，同一位顧客的所有訂單合併成一張卡，每個品項都顯示狀態，
  * 店家才判斷得了東西到齊了沒，再決定現在出還是等到齊。
  * 原本要一張訂單一張訂單去訂單管理查、一張一張建批次，顧客一多根本沒辦法用。
  */
@@ -83,7 +87,7 @@ export default function ShippingWorkspacePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [campaignId]);
 
-  const keyOf = (c: Customer, it: WorkItem) => `${c.orderId}|${it.type}|${it.id}`;
+  const keyOf = (_c: Customer, it: WorkItem) => `${it.orderId}|${it.type}|${it.id}`;
 
   // 搜尋到顧客或其中任一品項時，整位顧客的所有品項都顯示（要看得到全部才判斷得了到齊了沒）
   const visible = customers.filter((c) => {
@@ -91,6 +95,7 @@ export default function ShippingWorkspacePage() {
     const q = filter.trim().toLowerCase();
     if (!q) return true;
     if (c.username.toLowerCase().includes(q)) return true;
+    if (c.orders.some((o) => o.orderNo.toLowerCase().includes(q))) return true;
     return c.lines.some((it) => `${it.seriesName}${it.name}${it.style}`.toLowerCase().includes(q));
   });
   const completeCount = customers.filter((c) => c.notArrivedCount === 0).length;
@@ -129,11 +134,11 @@ export default function ShippingWorkspacePage() {
     setBusy(`ord-${b.id}`);
     setMsg("");
     try {
-      await callJson(`/api/admin/orders/${encodeURIComponent(c.orderNo)}/shipping-batches/${b.id}`, "PATCH", { myshipOrdered: checked });
+      await callJson(`/api/admin/orders/${encodeURIComponent(b.orderNo)}/shipping-batches/${b.id}`, "PATCH", { myshipOrdered: checked });
       // 只改這一批的勾選狀態，不用整頁重新載入
       setCustomers((prev) =>
         prev.map((x) =>
-          x.orderId !== c.orderId
+          x.key !== c.key
             ? x
             : { ...x, shippedBatches: x.shippedBatches.map((y) => (y.id === b.id ? { ...y, myshipOrdered: checked } : y)) }
         )
@@ -150,7 +155,7 @@ export default function ShippingWorkspacePage() {
     setBusy(`del-${b.id}`);
     setMsg("");
     try {
-      await callJson(`/api/admin/orders/${encodeURIComponent(c.orderNo)}/shipping-batches/${b.id}`, "DELETE", {});
+      await callJson(`/api/admin/orders/${encodeURIComponent(b.orderNo)}/shipping-batches/${b.id}`, "DELETE", {});
       setMsg(`已刪除 ${c.username} 的第 ${b.batchNo} 批`);
       load();
     } catch (e: any) {
@@ -283,7 +288,7 @@ export default function ShippingWorkspacePage() {
             const allChecked = c.items.length > 0 && c.items.every((it) => (picks[keyOf(c, it)] || 0) > 0);
             return (
               <div
-                key={c.orderId}
+                key={c.key}
                 style={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginBottom: 10 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
@@ -300,20 +305,27 @@ export default function ShippingWorkspacePage() {
                     )}
                   </label>
                   <span style={{ fontSize: 12, color: "#8A8779" }}>
-                    訂單 {c.orderNo}
+                    {c.orders.length > 1 ? `${c.orders.length} 張訂單` : `訂單 ${c.orders[0]?.orderNo || ""}`}
                     {c.shippedBatchCount > 0 && `　已出過 ${c.shippedBatchCount} 批`}
                   </span>
                 </div>
                 <div style={{ paddingLeft: 20, fontSize: 13 }}>
-                  {c.lines.map((it) => {
+                  {c.lines.map((it, idx) => {
                     const qty = picks[keyOf(c, it)] || 0;
+                    // 有多張訂單時，每張訂單的第一個品項上方標訂單編號
+                    const orderHeader =
+                      c.orders.length > 1 && (idx === 0 || c.lines[idx - 1].orderId !== it.orderId) ? (
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#5F5E5A", margin: idx === 0 ? "0 0 2px" : "8px 0 2px" }}>訂單 {it.orderNo}</div>
+                      ) : null;
                     const canPick = it.shippable > 0;
                     // 可出貨以外的部分（還沒到、已出貨）用小字標在後面
                     const notes: string[] = [];
                     if (it.notArrived > 0) notes.push(`未到貨 ${it.notArrived}`);
                     if (it.shipped > 0) notes.push(`已出貨 ${it.shipped}${it.batchNos.length ? `（第 ${it.batchNos.join("、")} 批）` : ""}`);
                     return (
-                      <div key={`${it.type}-${it.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", gap: 8, flexWrap: "wrap", color: canPick ? undefined : "#8A8779" }}>
+                      <Fragment key={`${it.type}-${it.id}`}>
+                      {orderHeader}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", gap: 8, flexWrap: "wrap", color: canPick ? undefined : "#8A8779" }}>
                         <label style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                           {canPick ? (
                             <input type="checkbox" checked={qty > 0} onChange={(e) => toggleItem(c, it, e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0 }} />
@@ -355,6 +367,7 @@ export default function ShippingWorkspacePage() {
                           )}
                         </span>
                       </div>
+                      </Fragment>
                     );
                   })}
                 </div>
@@ -364,7 +377,7 @@ export default function ShippingWorkspacePage() {
                     {c.shippedBatches.map((b) => (
                       <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, fontSize: 12, color: "#5F5E5A", padding: "3px 0" }}>
                         <span style={{ minWidth: 0, wordBreak: "break-word" }}>
-                          第 {b.batchNo} 批：{b.items.map((x) => `${x.label} x${x.qty}`).join("、")}　運費 NT$ {b.customerShippingFee}
+                          第 {b.batchNo} 批{c.orders.length > 1 ? `（${b.orderNo}）` : ""}：{b.items.map((x) => `${x.label} x${x.qty}`).join("、")}　運費 NT$ {b.customerShippingFee}
                         </span>
                         <label style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, whiteSpace: "nowrap" }}>
                           <input

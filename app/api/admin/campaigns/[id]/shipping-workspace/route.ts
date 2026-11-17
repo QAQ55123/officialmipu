@@ -6,7 +6,7 @@ import { loadCampaignShipping } from "@/lib/shippingAvailability";
 export const dynamic = "force-dynamic";
 
 /**
- * 出貨作業頁：列出這個檔期「至少有一件已到貨」的顧客（不管出貨了沒），依顧客分組。
+ * 出貨作業頁：列出這個檔期「至少有一件已到貨」的顧客（不管出貨了沒），同一位顧客的所有訂單合併成一張卡。
  * 每位顧客的所有品項都列出來（可出貨／未到貨／已出貨），店家才判斷得了這位顧客的東西到齊了沒。
  * 一件都還沒到的顧客不列出來，等之後到貨了會自動出現。
  */
@@ -28,12 +28,16 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   const { orders, arrivedByItem, shippedByItem, shippedByGift, arrivedByGiftStyle, batches, batchItems } = data;
   if (orders.length === 0) return NextResponse.json({ customers: [] });
 
-  const batchCountByOrder = new Map<string, number>();
-  // 第幾批：跟訂單管理頁一樣，依建立時間排序編號
+  // 同一位顧客（帳號不分大小寫）在這個檔期的所有訂單合併成一張卡，跟賣貨便匯出的算法一致
+  const customerKeyOf = (o: any) => String(o.username || "").trim().toLowerCase();
+  const customerKeyByOrder = new Map<string, string>(orders.map((o: any) => [o.id, customerKeyOf(o)]));
+  // 第幾批：以「顧客」為單位、依建立時間編號，跟賣貨便匯出的「N.0」對得起來
+  const batchCountByCustomer = new Map<string, number>();
   const batchNoById = new Map<string, number>();
   batches.forEach((b: any) => {
-    const n = (batchCountByOrder.get(b.order_id) || 0) + 1;
-    batchCountByOrder.set(b.order_id, n);
+    const key = customerKeyByOrder.get(b.order_id) || "";
+    const n = (batchCountByCustomer.get(key) || 0) + 1;
+    batchCountByCustomer.set(key, n);
     batchNoById.set(b.id, n);
   });
   // 每個品項在哪幾批出貨過
@@ -52,7 +56,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   // 每個滿贈款式還有多少到貨數可以分給顧客（依訂單順序先到先給）
   const giftStyleRemaining = new Map<string, number>(arrivedByGiftStyle);
 
-  const customers = orders
+  const perOrder = orders
     .map((o: any) => {
       // 每一件都列出來：ordered 訂購數、shipped 已出貨、shippable 已到貨可出貨、notArrived 還沒到
       const itemLines = (o.order_items || []).map((it: any) => {
@@ -62,6 +66,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         return {
           type: "item" as const,
           id: it.id,
+          orderId: o.id,
+          orderNo: o.order_no,
           seriesName: it.series_name_snapshot || "",
           name: it.product_name,
           style: it.style || "",
@@ -87,6 +93,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         return {
           type: "gift" as const,
           id: g.id,
+          orderId: o.id,
+          orderNo: o.order_no,
           seriesName: "",
           name: g.style_name_snapshot,
           style: "",
@@ -115,6 +123,9 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         .filter((b: any) => b.order_id === o.id)
         .map((b: any) => ({
           id: b.id,
+          orderId: o.id,
+          orderNo: o.order_no,
+          createdAt: b.created_at,
           batchNo: batchNoById.get(b.id) || 0,
           customerShippingFee: Number(b.customer_shipping_fee) || 0,
           myshipOrdered: !!b.myship_ordered,
@@ -123,20 +134,35 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             .map((bi: any) => ({ label: labelOf(bi), qty: bi.qty })),
         }));
 
+      return { key: customerKeyOf(o), username: String(o.username || "").trim(), orderId: o.id, orderNo: o.order_no, lines, shippedBatches };
+    });
+
+  // 依顧客合併：所有訂單的品項都列出來（包括完全還沒到的訂單），「全部到齊」才是看這個人的全部東西
+  const byCustomer = new Map<string, any>();
+  perOrder.forEach((po: any) => {
+    const cur = byCustomer.get(po.key) || { key: po.key, username: po.username, orders: [] as any[], lines: [] as any[], shippedBatches: [] as any[] };
+    cur.orders.push({ orderId: po.orderId, orderNo: po.orderNo });
+    cur.lines.push(...po.lines);
+    cur.shippedBatches.push(...po.shippedBatches);
+    byCustomer.set(po.key, cur);
+  });
+
+  const customers = Array.from(byCustomer.values())
+    .map((c: any) => {
+      c.shippedBatches.sort((x: any, y: any) => x.batchNo - y.batchNo);
       return {
-        orderId: o.id,
-        orderNo: o.order_no,
-        username: o.username,
-        shippedBatchCount: batchCountByOrder.get(o.id) || 0,
-        notArrivedCount: lines.reduce((sum: number, l: any) => sum + l.notArrived, 0),
-        overShippedCount: lines.reduce((sum: number, l: any) => sum + l.overShipped, 0),
-        lines,
-        items: lines.filter((l: any) => l.shippable > 0), // 可以勾選出貨的
-        shippedBatches,
+        key: c.key,
+        username: c.username,
+        orders: c.orders,
+        shippedBatchCount: c.shippedBatches.length,
+        notArrivedCount: c.lines.reduce((sum: number, l: any) => sum + l.notArrived, 0),
+        overShippedCount: c.lines.reduce((sum: number, l: any) => sum + l.overShipped, 0),
+        lines: c.lines,
+        items: c.lines.filter((l: any) => l.shippable > 0), // 可以勾選出貨的
+        shippedBatches: c.shippedBatches,
       };
     })
-    // 至少有一件已到貨（不管出貨了沒）的顧客都列出來，已出過貨、重複出貨的才看得到、刪得到；
-    // 一件都還沒到的不列
+    // 這個人任何一張訂單有東西到貨（或出過貨）就整個人列出來，沒到的訂單也一起顯示；一件都還沒到的人不列
     .filter((c: any) => c.lines.some((l: any) => l.arrived > 0 || l.shipped > 0));
 
   return NextResponse.json({ customers });
