@@ -9,19 +9,33 @@ type WorkItem = {
   seriesName: string;
   name: string;
   style: string;
+  ordered: number;
+  shipped: number;
   shippable: number;
+  notArrived: number;
+  batchNos: number[];
   isGift: boolean;
+};
+type ShippedBatch = {
+  id: string;
+  batchNo: number;
+  customerShippingFee: number;
+  items: { label: string; qty: number }[];
 };
 type Customer = {
   orderId: string;
   orderNo: string;
   username: string;
   shippedBatchCount: number;
-  items: WorkItem[];
+  notArrivedCount: number;
+  lines: WorkItem[]; // 這位顧客的所有品項（可出貨／未到貨／已出貨）
+  items: WorkItem[]; // 其中可以勾選出貨的
+  shippedBatches: ShippedBatch[];
 };
 
 /**
- * 出貨作業：把這個檔期「已到貨、還沒出貨」的品項依顧客列出來，一次處理完。
+ * 出貨作業：列出這個檔期「至少有一件可出貨」的顧客，每位顧客的所有品項都顯示狀態，
+ * 店家才判斷得了東西到齊了沒，再決定現在出還是等到齊。
  * 原本要一張訂單一張訂單去訂單管理查、一張一張建批次，顧客一多根本沒辦法用。
  */
 export default function ShippingWorkspacePage() {
@@ -38,6 +52,7 @@ export default function ShippingWorkspacePage() {
   const [picks, setPicks] = useState<Record<string, number>>({});
   const [shopUrl, setShopUrl] = useState("");
   const [busy, setBusy] = useState("");
+  const [onlyComplete, setOnlyComplete] = useState(false); // 只看全部到齊的顧客
 
   async function load() {
     setLoading(true);
@@ -65,15 +80,15 @@ export default function ShippingWorkspacePage() {
 
   const keyOf = (c: Customer, it: WorkItem) => `${c.orderId}|${it.type}|${it.id}`;
 
-  const visible = customers
-    .map((c) => {
-      if (!filter.trim()) return c;
-      const q = filter.trim().toLowerCase();
-      if (c.username.toLowerCase().includes(q)) return c;
-      const items = c.items.filter((it) => `${it.seriesName}${it.name}${it.style}`.toLowerCase().includes(q));
-      return items.length > 0 ? { ...c, items } : null;
-    })
-    .filter(Boolean) as Customer[];
+  // 搜尋到顧客或其中任一品項時，整位顧客的所有品項都顯示（要看得到全部才判斷得了到齊了沒）
+  const visible = customers.filter((c) => {
+    if (onlyComplete && c.notArrivedCount > 0) return false;
+    const q = filter.trim().toLowerCase();
+    if (!q) return true;
+    if (c.username.toLowerCase().includes(q)) return true;
+    return c.lines.some((it) => `${it.seriesName}${it.name}${it.style}`.toLowerCase().includes(q));
+  });
+  const completeCount = customers.filter((c) => c.notArrivedCount === 0).length;
 
   const pickedList = Object.entries(picks)
     .filter(([, qty]) => qty > 0)
@@ -96,12 +111,28 @@ export default function ShippingWorkspacePage() {
       return next;
     });
   }
+  // 全選只選目前畫面上看得到的顧客（開了「只看全部到齊」就只選到齊的）
   function toggleAll(checked: boolean) {
     setPicks(() => {
       const next: Record<string, number> = {};
-      customers.forEach((c) => c.items.forEach((it) => (next[keyOf(c, it)] = checked ? it.shippable : 0)));
+      visible.forEach((c) => c.items.forEach((it) => (next[keyOf(c, it)] = checked ? it.shippable : 0)));
       return next;
     });
+  }
+
+  async function deleteBatch(c: Customer, b: ShippedBatch) {
+    if (!confirm(`確定要刪除 ${c.username} 的第 ${b.batchNo} 批嗎？裡面的品項會回到可出貨的狀態。\n如果已經通知過顧客，刪除不會通知顧客，請自行確認。`)) return;
+    setBusy(`del-${b.id}`);
+    setMsg("");
+    try {
+      await callJson(`/api/admin/orders/${encodeURIComponent(c.orderNo)}/shipping-batches/${b.id}`, "DELETE", {});
+      setMsg(`已刪除 ${c.username} 的第 ${b.batchNo} 批`);
+      load();
+    } catch (e: any) {
+      setMsg(e.message || "刪除失敗");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function createBatches() {
@@ -167,7 +198,7 @@ export default function ShippingWorkspacePage() {
     }
   }
 
-  const totalItems = customers.reduce((s, c) => s + c.items.length, 0);
+  const totalItems = visible.reduce((s, c) => s + c.items.length, 0);
 
   return (
     <div className="page-wrap" style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px 60px" }}>
@@ -177,7 +208,7 @@ export default function ShippingWorkspacePage() {
 
       <h2 style={{ marginBottom: 4 }}>出貨作業{campaignName ? `：${campaignName}` : ""}</h2>
       <p style={{ fontSize: 12, color: "#8A8779", marginTop: 0, marginBottom: 16 }}>
-        只列出「已到貨、還沒出貨」的品項，依顧客分組。沒到貨的之後到了會自動出現在這裡。
+        列出至少有一件可出貨的顧客，每位顧客的所有品項都會顯示狀態（可出貨／未到貨／已出貨）。一件都還沒到的顧客不會列出來。
       </p>
 
       {msg && (
@@ -208,6 +239,10 @@ export default function ShippingWorkspacePage() {
               onChange={(e) => setFilter(e.target.value)}
               style={{ flex: 1, minWidth: 150 }}
             />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+              <input type="checkbox" checked={onlyComplete} onChange={(e) => setOnlyComplete(e.target.checked)} style={{ width: 16, height: 16 }} />
+              只看全部到齊（{completeCount} 位）
+            </label>
             <span style={{ fontSize: 12, color: "#8A8779" }}>
               已勾選 {pickedList.length} 項 / 共 {totalItems} 項
             </span>
@@ -224,6 +259,11 @@ export default function ShippingWorkspacePage() {
                   <label style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
                     <input type="checkbox" checked={allChecked} onChange={(e) => toggleCustomer(c, e.target.checked)} style={{ width: 16, height: 16 }} />
                     {c.username}
+                    {c.notArrivedCount === 0 ? (
+                      <span style={{ fontSize: 11, fontWeight: 500, color: "#0F6E56", background: "#E1F5EE", padding: "1px 8px", borderRadius: 999 }}>全部到齊</span>
+                    ) : (
+                      <span style={{ fontSize: 11, fontWeight: 500, color: "#854F0B", background: "#FAEEDA", padding: "1px 8px", borderRadius: 999 }}>還有 {c.notArrivedCount} 件沒到</span>
+                    )}
                   </label>
                   <span style={{ fontSize: 12, color: "#8A8779" }}>
                     訂單 {c.orderNo}
@@ -231,12 +271,21 @@ export default function ShippingWorkspacePage() {
                   </span>
                 </div>
                 <div style={{ paddingLeft: 20, fontSize: 13 }}>
-                  {c.items.map((it) => {
+                  {c.lines.map((it) => {
                     const qty = picks[keyOf(c, it)] || 0;
+                    const canPick = it.shippable > 0;
+                    // 可出貨以外的部分（還沒到、已出貨）用小字標在後面
+                    const notes: string[] = [];
+                    if (it.notArrived > 0) notes.push(`未到貨 ${it.notArrived}`);
+                    if (it.shipped > 0) notes.push(`已出貨 ${it.shipped}${it.batchNos.length ? `（第 ${it.batchNos.join("、")} 批）` : ""}`);
                     return (
-                      <div key={`${it.type}-${it.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", gap: 8, flexWrap: "wrap" }}>
+                      <div key={`${it.type}-${it.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", gap: 8, flexWrap: "wrap", color: canPick ? undefined : "#8A8779" }}>
                         <label style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                          <input type="checkbox" checked={qty > 0} onChange={(e) => toggleItem(c, it, e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0 }} />
+                          {canPick ? (
+                            <input type="checkbox" checked={qty > 0} onChange={(e) => toggleItem(c, it, e.target.checked)} style={{ width: 15, height: 15, flexShrink: 0 }} />
+                          ) : (
+                            <span style={{ width: 15, flexShrink: 0 }} />
+                          )}
                           {it.isGift && (
                             <span style={{ display: "inline-block", fontSize: 11, color: "#3C3489", background: "#EEEDFE", padding: "1px 8px", borderRadius: 999, flexShrink: 0 }}>
                               滿贈
@@ -245,25 +294,48 @@ export default function ShippingWorkspacePage() {
                           <span style={{ wordBreak: "break-word" }}>
                             {it.seriesName ? `${it.seriesName} / ` : ""}
                             {it.name}
-                            {it.style ? `（${it.style}）` : ""}
+                            {it.style ? `（${it.style}）` : ""} x{it.ordered}
                           </span>
                         </label>
-                        <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                          <input
-                            type="number"
-                            className="admin-input"
-                            value={qty}
-                            min={0}
-                            max={it.shippable}
-                            onChange={(e) => setQty(c, it, Number(e.target.value))}
-                            style={{ width: 70 }}
-                          />
-                          <span style={{ color: "#8A8779", fontSize: 12 }}>/ {it.shippable}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
+                          {notes.length > 0 && (
+                            <span style={{ fontSize: 12, color: it.notArrived > 0 ? "#854F0B" : "#8A8779" }}>{notes.join("・")}</span>
+                          )}
+                          {canPick && (
+                            <>
+                              <span style={{ fontSize: 12, color: "#0F6E56" }}>可出貨</span>
+                              <input
+                                type="number"
+                                className="admin-input"
+                                value={qty}
+                                min={0}
+                                max={it.shippable}
+                                onChange={(e) => setQty(c, it, Number(e.target.value))}
+                                style={{ width: 70 }}
+                              />
+                              <span style={{ color: "#8A8779", fontSize: 12 }}>/ {it.shippable}</span>
+                            </>
+                          )}
                         </span>
                       </div>
                     );
                   })}
                 </div>
+                {c.shippedBatches.length > 0 && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--line)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#5F5E5A", marginBottom: 4 }}>已建立的出貨批次</div>
+                    {c.shippedBatches.map((b) => (
+                      <div key={b.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, fontSize: 12, color: "#5F5E5A", padding: "3px 0" }}>
+                        <span style={{ minWidth: 0, wordBreak: "break-word" }}>
+                          第 {b.batchNo} 批：{b.items.map((x) => `${x.label} x${x.qty}`).join("、")}　運費 NT$ {b.customerShippingFee}
+                        </span>
+                        <button className="btn small danger" style={{ flexShrink: 0 }} onClick={() => deleteBatch(c, b)} disabled={busy === `del-${b.id}`}>
+                          {busy === `del-${b.id}` ? "刪除中…" : "刪除"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
