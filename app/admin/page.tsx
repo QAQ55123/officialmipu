@@ -777,6 +777,9 @@ export default function AdminPage() {
       loadOrderArrivalStatus(orderLookupResult.orderNo);
     } catch (e: any) {
       setShippingMsg(e.message || "建立失敗");
+      // 被擋下來通常代表畫面上的資料已經過時，重新載入讓畫面跟資料庫一致
+      loadShippingBatches(orderLookupResult.orderNo);
+      loadOrderArrivalStatus(orderLookupResult.orderNo);
     } finally {
       creatingShippingBatchRef.current = false;
       setCreatingShippingBatch(false);

@@ -154,6 +154,9 @@ export default function ShippingWorkspacePage() {
       load();
     } catch (e: any) {
       setMsg(e.message || "建立失敗");
+      // 被擋下來通常代表畫面上的資料已經過時（例如別的地方剛建過批次），重新載入讓畫面跟資料庫一致
+      setPicks({});
+      load();
     } finally {
       creatingRef.current = false;
       setBusy("");
