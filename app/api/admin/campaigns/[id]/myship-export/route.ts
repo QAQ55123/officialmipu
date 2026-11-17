@@ -29,7 +29,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           "",
           i === 0 ? "紀錄" : "",
           r.account,
-          1,
+          r.qty,
           r.amount,
           "",
           i === 0 ? "新品" : "",

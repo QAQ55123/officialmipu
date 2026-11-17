@@ -529,6 +529,8 @@ create table if not exists shipping_batches (
   created_at        timestamptz default now()
 );
 create index if not exists idx_shipping_batches_order on shipping_batches (order_id);
+-- 顧客已經在賣貨便下單了：每次都是整批重新匯出賣貨便，勾了的批次數量會填 0，避免重複下單
+alter table shipping_batches add column if not exists myship_ordered boolean not null default false;
 
 -- 哪些訂單品項被歸進這個出貨批次（同一個品項可能只有部分數量被歸進來，因為分批到貨）
 create table if not exists shipping_batch_items (

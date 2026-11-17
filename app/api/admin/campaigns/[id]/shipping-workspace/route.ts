@@ -117,6 +117,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           id: b.id,
           batchNo: batchNoById.get(b.id) || 0,
           customerShippingFee: Number(b.customer_shipping_fee) || 0,
+          myshipOrdered: !!b.myship_ordered,
           items: batchItems
             .filter((bi: any) => bi.shipping_batch_id === b.id)
             .map((bi: any) => ({ label: labelOf(bi), qty: bi.qty })),

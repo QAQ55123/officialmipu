@@ -74,7 +74,7 @@ export async function loadCampaignShipping(supabase: any, campaignId: string): P
   extraArrived.forEach((qty, styleId) => add(arrivedByGiftStyle, styleId, qty));
 
   // 已經歸進出貨批次的數量
-  const batches = await selectIn(supabase, "shipping_batches", "id, order_id, customer_shipping_fee, created_at", "order_id", orderIds);
+  const batches = await selectIn(supabase, "shipping_batches", "id, order_id, customer_shipping_fee, created_at, myship_ordered", "order_id", orderIds);
   batches.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   const batchItems = await selectIn(
     supabase,

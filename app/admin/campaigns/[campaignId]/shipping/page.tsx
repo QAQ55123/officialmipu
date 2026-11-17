@@ -22,6 +22,7 @@ type ShippedBatch = {
   id: string;
   batchNo: number;
   customerShippingFee: number;
+  myshipOrdered: boolean; // 顧客已在賣貨便下單：匯出賣貨便時這批數量填 0
   items: { label: string; qty: number }[];
 };
 type Customer = {
@@ -122,6 +123,26 @@ export default function ShippingWorkspacePage() {
       visible.forEach((c) => c.items.forEach((it) => (next[keyOf(c, it)] = checked ? it.shippable : 0)));
       return next;
     });
+  }
+
+  async function toggleMyshipOrdered(c: Customer, b: ShippedBatch, checked: boolean) {
+    setBusy(`ord-${b.id}`);
+    setMsg("");
+    try {
+      await callJson(`/api/admin/orders/${encodeURIComponent(c.orderNo)}/shipping-batches/${b.id}`, "PATCH", { myshipOrdered: checked });
+      // 只改這一批的勾選狀態，不用整頁重新載入
+      setCustomers((prev) =>
+        prev.map((x) =>
+          x.orderId !== c.orderId
+            ? x
+            : { ...x, shippedBatches: x.shippedBatches.map((y) => (y.id === b.id ? { ...y, myshipOrdered: checked } : y)) }
+        )
+      );
+    } catch (e: any) {
+      setMsg(e.message || "更新失敗");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function deleteBatch(c: Customer, b: ShippedBatch) {
@@ -345,6 +366,16 @@ export default function ShippingWorkspacePage() {
                         <span style={{ minWidth: 0, wordBreak: "break-word" }}>
                           第 {b.batchNo} 批：{b.items.map((x) => `${x.label} x${x.qty}`).join("、")}　運費 NT$ {b.customerShippingFee}
                         </span>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, whiteSpace: "nowrap" }}>
+                          <input
+                            type="checkbox"
+                            checked={b.myshipOrdered}
+                            disabled={busy === `ord-${b.id}`}
+                            onChange={(e) => toggleMyshipOrdered(c, b, e.target.checked)}
+                            style={{ width: 15, height: 15 }}
+                          />
+                          已下單
+                        </label>
                         <button className="btn small danger" style={{ flexShrink: 0 }} onClick={() => deleteBatch(c, b)} disabled={busy === `del-${b.id}`}>
                           {busy === `del-${b.id}` ? "刪除中…" : "刪除"}
                         </button>
@@ -370,7 +401,7 @@ export default function ShippingWorkspacePage() {
               <button className="btn small secondary" onClick={exportMyship} disabled={busy === "export"}>
                 {busy === "export" ? "匯出中…" : "匯出賣貨便表單"}
               </button>
-              <span style={{ fontSize: 12, color: "#8A8779" }}>依「尚欠金額」產生，每 50 人一個商品</span>
+              <span style={{ fontSize: 12, color: "#8A8779" }}>匯出全部顧客，依出貨批次分列；沒出貨的標（未到）、價格 999。每 50 列一個商品</span>
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>

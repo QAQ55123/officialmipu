@@ -14,6 +14,7 @@ export async function PATCH(req: Request, { params }: { params: { orderNo: strin
   const updates: Record<string, any> = {};
   if ("internalCost" in body) updates.internal_cost = body.internalCost === "" || body.internalCost == null ? null : Number(body.internalCost);
   if ("note" in body) updates.note = body.note || null;
+  if ("myshipOrdered" in body) updates.myship_ordered = !!body.myshipOrdered;
 
   const supabase = getSupabaseAdmin();
   const { error } = await supabase.from("shipping_batches").update(updates).eq("id", params.batchId);
