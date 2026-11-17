@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
+import { loadCampaignShipping, checkShippingPicks } from "@/lib/shippingAvailability";
 import { scheduleCostSync, campaignIdOfOrderNo } from "@/lib/costSync";
 
 export const dynamic = "force-dynamic";
@@ -69,8 +70,20 @@ export async function POST(req: Request, { params }: { params: { orderNo: string
   if (pickedItems.length === 0) return NextResponse.json({ error: "請至少勾選一個品項" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: order } = await supabase.from("orders").select("id, series_id").eq("order_no", params.orderNo).maybeSingle();
+  const { data: order } = await supabase.from("orders").select("id, series_id, campaign_id").eq("order_no", params.orderNo).maybeSingle();
   if (!order) return NextResponse.json({ error: "找不到這張訂單" }, { status: 404 });
+
+  // 建立前先檢查：已出貨 + 這次 不能超過已到貨（重複按建立時，第二次會在這裡被擋下）。
+  // 沒有檔期的舊訂單追蹤不到到貨，維持原本的做法不檢查。
+  if (order.campaign_id) {
+    try {
+      const shipping = await loadCampaignShipping(supabase, order.campaign_id);
+      const err = checkShippingPicks(shipping, pickedItems);
+      if (err) return NextResponse.json({ error: err }, { status: 400 });
+    } catch (e: any) {
+      return NextResponse.json({ error: `讀取到貨資料失敗，沒有建立批次：${e.message}` }, { status: 500 });
+    }
+  }
 
   // 算運費：一般商品用該商品設定的固定運費金額（台幣），滿贈品項固定0
   const rows: any[] = [];

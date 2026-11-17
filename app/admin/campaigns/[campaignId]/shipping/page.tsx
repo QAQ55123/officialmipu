@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { callJson, fetchJson } from "@/lib/adminClient";
 
@@ -10,9 +10,11 @@ type WorkItem = {
   name: string;
   style: string;
   ordered: number;
+  arrived: number;
   shipped: number;
   shippable: number;
   notArrived: number;
+  overShipped: number; // 已出貨超過到貨（例如重複建了批次）
   batchNos: number[];
   isGift: boolean;
 };
@@ -28,13 +30,14 @@ type Customer = {
   username: string;
   shippedBatchCount: number;
   notArrivedCount: number;
+  overShippedCount: number;
   lines: WorkItem[]; // 這位顧客的所有品項（可出貨／未到貨／已出貨）
   items: WorkItem[]; // 其中可以勾選出貨的
   shippedBatches: ShippedBatch[];
 };
 
 /**
- * 出貨作業：列出這個檔期「至少有一件可出貨」的顧客，每位顧客的所有品項都顯示狀態，
+ * 出貨作業：列出這個檔期「至少有一件已到貨」的顧客，每位顧客的所有品項都顯示狀態，
  * 店家才判斷得了東西到齊了沒，再決定現在出還是等到齊。
  * 原本要一張訂單一張訂單去訂單管理查、一張一張建批次，顧客一多根本沒辦法用。
  */
@@ -53,6 +56,7 @@ export default function ShippingWorkspacePage() {
   const [shopUrl, setShopUrl] = useState("");
   const [busy, setBusy] = useState("");
   const [onlyComplete, setOnlyComplete] = useState(false); // 只看全部到齊的顧客
+  const creatingRef = useRef(false); // 建立中鎖住，擋同一瞬間的連點
 
   async function load() {
     setLoading(true);
@@ -137,6 +141,8 @@ export default function ShippingWorkspacePage() {
 
   async function createBatches() {
     if (pickedList.length === 0) return setMsg("請先勾選要出貨的品項");
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setBusy("batch");
     setMsg("");
     try {
@@ -149,6 +155,7 @@ export default function ShippingWorkspacePage() {
     } catch (e: any) {
       setMsg(e.message || "建立失敗");
     } finally {
+      creatingRef.current = false;
       setBusy("");
     }
   }
@@ -208,7 +215,7 @@ export default function ShippingWorkspacePage() {
 
       <h2 style={{ marginBottom: 4 }}>出貨作業{campaignName ? `：${campaignName}` : ""}</h2>
       <p style={{ fontSize: 12, color: "#8A8779", marginTop: 0, marginBottom: 16 }}>
-        列出至少有一件可出貨的顧客，每位顧客的所有品項都會顯示狀態（可出貨／未到貨／已出貨）。一件都還沒到的顧客不會列出來。
+        列出至少有一件已到貨的顧客（不管出貨了沒），每位顧客的所有品項都會顯示狀態（可出貨／未到貨／已出貨）。一件都還沒到的顧客不會列出來。
       </p>
 
       {msg && (
@@ -218,7 +225,7 @@ export default function ShippingWorkspacePage() {
       {loading ? (
         <div style={{ fontSize: 13, color: "#8A8779" }}>載入中…</div>
       ) : customers.length === 0 ? (
-        <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有已到貨、待出貨的品項</div>
+        <div style={{ fontSize: 13, color: "#8A8779" }}>目前沒有已到貨的品項</div>
       ) : (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
@@ -249,7 +256,7 @@ export default function ShippingWorkspacePage() {
           </div>
 
           {visible.map((c) => {
-            const allChecked = c.items.every((it) => (picks[keyOf(c, it)] || 0) > 0);
+            const allChecked = c.items.length > 0 && c.items.every((it) => (picks[keyOf(c, it)] || 0) > 0);
             return (
               <div
                 key={c.orderId}
@@ -257,12 +264,15 @@ export default function ShippingWorkspacePage() {
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
                   <label style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="checkbox" checked={allChecked} onChange={(e) => toggleCustomer(c, e.target.checked)} style={{ width: 16, height: 16 }} />
+                    <input type="checkbox" checked={allChecked} disabled={c.items.length === 0} onChange={(e) => toggleCustomer(c, e.target.checked)} style={{ width: 16, height: 16 }} />
                     {c.username}
                     {c.notArrivedCount === 0 ? (
                       <span style={{ fontSize: 11, fontWeight: 500, color: "#0F6E56", background: "#E1F5EE", padding: "1px 8px", borderRadius: 999 }}>全部到齊</span>
                     ) : (
                       <span style={{ fontSize: 11, fontWeight: 500, color: "#854F0B", background: "#FAEEDA", padding: "1px 8px", borderRadius: 999 }}>還有 {c.notArrivedCount} 件沒到</span>
+                    )}
+                    {c.overShippedCount > 0 && (
+                      <span style={{ fontSize: 11, fontWeight: 500, color: "#A32D2D", background: "#FCEBEB", padding: "1px 8px", borderRadius: 999 }}>重複出貨 {c.overShippedCount} 件</span>
                     )}
                   </label>
                   <span style={{ fontSize: 12, color: "#8A8779" }}>
@@ -300,6 +310,9 @@ export default function ShippingWorkspacePage() {
                         <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
                           {notes.length > 0 && (
                             <span style={{ fontSize: 12, color: it.notArrived > 0 ? "#854F0B" : "#8A8779" }}>{notes.join("・")}</span>
+                          )}
+                          {it.overShipped > 0 && (
+                            <span style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D" }}>已出貨超過到貨 {it.overShipped} 件</span>
                           )}
                           {canPick && (
                             <>

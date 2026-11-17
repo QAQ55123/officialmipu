@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
-import { extraArrivedByGiftStyle } from "@/lib/extraPurchaseArrival";
+import { loadCampaignShipping } from "@/lib/shippingAvailability";
 
 export const dynamic = "force-dynamic";
 
 /**
- * 出貨作業頁：列出這個檔期「至少有一件可出貨」的顧客，依顧客分組。
+ * 出貨作業頁：列出這個檔期「至少有一件已到貨」的顧客（不管出貨了沒），依顧客分組。
  * 每位顧客的所有品項都列出來（可出貨／未到貨／已出貨），店家才判斷得了這位顧客的東西到齊了沒。
  * 一件都還沒到的顧客不列出來，等之後到貨了會自動出現。
  */
@@ -18,72 +18,20 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
   const supabase = getSupabaseAdmin();
 
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("id, order_no, username, order_items(id, product_name, style, qty, series_name_snapshot), order_gift_selections(id, gift_style_id, style_name_snapshot, qty)")
-    .eq("campaign_id", params.id)
-    .order("created_at", { ascending: true });
-  if (!orders || orders.length === 0) return NextResponse.json({ customers: [] });
+  let data;
+  try {
+    // 到貨／已出貨的計算跟「建立出貨批次前的檢查」共用 lib/shippingAvailability.ts，全部分批讀完
+    data = await loadCampaignShipping(supabase, params.id);
+  } catch (e: any) {
+    return NextResponse.json({ error: `讀取失敗：${e.message}` }, { status: 500 });
+  }
+  const { orders, arrivedByItem, shippedByItem, shippedByGift, arrivedByGiftStyle, batches, batchItems } = data;
+  if (orders.length === 0) return NextResponse.json({ customers: [] });
 
-  const orderIds = orders.map((o: any) => o.id);
-  const allItemIds = orders.flatMap((o: any) => (o.order_items || []).map((it: any) => it.id));
-  const allGiftIds = orders.flatMap((o: any) => (o.order_gift_selections || []).map((g: any) => g.id));
-
-  // 已到貨數量：vendor_shipment_items 沒有 order_item_id，它連的是採購單品項，
-  // 要透過 vendor_purchase_batch_items 才對得回訂單品項
-  const { data: batchItemLinks } = allItemIds.length
-    ? await supabase.from("vendor_purchase_batch_items").select("id, order_item_id").in("order_item_id", allItemIds)
-    : { data: [] };
-  const orderItemByBatchItem = new Map<string, string>(
-    (batchItemLinks || []).map((bi: any) => [bi.id, bi.order_item_id])
-  );
-  const batchItemIds = (batchItemLinks || []).map((bi: any) => bi.id);
-
-  // 滿贈：採購單的滿贈只記款式，對不到「哪位顧客」，所以先統計每個款式到貨幾個，之後依訂單順序分配
-  const { data: batchGiftLinks } = await supabase
-    .from("vendor_purchase_batch_gifts")
-    .select("id, gift_style_id");
-  const giftStyleByBatchGift = new Map<string, string>(
-    (batchGiftLinks || []).map((bg: any) => [bg.id, bg.gift_style_id])
-  );
-
-  const { data: shipmentItems } =
-    batchItemIds.length > 0 || (batchGiftLinks || []).length > 0
-      ? await supabase.from("vendor_shipment_items").select("batch_item_id, batch_gift_id, qty, arrived").eq("arrived", true)
-      : { data: [] };
-
-  const arrivedByItem = new Map<string, number>();
-  const arrivedByGiftStyle = new Map<string, number>();
-  (shipmentItems || []).forEach((si: any) => {
-    if (si.batch_item_id) {
-      const oiId = orderItemByBatchItem.get(si.batch_item_id);
-      if (oiId) arrivedByItem.set(oiId, (arrivedByItem.get(oiId) || 0) + si.qty);
-    } else if (si.batch_gift_id) {
-      const styleId = giftStyleByBatchGift.get(si.batch_gift_id);
-      if (styleId) arrivedByGiftStyle.set(styleId, (arrivedByGiftStyle.get(styleId) || 0) + si.qty);
-    }
-  });
-
-  // 已經歸進出貨批次的數量
-  const { data: batches } = await supabase
-    .from("shipping_batches")
-    .select("id, order_id, customer_shipping_fee, created_at")
-    .in("order_id", orderIds)
-    .order("created_at", { ascending: true });
-  const batchIds = (batches || []).map((b: any) => b.id);
-  const { data: batchItems } = batchIds.length
-    ? await supabase.from("shipping_batch_items").select("shipping_batch_id, order_item_id, order_gift_selection_id, qty").in("shipping_batch_id", batchIds)
-    : { data: [] };
-  const shippedByItem = new Map<string, number>();
-  const shippedByGift = new Map<string, number>();
-  (batchItems || []).forEach((bi: any) => {
-    if (bi.order_item_id) shippedByItem.set(bi.order_item_id, (shippedByItem.get(bi.order_item_id) || 0) + bi.qty);
-    if (bi.order_gift_selection_id) shippedByGift.set(bi.order_gift_selection_id, (shippedByGift.get(bi.order_gift_selection_id) || 0) + bi.qty);
-  });
   const batchCountByOrder = new Map<string, number>();
   // 第幾批：跟訂單管理頁一樣，依建立時間排序編號
   const batchNoById = new Map<string, number>();
-  (batches || []).forEach((b: any) => {
+  batches.forEach((b: any) => {
     const n = (batchCountByOrder.get(b.order_id) || 0) + 1;
     batchCountByOrder.set(b.order_id, n);
     batchNoById.set(b.id, n);
@@ -91,7 +39,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   // 每個品項在哪幾批出貨過
   const batchNosByItem = new Map<string, Set<number>>();
   const batchNosByGift = new Map<string, Set<number>>();
-  (batchItems || []).forEach((bi: any) => {
+  batchItems.forEach((bi: any) => {
     const no = batchNoById.get(bi.shipping_batch_id);
     if (!no) return;
     const key = bi.order_item_id || bi.order_gift_selection_id;
@@ -102,9 +50,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   });
 
   // 每個滿贈款式還有多少到貨數可以分給顧客（依訂單順序先到先給）
-  // 額外採購（跟其他管道補買的滿贈）到貨的數量也要算進去
-  const extraArrived = await extraArrivedByGiftStyle(supabase, params.id);
-  extraArrived.forEach((qty, styleId) => arrivedByGiftStyle.set(styleId, (arrivedByGiftStyle.get(styleId) || 0) + qty));
   const giftStyleRemaining = new Map<string, number>(arrivedByGiftStyle);
 
   const customers = orders
@@ -122,8 +67,10 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           style: it.style || "",
           ordered,
           shipped,
+          arrived,
           shippable: Math.max(0, arrived - shipped),
           notArrived: Math.max(0, ordered - Math.max(arrived, shipped)),
+          overShipped: Math.max(0, shipped - arrived), // 已出貨超過到貨（例如重複建了批次）
           batchNos: Array.from(batchNosByItem.get(it.id) || []).sort((x, y) => x - y),
           isGift: false,
         };
@@ -145,8 +92,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           style: "",
           ordered,
           shipped,
+          arrived: canTake,
           shippable: Math.max(0, canTake - shipped),
           notArrived: Math.max(0, ordered - Math.max(canTake, shipped)),
+          // 滿贈的到貨是依款式分配的，對不準是誰的；超過這位顧客自己選的數量才確定是重複出貨
+          overShipped: Math.max(0, shipped - ordered),
           batchNos: Array.from(batchNosByGift.get(g.id) || []).sort((x, y) => x - y),
           isGift: true,
         };
@@ -161,13 +111,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         const it = itemLines.find((x: any) => x.id === bi.order_item_id);
         return it ? `${it.seriesName ? `${it.seriesName} / ` : ""}${it.name}${it.style ? `（${it.style}）` : ""}` : "";
       };
-      const shippedBatches = (batches || [])
+      const shippedBatches = batches
         .filter((b: any) => b.order_id === o.id)
         .map((b: any) => ({
           id: b.id,
           batchNo: batchNoById.get(b.id) || 0,
           customerShippingFee: Number(b.customer_shipping_fee) || 0,
-          items: (batchItems || [])
+          items: batchItems
             .filter((bi: any) => bi.shipping_batch_id === b.id)
             .map((bi: any) => ({ label: labelOf(bi), qty: bi.qty })),
         }));
@@ -178,12 +128,15 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         username: o.username,
         shippedBatchCount: batchCountByOrder.get(o.id) || 0,
         notArrivedCount: lines.reduce((sum: number, l: any) => sum + l.notArrived, 0),
+        overShippedCount: lines.reduce((sum: number, l: any) => sum + l.overShipped, 0),
         lines,
         items: lines.filter((l: any) => l.shippable > 0), // 可以勾選出貨的
         shippedBatches,
       };
     })
-    .filter((c: any) => c.items.length > 0);
+    // 至少有一件已到貨（不管出貨了沒）的顧客都列出來，已出過貨、重複出貨的才看得到、刪得到；
+    // 一件都還沒到的不列
+    .filter((c: any) => c.lines.some((l: any) => l.arrived > 0 || l.shipped > 0));
 
   return NextResponse.json({ customers });
 }

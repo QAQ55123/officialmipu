@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { requireAdminSession } from "@/lib/adminAuth";
 import { scheduleCostSync } from "@/lib/costSync";
+import { loadCampaignShipping, checkShippingPicks } from "@/lib/shippingAvailability";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (picks.length === 0) return NextResponse.json({ error: "請至少勾選一個品項" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
+
+  // 建立前先檢查：已出貨 + 這次 不能超過已到貨（重複按建立時，第二次會在這裡被擋下）
+  try {
+    const shipping = await loadCampaignShipping(supabase, params.id);
+    const err = checkShippingPicks(shipping, picks);
+    if (err) return NextResponse.json({ error: err }, { status: 400 });
+  } catch (e: any) {
+    return NextResponse.json({ error: `讀取到貨資料失敗，沒有建立批次：${e.message}` }, { status: 500 });
+  }
 
   // 依訂單分組
   const byOrder = new Map<string, typeof picks>();

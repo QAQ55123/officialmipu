@@ -740,6 +740,9 @@ export default function AdminPage() {
   const [shippingBatches, setShippingBatches] = useState<any[]>([]);
   const [batchPickQty, setBatchPickQty] = useState<Record<string, string>>({});
   const [shippingMsg, setShippingMsg] = useState("");
+  // 建立出貨批次中：按鈕鎖住，避免連按重複建立（用 ref 才擋得住同一瞬間的連點）
+  const [creatingShippingBatch, setCreatingShippingBatch] = useState(false);
+  const creatingShippingBatchRef = useRef(false);
 
   async function loadShippingBatches(orderNo: string) {
     try {
@@ -761,6 +764,9 @@ export default function AdminPage() {
         .map(([giftSelectionId, qtyStr]) => ({ type: "gift" as const, id: giftSelectionId, qty: Number(qtyStr) })),
     ].filter((x) => isFinite(x.qty) && x.qty > 0);
     if (items.length === 0) return setShippingMsg("請至少勾選一個品項並填入數量");
+    if (creatingShippingBatchRef.current) return;
+    creatingShippingBatchRef.current = true;
+    setCreatingShippingBatch(true);
     setShippingMsg("");
     try {
       const d = await callJson(`/api/admin/orders/${orderLookupResult.orderNo}/shipping-batches`, "POST", { items });
@@ -771,6 +777,9 @@ export default function AdminPage() {
       loadOrderArrivalStatus(orderLookupResult.orderNo);
     } catch (e: any) {
       setShippingMsg(e.message || "建立失敗");
+    } finally {
+      creatingShippingBatchRef.current = false;
+      setCreatingShippingBatch(false);
     }
   }
 
@@ -3850,7 +3859,7 @@ export default function AdminPage() {
                                     />
                                   </div>
                                 ))}
-                                <button className="btn small" style={{ marginTop: 6 }} onClick={createShippingBatch}>建立出貨批次</button>
+                                <button className="btn small" style={{ marginTop: 6 }} onClick={createShippingBatch} disabled={creatingShippingBatch}>{creatingShippingBatch ? "建立中…" : "建立出貨批次"}</button>
                               </>
                             ) : (
                               <div style={{ fontSize: 12, color: "#8A8779" }}>目前沒有已到貨、還沒出貨的品項</div>
